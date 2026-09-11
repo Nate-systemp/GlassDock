@@ -21,9 +21,16 @@ public sealed class DesktopOverlayWindow : Window
     private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
     private readonly GlassSurface surface = new()
     {
-        UseDesktopBackdrop = true, Width = 120, Height = 5,
+        UseDesktopBackdrop = true, Width = 120, Height = 5, Opacity = 0,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 16)
+    };
+    private readonly Border indicator = new()
+    {
+        Width = 120, Height = 5, CornerRadius = new CornerRadius(2.5),
+        Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(220, 225, 225, 230)),
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+        Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
     };
     private readonly StackPanel icons = new()
     {
@@ -68,12 +75,14 @@ public sealed class DesktopOverlayWindow : Window
         windowManager = new WindowsOverlayManager(hwnd);
         windowManager.Configure(inspection);
         root.Children.Add(surface);
+        root.Children.Add(indicator);
         root.Children.Add(icons);
+        surface.RegisterPropertyChangedCallback(UIElement.OpacityProperty, (_, _) => UpdateBackdropBounds());
         surface.SizeChanged += (_, _) => UpdateBackdropBounds();
         root.SizeChanged += (_, _) => UpdateBackdropBounds();
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         CreateItems();
-        animation = new DockAnimationController(surface, icons);
+        animation = new DockAnimationController(surface, icons, indicator);
         keyboard = new WindowsKeyboardService(hwnd);
         keyboard.HomeRequested += (_, _) => ShowHome();
         keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
@@ -153,6 +162,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private async void Entered(object sender, PointerRoutedEventArgs e)
     {
+        DockAnimationController.Trace($"PointerEntered state={state.State}");
         collapseDelay?.Cancel();
         if (state.State is DockState.Expanded or DockState.Expanding) return;
         state.Enter();
@@ -168,6 +178,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private void Exited(object sender, PointerRoutedEventArgs e)
     {
+        DockAnimationController.Trace($"PointerExited state={state.State}");
         ScheduleCollapse();
     }
 
@@ -180,6 +191,7 @@ public sealed class DesktopOverlayWindow : Window
         {
             await Task.Delay(280, delay.Token);
             if (menuOpen || closing) return;
+            DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             var revision = state.Collapse();
             icons.IsHitTestVisible = false;
             if (await animation.AnimateAsync(false))
@@ -200,10 +212,10 @@ public sealed class DesktopOverlayWindow : Window
     {
         var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
         {
-            BlurAmount = 18, Opacity = 0.84, CornerRadius = 28,
-            ShadowOpacity = expanded ? 0.24 : 0.18, ShadowBlur = expanded ? 18 : 10,
-            ShadowOffset = expanded ? 4 : 0, EdgeHighlight = expanded ? 0.16 : 0.75,
-            BorderOpacity = expanded ? 0.42 : 0.8
+            BlurAmount = 24, Opacity = 0.78, CornerRadius = 12,
+            ShadowOpacity = 0.28, ShadowBlur = 24,
+            ShadowOffset = 6, EdgeHighlight = 0.22,
+            BorderOpacity = 0.18
         };
         surface.Apply(material);
         desktopBackdrop.Apply(material);
@@ -211,7 +223,7 @@ public sealed class DesktopOverlayWindow : Window
     }
 
     private void UpdateBackdropBounds() => desktopBackdrop.SetBounds(root.ActualWidth, root.ActualHeight,
-        surface.ActualWidth, surface.ActualHeight, 16, root.XamlRoot?.RasterizationScale ?? 1);
+        surface.ActualWidth, surface.ActualHeight, 16, root.XamlRoot?.RasterizationScale ?? 1, surface.Opacity);
 
     public void SetBottomMargin(double margin)
     {

@@ -71,9 +71,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         effect.Properties.InsertColor("Tint.Color", GlassEffectGraph.Tint(material));
     }
 
-    public void SetBounds(double windowWidth, double windowHeight, double width, double height, double bottom, double scale)
+    public void SetBounds(double windowWidth, double windowHeight, double width, double height, double bottom, double scale, double opacity = 1)
     {
         if (geometry is null || visual is null || maskSurface is null) return;
+        visual.Opacity = (float)opacity;
         var size = new Vector2((float)(windowWidth * scale), (float)(windowHeight * scale));
         visual.Size = size;
         maskSurface.SourceSize = size;
