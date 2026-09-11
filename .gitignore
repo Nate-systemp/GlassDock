@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+.vs/
+.vscode/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.tmp
+*.log
+*.pfx
+*.p12
+*.key
+*.cer
+.env
+.env.*
+secrets.json
