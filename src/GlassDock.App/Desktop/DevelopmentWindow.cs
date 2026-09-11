@@ -20,7 +20,7 @@ internal sealed class DevelopmentWindow : Window
         panel.Children.Add(new TextBlock { Text = "Desktop foundation", FontSize = 27 });
         panel.Children.Add(new TextBlock
         {
-            Text = "Hover the bottom-center pill. Right-click it to return here.\nTaskbar suppression is an explicit, 60-second experiment.\nCtrl+Alt+F12: restore taskbar · Ctrl+Alt+Space: Home placeholder.",
+            Text = "Hover the bottom-center pill to expand, or press Windows to toggle.\nTaskbar suppression is protected by the recovery watchdog.\nCtrl+Alt+F12: restore taskbar · Ctrl+Alt+Space: toggle dock.",
             TextWrapping = TextWrapping.Wrap
         });
         var margin = new Slider { Header = "Bottom margin (DIP)", Minimum = 16, Maximum = 100,
@@ -41,7 +41,7 @@ internal sealed class DevelopmentWindow : Window
         panel.Children.Add(lab);
         panel.Children.Add(status);
         panel.Children.Add(rendering);
-        panel.Children.Add(new TextBlock { Text = "Bare Windows key is not intercepted. No applications are launched by dock items.",
+        panel.Children.Add(new TextBlock { Text = "Bare Windows key toggles the dock; Windows-key shortcuts pass through. No applications are launched by dock items.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var exit = new Button { Content = "Exit GlassDock" };
         exit.Click += (_, _) => dock.Close();

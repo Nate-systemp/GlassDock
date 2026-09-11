@@ -9,6 +9,8 @@ public sealed class WindowsOverlayManager : IDisposable
 {
     private readonly nint hwnd;
     private readonly NativeMethods.SubclassProc callback;
+    private NativeMethods.WinEventProc? foregroundCallback;
+    private nint foregroundHook;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
     public const double Width = 640;
     public const double Height = 144;
@@ -29,6 +31,11 @@ public sealed class WindowsOverlayManager : IDisposable
             throw new InvalidOperationException("Cannot attach overlay transparency handling.");
         var dc = NativeMethods.GetDC(hwnd);
         try { ClearBackground(dc); } finally { NativeMethods.ReleaseDC(hwnd, dc); }
+        // Out-of-context notification only: no input interception or code in other processes.
+        foregroundCallback = (_, _, _, _, _, _, _) => EnsureTopmost();
+        foregroundHook = NativeMethods.SetWinEventHook(3, 3, 0, foregroundCallback, 0, 0, 0);
+        if (foregroundHook == 0) throw new InvalidOperationException("Cannot monitor foreground changes for the desktop overlay.");
+        EnsureTopmost();
     }
 
     private void ConfigureTransparency()
@@ -57,7 +64,19 @@ public sealed class WindowsOverlayManager : IDisposable
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }
 
-    public void Dispose() => NativeMethods.RemoveWindowSubclass(hwnd, callback, 2);
+    private void EnsureTopmost()
+    {
+        if (NativeMethods.IsWindow(hwnd))
+            NativeMethods.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0010 | 0x0001 | 0x0002);
+    }
+
+    public void Dispose()
+    {
+        if (foregroundHook != 0) NativeMethods.UnhookWinEvent(foregroundHook);
+        foregroundHook = 0;
+        NativeMethods.RemoveWindowSubclass(hwnd, callback, 2);
+        GC.KeepAlive(foregroundCallback);
+    }
 
     public PixelRect Position(double margin)
     {
@@ -72,16 +91,16 @@ public sealed class WindowsOverlayManager : IDisposable
         return rect;
     }
 
-    public void SetInteractionRegion(bool expanded)
+    public void SetInteractionRegion(bool expanded, double bottomMargin = 24)
     {
         var scale = Scale;
         // The idle hit target surrounds the pill and reaches through its lower margin.
         var x = expanded ? 0 : 220;
-        var y = expanded ? 0 : 100;
+        var y = expanded ? 0 : Math.Max(0, Height - bottomMargin - 28);
         var width = expanded ? Width : 200;
-        var height = expanded ? Height : 44;
+        var height = Height - y;
         var region = NativeMethods.CreateRoundRectRgn((int)(x * scale), (int)(y * scale),
-            (int)((x + width) * scale), (int)((y + height) * scale), (int)(16 * scale), (int)(16 * scale));
+            (int)((x + width) * scale) + 1, (int)((y + height) * scale) + 1, (int)(16 * scale), (int)(16 * scale));
         if (region == 0) throw new Win32Exception();
         if (NativeMethods.SetWindowRgn(hwnd, region, true) == 0)
         {

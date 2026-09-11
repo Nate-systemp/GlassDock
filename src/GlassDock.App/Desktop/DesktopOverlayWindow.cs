@@ -54,7 +54,7 @@ public sealed class DesktopOverlayWindow : Window
     private bool startingTest;
     private int taskbarRevision;
     public double BottomMargin { get; private set; } = 24;
-    public string Status { get; private set; } = "Safe development mode · taskbar unchanged.";
+    public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
     public bool HotkeysAvailable => keyboard.IsRegistered;
     public event EventHandler? StatusChanged;
@@ -63,6 +63,7 @@ public sealed class DesktopOverlayWindow : Window
     {
         Title = "GlassDock — Floating Dock";
         Content = root;
+        surface.Margin = indicator.Margin = icons.Margin = new Thickness(0, 0, 0, BottomMargin);
         SystemBackdrop = desktopBackdrop;
         AppWindow.IsShownInSwitchers = inspection;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
@@ -84,17 +85,18 @@ public sealed class DesktopOverlayWindow : Window
         CreateItems();
         animation = new DockAnimationController(surface, icons, indicator);
         keyboard = new WindowsKeyboardService(hwnd);
-        keyboard.HomeRequested += (_, _) => ShowHome();
+        keyboard.HomeRequested += async (_, _) => await ToggleDockAsync();
         keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
         root.PointerEntered += Entered;
         root.PointerMoved += (_, _) => collapseDelay?.Cancel();
         root.PointerExited += Exited;
-        root.Loaded += (_, _) =>
+        root.Loaded += async (_, _) =>
         {
-            windowManager.Position(Math.Max(0, BottomMargin - 16));
+            windowManager.Position(0);
             windowManager.SetInteractionRegion(false);
             state.Show();
             ApplyMaterial(false);
+            await StartTaskbarTestAsync(whileAppActive: true);
         };
         surface.RenderingModeChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
         var menu = new MenuFlyout();
@@ -112,7 +114,7 @@ public sealed class DesktopOverlayWindow : Window
             if (taskbarSession is { IsActive: true } session) await session.HeartbeatAsync();
         };
         Closed += OnClosed;
-        windowManager.Position(Math.Max(0, BottomMargin - 16));
+        windowManager.Position(0);
         windowManager.SetInteractionRegion(false);
     }
 
@@ -127,9 +129,7 @@ public sealed class DesktopOverlayWindow : Window
     {
         var items = new (string Name, string Glyph, uint Color)[]
         {
-            ("Notes", "\uE70B", 0x6A8BD9), ("Files", "\uE8B7", 0xBF9551),
-            ("Studio", "\uE790", 0x9A7BC2), ("Messages", "\uE8F2", 0x4C9D92),
-            ("Music", "\uE8D6", 0xB66584), ("Tools", "\uE713", 0x6A849E), ("Search", "\uE721", 0x64758F)
+
         };
         foreach (var (name, glyph, color) in items)
         {
@@ -163,6 +163,16 @@ public sealed class DesktopOverlayWindow : Window
     private async void Entered(object sender, PointerRoutedEventArgs e)
     {
         DockAnimationController.Trace($"PointerEntered state={state.State}");
+        await ExpandDockAsync();
+    }
+
+    private Task ToggleDockAsync() => state.State is DockState.Expanded or DockState.Expanding or DockState.Hovering
+        ? CollapseDockAsync()
+        : ExpandDockAsync();
+
+    private async Task ExpandDockAsync()
+    {
+        if (closing || state.State == DockState.Hidden) return;
         collapseDelay?.Cancel();
         if (state.State is DockState.Expanded or DockState.Expanding) return;
         state.Enter();
@@ -182,6 +192,23 @@ public sealed class DesktopOverlayWindow : Window
         ScheduleCollapse();
     }
 
+    private async Task CollapseDockAsync()
+    {
+        collapseDelay?.Cancel();
+        if (closing || state.State is DockState.Hidden or DockState.Idle or DockState.Collapsing) return;
+        var revision = state.Collapse();
+        icons.IsHitTestVisible = false;
+        if (await animation.AnimateAsync(false))
+        {
+            state.Complete(revision);
+            if (state.State == DockState.Idle)
+            {
+                ApplyMaterial(false);
+                windowManager.SetInteractionRegion(false, BottomMargin);
+            }
+        }
+    }
+
     private async void ScheduleCollapse()
     {
         collapseDelay?.Cancel();
@@ -192,17 +219,7 @@ public sealed class DesktopOverlayWindow : Window
             await Task.Delay(280, delay.Token);
             if (menuOpen || closing) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
-            var revision = state.Collapse();
-            icons.IsHitTestVisible = false;
-            if (await animation.AnimateAsync(false))
-            {
-                state.Complete(revision);
-                if (state.State == DockState.Idle)
-                {
-                    ApplyMaterial(false);
-                    windowManager.SetInteractionRegion(false);
-                }
-            }
+            await CollapseDockAsync();
         }
         catch (OperationCanceledException) { }
         finally { if (ReferenceEquals(collapseDelay, delay)) collapseDelay = null; delay.Dispose(); }
@@ -223,12 +240,15 @@ public sealed class DesktopOverlayWindow : Window
     }
 
     private void UpdateBackdropBounds() => desktopBackdrop.SetBounds(root.ActualWidth, root.ActualHeight,
-        surface.ActualWidth, surface.ActualHeight, 16, root.XamlRoot?.RasterizationScale ?? 1, surface.Opacity);
+        surface.ActualWidth, surface.ActualHeight, BottomMargin, root.XamlRoot?.RasterizationScale ?? 1, surface.Opacity);
 
     public void SetBottomMargin(double margin)
     {
         BottomMargin = Math.Clamp(double.IsFinite(margin) ? margin : 24, 16, 100);
-        windowManager.Position(BottomMargin - 16);
+        surface.Margin = indicator.Margin = icons.Margin = new Thickness(0, 0, 0, BottomMargin);
+        windowManager.Position(0);
+        windowManager.SetInteractionRegion(state.State != DockState.Idle, BottomMargin);
+        UpdateBackdropBounds();
         SetStatus($"Indicator bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
     }
 
@@ -276,7 +296,7 @@ public sealed class DesktopOverlayWindow : Window
         lab.Activate();
     }
 
-    public async Task StartTaskbarTestAsync()
+    public async Task StartTaskbarTestAsync(bool whileAppActive = false)
     {
         if (startingTest || taskbarSession is { IsActive: true }) return;
         if (!keyboard.IsRegistered) { SetStatus("Taskbar test refused: development/recovery hotkeys are unavailable."); return; }
@@ -285,7 +305,7 @@ public sealed class DesktopOverlayWindow : Window
         try
         {
             if (taskbarSession is not null) await taskbarSession.DisposeAsync();
-            var session = await TaskbarDevelopmentSession.StartAsync(Path.Combine(AppContext.BaseDirectory, "Recovery", "GlassDock.Watchdog.exe"));
+            var session = await TaskbarDevelopmentSession.StartAsync(Path.Combine(AppContext.BaseDirectory, "Recovery", "GlassDock.Watchdog.exe"), whileAppActive);
             if (closing || revision != taskbarRevision)
             {
                 await session.DisposeAsync();
@@ -300,12 +320,21 @@ public sealed class DesktopOverlayWindow : Window
             });
             if (session.IsActive)
             {
+                // Changing auto-hide updates the work area; the shell can move windows
+                // during that change. Re-anchor to full monitor bounds afterwards.
+                windowManager.Position(0);
                 heartbeat.Start();
-                SetStatus("Taskbar hidden · maximum 60 seconds · Ctrl+Alt+F12 restores immediately.");
+                SetStatus(whileAppActive
+                    ? "Taskbar suppressed while dock is active · Ctrl+Alt+F12 restores immediately."
+                    : "Taskbar hidden · maximum 60 seconds · Ctrl+Alt+F12 restores immediately.");
             }
             else SetStatus("Taskbar test ended during initialization; recovery was requested.");
         }
-        catch (Exception exception) { SetStatus($"Taskbar test refused: {exception.Message}"); }
+        catch (Exception exception)
+        {
+            TaskbarRecovery.RestoreNow();
+            SetStatus($"Taskbar suppression refused: {exception.Message}");
+        }
         finally { startingTest = false; }
     }
 
@@ -331,6 +360,8 @@ public sealed class DesktopOverlayWindow : Window
         state.Hide();
         collapseDelay?.Cancel();
         heartbeat.Stop();
+        // Restore synchronously before closing the last XAML window can end the process.
+        if (taskbarSession is not null || startingTest) TaskbarRecovery.RestoreNow();
         animation.Stop();
         keyboard.Dispose();
         windowManager.Dispose();

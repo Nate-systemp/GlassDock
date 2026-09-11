@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GlassDock.Core.Desktop;
 using GlassDock.Windows.Desktop;
 
 // This helper does not restart any process. Its only mutation is reversible taskbar visibility.
@@ -14,7 +15,7 @@ if (args is ["--restore"])
     Console.WriteLine(restored ? "RESTORED" : "RESTORE FAILED: no visible taskbar was verified.");
     return restored ? 0 : 1;
 }
-if (args.Length != 3 || args[0] != "--watch" ||
+if (args.Length != 3 || args[0] is not ("--watch" or "--watch-active") ||
     !int.TryParse(args[1], out var parentId) || !long.TryParse(args[2], out var startTicks))
 {
     Console.WriteLine("GlassDock Recovery: --status, --restore, or App-owned --watch <pid> <start-ticks>");
@@ -42,13 +43,12 @@ try
     Console.Out.Flush();
 
     var clock = Stopwatch.StartNew();
-    var lastHeartbeat = clock.Elapsed;
+    var deadline = new TaskbarLease(args[0] == "--watch-active");
     TimeSpan? hiddenAt = null;
     var read = Task.Run(Console.ReadLine);
     while (!parent.HasExited && !emergency.WaitOne(0))
     {
-        if (clock.Elapsed - lastHeartbeat > TimeSpan.FromSeconds(5)) break;
-        if (hiddenAt is { } start && clock.Elapsed - start >= TimeSpan.FromSeconds(60)) break;
+        if (deadline.IsExpired(clock.Elapsed)) break;
         if (read.IsCompleted)
         {
             var command = read.GetAwaiter().GetResult();
@@ -57,11 +57,12 @@ try
             {
                 controller.HideForTest();
                 hiddenAt = clock.Elapsed;
+                deadline.Hidden(clock.Elapsed);
                 Console.WriteLine("HIDDEN");
                 Console.Out.Flush();
             }
             else if (command != "PING") break;
-            lastHeartbeat = clock.Elapsed;
+            deadline.Heartbeat(clock.Elapsed);
             read = Task.Run(Console.ReadLine);
         }
         if (hiddenAt is not null && !controller.MaintainHidden()) break;

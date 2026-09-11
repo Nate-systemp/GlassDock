@@ -1,6 +1,6 @@
 namespace GlassDock.Core.Desktop;
 
-public readonly record struct TaskbarStatus(bool Available, bool Visible, int Count);
+public readonly record struct TaskbarStatus(bool Available, bool Visible, int Count, bool Enabled = true, bool AutoHide = false);
 
 public interface ITaskbarController
 {

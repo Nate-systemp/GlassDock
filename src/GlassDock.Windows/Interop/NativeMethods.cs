@@ -5,7 +5,36 @@ namespace GlassDock.Windows.Interop;
 
 internal static class NativeMethods
 {
+    [StructLayout(LayoutKind.Sequential)] internal struct AppBarData
+    {
+        public uint Size; public nint Window; public uint CallbackMessage; public uint Edge; public Rect Rectangle; public nint Parameter;
+    }
+    [DllImport("shell32.dll")] internal static extern nuint SHAppBarMessage(uint message, ref AppBarData data);
+    internal delegate nint KeyboardProc(int code, nuint message, nint data);
+    [DllImport("user32.dll")] internal static extern nint SetWindowsHookExW(int type, KeyboardProc callback, nint module, uint thread);
+    [DllImport("user32.dll")] internal static extern bool UnhookWindowsHookEx(nint hook);
+    [DllImport("user32.dll")] internal static extern nint CallNextHookEx(nint hook, int code, nuint message, nint data);
+    [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] internal static extern bool PostMessageW(nint hwnd, uint message, nuint wParam, nint lParam);
+    [DllImport("user32.dll")] internal static extern uint SendInput(uint count, Input[] inputs, int size);
+    [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData
+    {
+        public uint Key, ScanCode, Flags, Time; public nuint ExtraInfo;
+    }
+    // x64 INPUT is 40 bytes, with its union aligned at offset 8.
+    [StructLayout(LayoutKind.Explicit, Size = 40)] internal struct Input
+    {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(8)] public ushort Key;
+        [FieldOffset(12)] public uint Flags;
+        [FieldOffset(24)] public nuint ExtraInfo;
+    }
     internal delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+    internal delegate void WinEventProc(nint hook, uint eventType, nint hwnd, int objectId, int childId, uint threadId, uint time);
+    [DllImport("user32.dll")] internal static extern nint SetWinEventHook(uint min, uint max, nint module, WinEventProc callback, uint process, uint thread, uint flags);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool UnhookWinEvent(nint hook);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool EnableWindow(nint hwnd, [MarshalAs(UnmanagedType.Bool)] bool enable);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool IsWindowEnabled(nint hwnd);
     internal delegate nint SubclassProc(nint hwnd, uint message, nuint wParam, nint lParam, nuint id, nuint data);
     [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] internal struct Point { public int X, Y; }

@@ -14,7 +14,7 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
 
     private TaskbarDevelopmentSession(Process process) => this.process = process;
 
-    public static async Task<TaskbarDevelopmentSession> StartAsync(string helperPath)
+    public static async Task<TaskbarDevelopmentSession> StartAsync(string helperPath, bool whileAppActive = false)
     {
         if (!File.Exists(helperPath)) throw new FileNotFoundException("Build the solution to deploy the recovery helper.", helperPath);
         using var parent = Process.GetCurrentProcess();
@@ -23,7 +23,7 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true
         };
-        info.ArgumentList.Add("--watch");
+        info.ArgumentList.Add(whileAppActive ? "--watch-active" : "--watch");
         info.ArgumentList.Add(parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
         info.ArgumentList.Add(parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var child = Process.Start(info) ?? throw new InvalidOperationException("Cannot start recovery helper.");

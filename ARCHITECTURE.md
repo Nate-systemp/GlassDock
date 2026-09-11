@@ -1,4 +1,5 @@
 # Architecture
+The later user-authorized taskbar auto-hide and bare Windows-key fixes are described in [TASKBAR_AND_WINDOWS_KEY_FIX.md](docs/TASKBAR_AND_WINDOWS_KEY_FIX.md). That follow-up supersedes the original development-only suppression and deferred bare-key behavior described below.
 ## Scope and dependency decision
 Phase 0 established the project boundaries. Phase 1 adds a standalone material laboratory. The separately authorized Phase 2–3 foundation adds a floating dock and bounded recovery experiments.
 The requested conceptual flow App → Core → Windows describes runtime delegation.

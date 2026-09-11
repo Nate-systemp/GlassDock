@@ -1,4 +1,5 @@
 # Desktop foundation recovery design
+Historical initial design. The subsequent user-authorized active lease, recoverable auto-hide suspension, and bare-key activation are documented in [TASKBAR_AND_WINDOWS_KEY_FIX.md](TASKBAR_AND_WINDOWS_KEY_FIX.md).
 Written before enabling taskbar suppression.
 
 Default launch creates the floating indicator but leaves the Windows taskbar unchanged. Explicit development tests may suppress the primary taskbar for at most 60 seconds. This is not production shell replacement.

@@ -63,8 +63,6 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
     internal static void Trace(string message)
     {
         System.Diagnostics.Debug.WriteLine($"[DockAnimation] {message}");
-        if (Environment.GetEnvironmentVariable("GLASSDOCK_ANIMATION_TRACE") is { Length: > 0 } path)
-            File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
     }
 
     private void Add(DependencyObject target, string property, double from, params (int Milliseconds, double Value)[] frames)
