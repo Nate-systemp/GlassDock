@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />
     <ProjectReference Include="../GlassDock.Windows/GlassDock.Windows.csproj" />
   </ItemGroup>

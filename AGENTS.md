@@ -1,5 +1,5 @@
 # Repository instructions
-Current authorized milestone: Phase 0 only. Stop before Phase 1.
+Current authorized milestone: Phase 1 glass material laboratory only. Stop before Phase 2.
 - Read PRODUCT_SPEC.md before implementing features, ARCHITECTURE.md before changing architecture, and ROADMAP.md before starting a milestone.
 - Do not implement future phases early or add features merely because they seem useful.
 - Keep UI, business logic, and Windows integration separate. Keep Windows-specific services and Win32 interop inside GlassDock.Windows whenever practical.

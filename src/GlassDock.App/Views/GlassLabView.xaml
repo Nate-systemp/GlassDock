@@ -1,0 +1,106 @@
+<UserControl
+    x:Class="GlassDock.App.Views.GlassLabView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:GlassDock.App.Controls"
+    RequestedTheme="Dark">
+        <Grid Background="#101218" Padding="32,24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid Margin="0,0,0,24">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="G L A S S D O C K   /   R E S E A R C H" FontSize="11" Foreground="#91B5B6"/>
+                    <TextBlock Text="Glass Material Laboratory" FontSize="30" FontWeight="SemiBold"/>
+                    <TextBlock Text="Explore light, diffusion and depth. A material study for a quieter desktop."
+                               FontSize="13" Foreground="#9EA6B8"/>
+                </StackPanel>
+                <Border HorizontalAlignment="Right" VerticalAlignment="Top" CornerRadius="12"
+                        Background="#1B252A" BorderBrush="#304448" BorderThickness="1" Padding="12,6">
+                    <TextBlock Text="PHASE 01   ·   DEVELOPMENT ONLY" FontSize="10" Foreground="#A3D9D0"/>
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="304"/>
+                </Grid.ColumnDefinitions>
+                <Grid RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="FrostedButton" Content="01  Frosted" Click="FrostedClick" Padding="18,10"/>
+                            <Button x:Name="ClearButton" Content="02  Clear" Click="ClearClick" Padding="18,10"/>
+                            <Button x:Name="RefractiveButton" Content="03  Refractive" Click="RefractiveClick" Padding="18,10"/>
+                        </StackPanel>
+                        <TextBlock Text="LIVE PREVIEW" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Foreground="#788496" FontSize="10" CharacterSpacing="100"/>
+                    </Grid>
+                    <Border Grid.Row="1" CornerRadius="20" BorderThickness="1" BorderBrush="#343D4B"
+                            Background="#171C2B">
+                        <Grid x:Name="Stage" CornerRadius="20">
+                            <Viewbox Stretch="UniformToFill" IsHitTestVisible="False">
+                                <Canvas x:Name="SceneCanvas" Width="1000" Height="740"/>
+                            </Viewbox>
+                            <Grid Margin="24" VerticalAlignment="Top" Background="#A0101824" Padding="10,8" CornerRadius="8">
+                                <TextBlock x:Name="SceneTitle" Text="CHROMATIC FIELD" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="White" CharacterSpacing="160"/>
+                                <TextBlock Text="MATERIAL STUDY / 001" HorizontalAlignment="Right"
+                                           FontSize="10" Foreground="#DFFFFFFF" CharacterSpacing="80"/>
+                            </Grid>
+                            <controls:GlassSurface x:Name="Surface" Width="440" Height="300"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border Margin="24" VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                                    Background="#C0101824" Padding="12,8" CornerRadius="8">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Light, held softly." FontSize="24" Foreground="White" FontWeight="SemiBold"/>
+                                <TextBlock Text="Live pixels behind the surface · no image processing or capture"
+                                           Foreground="#DFFFFFFF" FontSize="11"/>
+                            </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="2" RowSpacing="10">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="Test scene" Foreground="#A4ABBA" VerticalAlignment="Center" FontSize="12"/>
+                            <ComboBox x:Name="ScenePicker" SelectedIndex="0" Width="190" SelectionChanged="SceneChanged"
+                                      AutomationProperties.Name="Test scene">
+                                <ComboBoxItem Content="Colorful"/>
+                                <ComboBoxItem Content="Dark"/>
+                                <ComboBoxItem Content="Light"/>
+                                <ComboBoxItem Content="High contrast"/>
+                                <ComboBoxItem Content="Fine detail"/>
+                            </ComboBox>
+                            <Button Content="Reset material" Click="ResetClick"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" x:Name="RenderStatus" TextWrapping="Wrap" Foreground="#9FC6BF" FontSize="11"/>
+                    </Grid>
+                </Grid>
+                <Border Grid.Column="1" Background="#191D26" BorderBrush="#2D3442" BorderThickness="1"
+                        CornerRadius="16" Padding="20,18">
+                    <Grid RowSpacing="12">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Material properties" FontSize="17" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="PresetStatus" Text="Frosted / native" FontSize="11" Foreground="#98BDB9"/>
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="PropertyControls" Spacing="12" Padding="0,0,10,0"/>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+            <Grid Grid.Row="2" Margin="0,20,0,0">
+                <TextBlock Text="STANDALONE LAB   /   No shell integration" Foreground="#788496" FontSize="10"/>
+                <TextBlock Text="Refractive is a lighting approximation, not optical distortion."
+                           Foreground="#929BAB" FontSize="10" HorizontalAlignment="Right"/>
+            </Grid>
+        </Grid>
+</UserControl>
