@@ -4,7 +4,7 @@ using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
-using Windows.UI.ViewManagement;
+using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Rendering;
 
@@ -16,6 +16,7 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
     private CompositionBackdropBrush? backdrop;
     private GlassMaterial material = new();
     private readonly UISettings uiSettings = new();
+
 
     public string RenderingMode { get; private set; } = "Connecting native Composition";
     public event EventHandler? RenderingModeChanged;
@@ -30,38 +31,7 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
         try
         {
             var source = new CompositionEffectSourceParameter("Backdrop");
-            var graph = new ArithmeticCompositeEffect
-            {
-                Name = "Material",
-                Source1 = source,
-                Source2 = new CompositeEffect
-                {
-                    Mode = Microsoft.Graphics.Canvas.CanvasComposite.SourceOver,
-                    Sources =
-                    {
-                        new ExposureEffect
-                        {
-                            Name = "Light",
-                            Source = new SaturationEffect
-                            {
-                                Name = "Color",
-                                Source = new GaussianBlurEffect
-                                {
-                                    Name = "Blur", BlurAmount = 28,
-                                    BorderMode = EffectBorderMode.Hard,
-                                    Source = source
-                                }
-                            }
-                        },
-                        new ColorSourceEffect { Name = "Tint", Color = Color.FromArgb(26, 220, 234, 255) }
-                    }
-                },
-                MultiplyAmount = 0, Offset = 0,
-                Source1Amount = 0.12f, Source2Amount = 0.88f
-            };
-            factory = compositor.CreateEffectFactory(graph,
-                ["Blur.BlurAmount", "Color.Saturation", "Light.Exposure", "Tint.Color",
-                 "Material.Source1Amount", "Material.Source2Amount"]);
+            factory = compositor.CreateEffectFactory(GlassEffectGraph.Create(source), GlassEffectGraph.Properties);
             effect = factory.CreateBrush();
             backdrop = compositor.CreateBackdropBrush();
             effect.SetSourceParameter("Backdrop", backdrop);
@@ -83,13 +53,8 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
         material = RefractionLayer.ForNativeBackend(value);
         if (effect is null) return;
         animate &= uiSettings.AnimationsEnabled;
-        Scalar("Blur.BlurAmount", (float)material.BlurAmount, animate);
-        Scalar("Color.Saturation", (float)material.Saturation, animate);
-        Scalar("Light.Exposure", (float)Math.Log2(material.Brightness), animate);
-        Scalar("Material.Source1Amount", (float)(1 - material.Opacity), animate);
-        Scalar("Material.Source2Amount", (float)material.Opacity, animate);
-        effect.Properties.InsertColor("Tint.Color", Color.FromArgb(26,
-            (byte)(material.Tint >> 16), (byte)(material.Tint >> 8), (byte)material.Tint));
+        foreach (var (name, scalar) in GlassEffectGraph.Scalars(material)) Scalar(name, scalar, animate);
+        effect.Properties.InsertColor("Tint.Color", GlassEffectGraph.Tint(material));
     }
 
     private void Scalar(string name, float value, bool animate)

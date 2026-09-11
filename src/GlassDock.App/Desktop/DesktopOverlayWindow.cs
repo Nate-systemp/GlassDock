@@ -1,0 +1,315 @@
+using System.Numerics;
+using GlassDock.App.Controls;
+using GlassDock.App.Rendering;
+using GlassDock.Core.Desktop;
+using GlassDock.Core.Materials;
+using GlassDock.Windows.Desktop;
+using Microsoft.UI;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using global::Windows.UI.ViewManagement;
+
+namespace GlassDock.App.Desktop;
+
+public sealed class DesktopOverlayWindow : Window
+{
+    private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
+    private readonly GlassSurface surface = new()
+    {
+        UseDesktopBackdrop = true, Width = 120, Height = 5,
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+        Margin = new Thickness(0, 0, 0, 16)
+    };
+    private readonly StackPanel icons = new()
+    {
+        Orientation = Orientation.Horizontal, Spacing = 12, Height = 84, Opacity = 0,
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+        Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
+    };
+    private readonly DockStateMachine state = new();
+    private readonly DesktopGlassBackdrop desktopBackdrop = new();
+    private readonly WindowsOverlayManager windowManager;
+    private readonly WindowsKeyboardService keyboard;
+    private readonly DockAnimationController animation;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
+    private CancellationTokenSource? collapseDelay;
+    private TaskbarDevelopmentSession? taskbarSession;
+    private DevelopmentWindow? controls;
+    private Window? home;
+    private Window? lab;
+    private bool menuOpen;
+    private bool closing;
+    private bool startingTest;
+    public double BottomMargin { get; private set; } = 24;
+    public string Status { get; private set; } = "Safe development mode · taskbar unchanged.";
+    public string RenderingMode => desktopBackdrop.RenderingMode;
+    public bool HotkeysAvailable => keyboard.IsRegistered;
+    public event EventHandler? StatusChanged;
+
+    public DesktopOverlayWindow(bool inspection = false)
+    {
+        Title = "GlassDock — Floating Dock";
+        Content = root;
+        SystemBackdrop = desktopBackdrop;
+        AppWindow.IsShownInSwitchers = inspection;
+        var presenter = (OverlappedPresenter)AppWindow.Presenter;
+        presenter.SetBorderAndTitleBar(false, false);
+        presenter.IsResizable = false;
+        presenter.IsMaximizable = false;
+        presenter.IsMinimizable = false;
+        presenter.IsAlwaysOnTop = true;
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        windowManager = new WindowsOverlayManager(hwnd);
+        windowManager.Configure(inspection);
+        root.Children.Add(surface);
+        root.Children.Add(icons);
+        surface.SizeChanged += (_, _) => UpdateBackdropBounds();
+        root.SizeChanged += (_, _) => UpdateBackdropBounds();
+        desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
+        CreateItems();
+        animation = new DockAnimationController(surface, icons);
+        keyboard = new WindowsKeyboardService(hwnd);
+        keyboard.HomeRequested += (_, _) => ShowHome();
+        keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
+        root.PointerEntered += Entered;
+        root.PointerMoved += (_, _) => collapseDelay?.Cancel();
+        root.PointerExited += Exited;
+        root.Loaded += (_, _) =>
+        {
+            windowManager.Position(Math.Max(0, BottomMargin - 16));
+            windowManager.SetInteractionRegion(false);
+            state.Show();
+            ApplyMaterial(false);
+        };
+        surface.RenderingModeChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
+        var menu = new MenuFlyout();
+        MenuItem(menu, "Development controls", ShowControls);
+        MenuItem(menu, "Restore Windows taskbar", RestoreTaskbar);
+        MenuItem(menu, "Glass Material Laboratory", ShowLab);
+        MenuItem(menu, "Exit GlassDock", Close);
+        menu.Opening += (_, _) => { menuOpen = true; collapseDelay?.Cancel(); };
+        menu.Closed += (_, _) => { menuOpen = false; ScheduleCollapse(); };
+        root.ContextFlyout = menu;
+        heartbeat = DispatcherQueue.CreateTimer();
+        heartbeat.Interval = TimeSpan.FromSeconds(1);
+        heartbeat.Tick += async (_, _) =>
+        {
+            if (taskbarSession is { IsActive: true } session) await session.HeartbeatAsync();
+        };
+        Closed += OnClosed;
+        windowManager.Position(Math.Max(0, BottomMargin - 16));
+        windowManager.SetInteractionRegion(false);
+    }
+
+    private static void MenuItem(MenuFlyout menu, string text, Action action)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += (_, _) => action();
+        menu.Items.Add(item);
+    }
+
+    private void CreateItems()
+    {
+        var items = new (string Name, string Glyph, uint Color)[]
+        {
+            ("Notes", "\uE70B", 0x6A8BD9), ("Files", "\uE8B7", 0xBF9551),
+            ("Studio", "\uE790", 0x9A7BC2), ("Messages", "\uE8F2", 0x4C9D92),
+            ("Music", "\uE8D6", 0xB66584), ("Tools", "\uE713", 0x6A849E), ("Search", "\uE721", 0x64758F)
+        };
+        foreach (var (name, glyph, color) in items)
+        {
+            var button = new Button
+            {
+                Width = 56, Height = 52, VerticalAlignment = VerticalAlignment.Center,
+                CornerRadius = new CornerRadius(14),
+                Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(215, (byte)(color >> 16), (byte)(color >> 8), (byte)color)),
+                Content = new FontIcon { Glyph = glyph, FontSize = 23, Foreground = new SolidColorBrush(Colors.White) }
+            };
+            AutomationProperties.SetName(button, $"{name} placeholder");
+            ToolTipService.SetToolTip(button, $"{name} · placeholder only");
+            button.PointerEntered += (_, _) => ScaleItem(button, 1.08f);
+            button.PointerExited += (_, _) => ScaleItem(button, 1);
+            button.Click += (_, _) => SetStatus($"{name} is a visual placeholder. No application was launched.");
+            icons.Children.Add(button);
+        }
+    }
+
+    private static void ScaleItem(FrameworkElement item, float scale)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(item);
+        visual.CenterPoint = new Vector3((float)item.ActualWidth / 2, (float)item.ActualHeight / 2, 0);
+        if (!new UISettings().AnimationsEnabled) { visual.Scale = new Vector3(scale, scale, 1); return; }
+        using var effect = visual.Compositor.CreateVector3KeyFrameAnimation();
+        effect.InsertKeyFrame(1, new Vector3(scale, scale, 1));
+        effect.Duration = TimeSpan.FromMilliseconds(110);
+        visual.StartAnimation("Scale", effect);
+    }
+
+    private async void Entered(object sender, PointerRoutedEventArgs e)
+    {
+        collapseDelay?.Cancel();
+        if (state.State is DockState.Expanded or DockState.Expanding) return;
+        state.Enter();
+        var revision = state.Expand();
+        windowManager.SetInteractionRegion(true);
+        ApplyMaterial(true);
+        if (await animation.AnimateAsync(true))
+        {
+            state.Complete(revision);
+            icons.IsHitTestVisible = state.State == DockState.Expanded;
+        }
+    }
+
+    private void Exited(object sender, PointerRoutedEventArgs e)
+    {
+        ScheduleCollapse();
+    }
+
+    private async void ScheduleCollapse()
+    {
+        collapseDelay?.Cancel();
+        var delay = new CancellationTokenSource();
+        collapseDelay = delay;
+        try
+        {
+            await Task.Delay(280, delay.Token);
+            if (menuOpen || closing) return;
+            var revision = state.Collapse();
+            icons.IsHitTestVisible = false;
+            if (await animation.AnimateAsync(false))
+            {
+                state.Complete(revision);
+                if (state.State == DockState.Idle)
+                {
+                    ApplyMaterial(false);
+                    windowManager.SetInteractionRegion(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { if (ReferenceEquals(collapseDelay, delay)) collapseDelay = null; delay.Dispose(); }
+    }
+
+    private void ApplyMaterial(bool expanded)
+    {
+        var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
+        {
+            BlurAmount = 18, Opacity = 0.84, CornerRadius = 28,
+            ShadowOpacity = expanded ? 0.24 : 0.18, ShadowBlur = expanded ? 18 : 10,
+            ShadowOffset = expanded ? 4 : 0, EdgeHighlight = expanded ? 0.16 : 0.75,
+            BorderOpacity = expanded ? 0.42 : 0.8
+        };
+        surface.Apply(material);
+        desktopBackdrop.Apply(material);
+        UpdateBackdropBounds();
+    }
+
+    private void UpdateBackdropBounds() => desktopBackdrop.SetBounds(root.ActualWidth, root.ActualHeight,
+        surface.ActualWidth, surface.ActualHeight, 16, root.XamlRoot?.RasterizationScale ?? 1);
+
+    public void SetBottomMargin(double margin)
+    {
+        BottomMargin = Math.Clamp(double.IsFinite(margin) ? margin : 24, 16, 100);
+        windowManager.Position(BottomMargin - 16);
+        SetStatus($"Indicator bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
+    }
+
+    public void ShowControls()
+    {
+        if (controls is null)
+        {
+            controls = new DevelopmentWindow(this);
+            controls.Closed += (_, _) => controls = null;
+        }
+        controls.Activate();
+    }
+
+    public void ShowHome()
+    {
+        if (home is null)
+        {
+            home = new Window
+            {
+                Title = "GlassDock — Glass Home integration placeholder",
+                Content = new StackPanel
+                {
+                    Padding = new Thickness(32), Spacing = 16,
+                    Children =
+                    {
+                        new TextBlock { Text = "Glass Home", FontSize = 28 },
+                        new TextBlock { Text = "Development event received.\nThe launcher is not implemented.\nBare Windows key remains handled by Windows.", TextWrapping = TextWrapping.Wrap }
+                    }
+                }
+            };
+            home.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(520, 260));
+            home.Closed += (_, _) => home = null;
+        }
+        home.Activate();
+    }
+
+    public void ShowLab()
+    {
+        if (lab is null)
+        {
+            lab = new Window { Title = "GlassDock — Glass Material Laboratory", Content = new Views.GlassLabView() };
+            lab.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1320, 900));
+            lab.Closed += (_, _) => lab = null;
+        }
+        lab.Activate();
+    }
+
+    public async Task StartTaskbarTestAsync()
+    {
+        if (startingTest || taskbarSession is { IsActive: true }) return;
+        if (!keyboard.IsRegistered) { SetStatus("Taskbar test refused: development/recovery hotkeys are unavailable."); return; }
+        startingTest = true;
+        try
+        {
+            if (taskbarSession is not null) await taskbarSession.DisposeAsync();
+            taskbarSession = await TaskbarDevelopmentSession.StartAsync(Path.Combine(AppContext.BaseDirectory, "Recovery", "GlassDock.Watchdog.exe"));
+            taskbarSession.Ended += (_, message) => DispatcherQueue.TryEnqueue(() =>
+            {
+                heartbeat.Stop();
+                SetStatus(message);
+            });
+            heartbeat.Start();
+            SetStatus("Taskbar hidden · maximum 60 seconds · Ctrl+Alt+F12 restores immediately.");
+        }
+        catch (Exception exception) { SetStatus($"Taskbar test refused: {exception.Message}"); }
+        finally { startingTest = false; }
+    }
+
+    public async void RestoreTaskbar()
+    {
+        heartbeat.Stop();
+        var restored = TaskbarRecovery.RestoreNow();
+        if (taskbarSession is not null)
+        {
+            await taskbarSession.DisposeAsync();
+            taskbarSession = null;
+        }
+        SetStatus(restored ? "Windows taskbar restored." : "Restoration not verified; use the independent recovery command.");
+    }
+
+    private void SetStatus(string value) { Status = value; StatusChanged?.Invoke(this, EventArgs.Empty); }
+
+    private async void OnClosed(object sender, WindowEventArgs e)
+    {
+        closing = true;
+        state.Hide();
+        collapseDelay?.Cancel();
+        heartbeat.Stop();
+        animation.Stop();
+        keyboard.Dispose();
+        windowManager.Dispose();
+        controls?.Close();
+        home?.Close();
+        lab?.Close();
+        if (taskbarSession is not null) await taskbarSession.DisposeAsync();
+    }
+}

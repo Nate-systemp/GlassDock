@@ -24,7 +24,8 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     private CompositionColorBrush? maskFill;
     private GlassMaterial material = new();
 
-    public string RenderingMode => brush.RenderingMode;
+    public string RenderingMode => UseDesktopBackdrop ? "Desktop system backdrop · shared material graph" : brush.RenderingMode;
+    public bool UseDesktopBackdrop { get; set; }
     public event EventHandler? RenderingModeChanged;
     public UIElement? PreviewContent { get => SurfaceContent.Content as UIElement; set => SurfaceContent.Content = value; }
 
@@ -41,7 +42,8 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
-        brush.Connect(compositor);
+        if (UseDesktopBackdrop) MaterialShape.Fill = new SolidColorBrush(Colors.Transparent);
+        else brush.Connect(compositor);
         shadow = compositor.CreateDropShadow();
         shadow.Color = Colors.Black;
         // Independent opaque geometry avoids redirecting a backdrop-sampling XAML shape.
@@ -74,8 +76,8 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         // A restrained top reflection and cool lower edge: lighting, not pixel displacement.
         LightingShape.Fill = new LinearGradientBrush
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(0.8, 1),
+            StartPoint = new global::Windows.Foundation.Point(0, 0),
+            EndPoint = new global::Windows.Foundation.Point(0.8, 1),
             GradientStops =
             {
                 new GradientStop { Color = Color.FromArgb((byte)(material.EdgeHighlight * 255), 255, 255, 255), Offset = 0 },
