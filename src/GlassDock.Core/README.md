@@ -1,3 +1,3 @@
 # GlassDock.Core
 
-Phase 0 boundary only. See ../../ARCHITECTURE.md.
+Platform-independent material values, dock state transitions, desktop placement math and taskbar/keyboard contracts. No Windows or UI dependencies. See ../../ARCHITECTURE.md.

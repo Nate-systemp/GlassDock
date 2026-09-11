@@ -12,7 +12,7 @@ public sealed class WindowsOverlayManager : IDisposable
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
     public const double Width = 640;
     public const double Height = 144;
-    public double Scale => Math.Max(1, NativeMethods.GetDpiForWindow(hwnd)) / 96d;
+    public double Scale => NativeMethods.GetDpiForWindow(hwnd) is var dpi && dpi > 0 ? dpi / 96d : 1;
 
     public void Configure(bool inspection = false)
     {
@@ -22,9 +22,6 @@ public sealed class WindowsOverlayManager : IDisposable
         NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)extendedStyle);
         var style = NativeMethods.GetWindowLongPtr(hwnd, -16).ToInt64();
         NativeMethods.SetWindowLongPtr(hwnd, -16, (nint)(style & ~0x00CF0000L));
-        var enabled = 1;
-        var result = NativeMethods.DwmSetWindowAttribute(hwnd, 17, ref enabled, sizeof(int));
-        if (result < 0) Marshal.ThrowExceptionForHR(result);
         var noCorner = 1;
         NativeMethods.DwmSetWindowAttribute(hwnd, 33, ref noCorner, sizeof(int));
         ConfigureTransparency();

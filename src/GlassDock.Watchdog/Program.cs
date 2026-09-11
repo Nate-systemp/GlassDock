@@ -2,6 +2,12 @@ using System.Diagnostics;
 using GlassDock.Windows.Desktop;
 
 // This helper does not restart any process. Its only mutation is reversible taskbar visibility.
+if (args is ["--status"])
+{
+    var status = new WindowsTaskbarController().Inspect();
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(status));
+    return status.Available ? 0 : 1;
+}
 if (args is ["--restore"])
 {
     var restored = TaskbarRecovery.RestoreNow();
@@ -11,12 +17,13 @@ if (args is ["--restore"])
 if (args.Length != 3 || args[0] != "--watch" ||
     !int.TryParse(args[1], out var parentId) || !long.TryParse(args[2], out var startTicks))
 {
-    Console.WriteLine("GlassDock Recovery: --restore, or App-owned --watch <pid> <start-ticks>");
+    Console.WriteLine("GlassDock Recovery: --status, --restore, or App-owned --watch <pid> <start-ticks>");
     return 0;
 }
 
 var controller = new WindowsTaskbarController();
 var ownsLease = false;
+var exitCode = 0;
 using var lease = new Mutex(false, TaskbarRecovery.LeaseName);
 using var emergency = new EventWaitHandle(false, EventResetMode.ManualReset, TaskbarRecovery.EventName);
 try
@@ -63,6 +70,7 @@ try
 }
 catch (Exception exception)
 {
+    exitCode = 1;
     Console.WriteLine($"ERROR: {exception.Message}");
 }
 finally
@@ -71,9 +79,10 @@ finally
     {
         var restored = controller.Restore();
         if (!restored) restored = controller.EmergencyRestore();
+        if (!restored) exitCode = 1;
         Console.WriteLine(restored ? "RESTORED: taskbar test ended." : "RESTORE FAILED: run GlassDock.Watchdog --restore.");
         Console.Out.Flush();
         lease.ReleaseMutex();
     }
 }
-return 0;
+return exitCode;

@@ -1,5 +1,5 @@
 # GlassDock product specification
-All behaviors below are future requirements. Phase 0 implements the repository foundation only.
+This document describes the long-term product. Implemented scope is limited to the Phase 0 foundation, Phase 1 material laboratory, and separately authorized Phase 2–3 desktop dock foundation. See ROADMAP.md for current gates; requirements below do not authorize future features.
 
 ## 1. Product overview
 GlassDock — A cleaner way to use Windows. A premium Windows interaction layer, intended for commercial distribution.

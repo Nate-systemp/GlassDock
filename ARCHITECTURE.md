@@ -1,22 +1,22 @@
 # Architecture
 ## Scope and dependency decision
-Phase 0 established the project boundaries. Phase 1 adds a standalone material laboratory.
+Phase 0 established the project boundaries. Phase 1 adds a standalone material laboratory. The separately authorized Phase 2–3 foundation adds a floating dock and bounded recovery experiments.
 The requested conceptual flow App → Core → Windows describes runtime delegation.
 Compile-time references deliberately invert the last arrow to keep Core independent:
 - App → Core, Windows
 - Windows → Core
 - Licensing → Core
-- Watchdog → Core
+- Watchdog → Core, Windows
 - Core → no project and no platform packages
 - Core.Tests → Core; Windows.Tests → Windows
 
 Future Core interfaces will be implemented by Windows services and supplied by App's composition root. Core must never reference Windows, WinUI, or Licensing.
 
 ## Repository
-src/GlassDock.App holds the laboratory, reusable GlassSurface and native rendering adapter.
-src/GlassDock.Core holds platform-independent material values, presets and validation.
-src/GlassDock.Windows holds future Windows service implementations, Win32/PInvoke, discovery, monitor and status integrations.
-src/GlassDock.Watchdog is a separate executable that immediately exits successfully in Phase 0.
+src/GlassDock.App holds the laboratory, reusable GlassSurface, desktop overlay UI and native rendering adapters.
+src/GlassDock.Core holds platform-independent material values, presets, dock transitions, placement math and taskbar/keyboard contracts.
+src/GlassDock.Windows isolates own-window interop, primary-monitor placement, registered hotkeys, taskbar visibility and recovery coordination.
+src/GlassDock.Watchdog is a separate recovery executable; App builds and deploys it under Recovery via a build-only project reference.
 src/GlassDock.Licensing is an empty platform-independent library reserved for future licensing.
 tests contains independent Core and Windows test projects.
 installer and website are documentation placeholders, not implementations.
@@ -26,13 +26,13 @@ scripts contains repeatable validation; .github/workflows contains Windows CI; d
 Future flow: views → viewmodels → services → Windows abstraction → OS APIs.
 App owns UI lifecycle and dependency composition. Do not scatter native calls in UI code.
 Introduce dependency injection when services exist, without adding a container now.
-Future long-running operations use async APIs and cancellation tokens. Future structured logging is provided at composition boundaries, uses event identifiers, redacts sensitive data, and remains local unless explicitly authorized. No logging service, telemetry or polling runs now.
+Async UI operations use cancellation/revision checks. Development exceptions are written locally to development-error.log; no telemetry or application networking exists. Only an explicit taskbar test starts heartbeat and visibility checks.
 Avoid speculative empty interfaces such as IDockService until their contracts can be tested.
 
-## Reliability architecture (future)
-Watchdog may start App, monitor process termination, restore normal Windows behavior, and attempt one or two bounded restarts. Repeated failure must leave the standard Windows desktop usable.
-Restoration must be idempotent and support emergency recovery, normal shutdown, partial startup and watchdog failure. IPC protocol and process ownership are future design decisions.
-Phase 10 cannot enable taskbar hiding until recovery prerequisites are demonstrated. Phase 11 remains the dedicated watchdog milestone; ordering is not permission to ship unsafe Phase 10 behavior.
+## Development recovery architecture
+App starts a child recovery process over redirected standard input/output. READY precedes HIDE; the child checks the parent's process name, session and startup time, then acquires a named session mutex. Only the child hides the taskbar. A manual-reset event provides independent emergency signaling.
+The lease ends after parent exit, EOF, RESTORE, five seconds without a heartbeat, the 60-second maximum, or a taskbar identity change. App also restores if its helper fails. No process restarts are performed.
+The independent --restore command works without App. No registry, appbar setting, startup or Explorer lifetime changes exist. Production suppression remains deferred; simultaneous process-pair failure requires the external recovery command. See docs/DESKTOP_RECOVERY_DESIGN.md.
 
 ## Licensing architecture (future)
 Client → license API → database. Payment provider integration and authoritative state live on the server. Future offline grace and caching must account for tampering and failure. No network, activation, payments or Free/Pro logic is implemented.
@@ -46,8 +46,8 @@ Packaging, signing, distribution, installer and updater decisions are deferred t
 
 ## Testing
 Core tests can run without Windows desktop UI. Foundation tests inspect project dependencies and enforce platform boundaries rather than pretending to test unimplemented features.
-Windows tests currently enforce isolation only; real OS integration tests will require an explicitly controlled Windows environment later.
-CI restores locked NuGet graphs, builds Release and runs both test projects. A local smoke check starts and closes only the foundation window. UI and shell behavior tests belong to their respective milestones.
+Windows tests enforce isolation; OS visibility/recovery checks are explicit local integration experiments, excluded from automatic tests and CI.
+CI restores locked NuGet graphs, builds Release and runs both test projects. Core tests cover stale animation completions, lifecycle and physical placement/DPI math. Local UI and recovery observations are recorded in docs/PHASE_2_3_VALIDATION.md.
 
 ## Phase 1 material laboratory
 GlassMaterial is an immutable Core value record with finite-value normalization and bounded dimensions.
@@ -66,3 +66,14 @@ The Refractive preset adds edge illumination and depth cues only. Win2D Displace
 True spatial refraction would require a separate texture/shader experiment and a defined source-sampling strategy; no custom engine is justified yet.
 This phase samples pixels inside the application only. Desktop-behind-window transparency, production accessibility contrast, HDR, cross-GPU performance and device-loss recovery are not established by this laboratory.
 See docs/PHASE_1_FINDINGS.md for observations and primary references.
+
+## Phase 2–3 desktop overlay
+DesktopOverlayWindow owns a fixed 640×144 DIP topmost, borderless, non-activating HWND. WindowsOverlayManager positions it using primary MonitorInfo.Monitor bounds, not work area or laboratory dimensions; DIP sizes use GetDpiForWindow. The visible pill is 120×5 DIP, centered with a default 24 DIP bottom gap. An idle native window region supplies a 200×44 DIP hit target; expanded interaction uses the whole bounded overlay. Pixels outside that region do not intercept input.
+
+One GlassSurface changes from pill to 560×84 DIP dock in 200 ms. Seven UI-only placeholders fade in, and item hover scales to 1.08 over 110 ms. A 280 ms exit delay and revision-based state machine prevent stale animation completions. Reduced-motion mode removes the timed transitions. No idle pointer polling exists.
+
+GlassEffectGraph is shared by both rendering adapters. The lab uses Microsoft.UI.Composition.CreateBackdropBrush. DesktopGlassBackdrop uses Windows.UI.Composition.CreateBackdropBrush as a custom SystemBackdrop, where the backing pixels are the desktop. An OS compositor visual-surface mask clips the same blur/saturation/exposure/tint graph to the animated rounded surface. GlassSurface still owns the rim, lighting, shadow and foreground content. This is native composition, with no desktop screenshot loop. The host-backdrop variant returned black on this test machine and is not used.
+
+The OS compositor needs its own current-thread dispatcher queue. Own-window DWM alpha setup and background erasure live in WindowsOverlayManager; no other application windows are styled. Composition resources are released on disconnect, and the dispatcher queue is retained for App's lifetime.
+
+IKeyboardService currently exposes only RegisterHotKey-based Ctrl+Alt+Space and Ctrl+Alt+F12 events. Bare Windows interception remains deferred; no low-level hook or keyboard filtering is implemented. The Home event opens a small development placeholder, not a launcher.

@@ -1,5 +1,5 @@
 # Roadmap
-Phase 0 is verified. Phase 1 material laboratory is implemented and visually inspected. Every phase requires a successful build, run, tests, documentation and Git commit.
+Phase 0 is verified. Phase 1 material laboratory is implemented and visually inspected. Phase 2–3 floating dock foundation is implemented with explicitly bounded taskbar/recovery tests. Every phase requires a successful build, run, tests, documentation and Git commit.
 
 - PHASE 0 → Project foundation
 - PHASE 1 → Glass visual laboratory
@@ -32,4 +32,11 @@ Implemented: three presets, live controls, five stress-test backgrounds, native 
 The user has separately authorized a Phase 2–3 desktop-foundation milestone, including carefully gated recovery/taskbar experiments. It must preserve the laboratory and does not authorize the full launcher or other future functionality.
 
 ## Safety gate
-Phase 10 cannot hide the taskbar until restoration and emergency recovery are proven. If recovery requires Phase 11 work, keep Phase 10 non-destructive and disabled until that gate is met. Preserve the phase sequence without exposing an unsafe shell state.
+The user's desktop-foundation request authorized early, bounded development experiments for taskbar visibility and recovery. Those experiments do not complete Phases 6, 10 or 11 or enable production shell replacement. Persistent suppression and bare Windows-key interception remain deferred.
+
+## Phase 2–3 acceptance and stop
+Implemented: primary-monitor floating pill, expanded glass dock, placeholder icon interactions, shared native material graph, explicit states, configurable margin, development hotkeys, independent watchdog and recovery command. Taskbar suppression is opt-in for at most 60 seconds and refuses multiple taskbars. Default launch leaves the taskbar intact.
+
+Local checks cover launch, material rendering, expansion/collapse, laboratory regression and recovery after normal exit, parent failure, helper failure and lease expiry. See docs/PHASE_2_3_VALIDATION.md for evidence and limits.
+
+Stop here. Full Glass Home, discovery, real launching, multi-monitor management, status, licensing, updater and automatic startup require separate authorization.

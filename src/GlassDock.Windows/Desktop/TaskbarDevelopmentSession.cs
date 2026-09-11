@@ -41,10 +41,16 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
         }
         catch
         {
-            child.StandardInput.Close(); // EOF tells the child to restore even after a lost acknowledgement.
-            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(7));
-            TaskbarRecovery.RestoreNow();
-            child.Dispose();
+            try
+            {
+                child.StandardInput.Close(); // EOF tells the child to restore even after a lost acknowledgement.
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(7));
+            }
+            finally
+            {
+                TaskbarRecovery.RestoreNow();
+                child.Dispose();
+            }
             throw;
         }
     }
@@ -79,12 +85,18 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
             while (await process.StandardOutput.ReadLineAsync() is { } line) status = line;
             await process.WaitForExitAsync();
         }
+        catch (IOException exception)
+        {
+            status = $"Recovery connection failed: {exception.Message}";
+        }
         finally
         {
             IsActive = false;
             // Independent fallback if the helper died before its finally block.
-            if (!stopping && !status.StartsWith("RESTORED", StringComparison.Ordinal))
-                TaskbarRecovery.RestoreNow();
+            if (!status.StartsWith("RESTORED", StringComparison.Ordinal))
+                status = TaskbarRecovery.RestoreNow()
+                    ? "RESTORED: recovery helper ended unexpectedly."
+                    : "RESTORE FAILED: run GlassDock.Watchdog --restore.";
             Ended?.Invoke(this, status);
         }
     }

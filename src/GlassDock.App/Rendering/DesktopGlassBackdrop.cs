@@ -44,13 +44,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         output.Mask = mask;
         try
         {
-            source = compositor.CreateHostBackdropBrush();
+            source = compositor.CreateBackdropBrush();
             factory = compositor.CreateEffectFactory(
                 GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop")), GlassEffectGraph.Properties);
             effect = factory.CreateBrush();
             effect.SetSourceParameter("Backdrop", source);
             output.Source = effect;
-            RenderingMode = "Native desktop host backdrop · shared glass graph";
+            RenderingMode = "Native system backdrop · shared glass graph";
             Apply(material);
         }
         catch (Exception exception) when (exception is COMException or ArgumentException)

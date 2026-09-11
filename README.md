@@ -1,20 +1,31 @@
 # GlassDock
 A cleaner way to use Windows.
 
-Seven C# projects with a standalone Glass Material Laboratory, architecture boundaries, tests and documentation.
+Seven C# projects with a floating desktop dock, a preserved Glass Material Laboratory, architecture boundaries, tests and documentation.
 
 ## Development
-Windows x64, .NET SDK 10.0.401 and Windows SDK 10.0.26100.0.
+Windows x64, .NET SDK 10.0.401 and Windows SDK 10.0.26100.0. The desktop foundation is visually tested on Windows 11, one primary monitor at 125% scaling.
 Use Visual Studio with WinUI development tools for the full IDE experience; VS Code is suitable for editing. No Visual Studio installation was detected on this machine; CLI builds are validated separately.
 Run from the repository root:
 ```powershell
 ./scripts/Validate.ps1
-dotnet run --project src/GlassDock.App
-dotnet run --project src/GlassDock.Watchdog
+dotnet run --project src/GlassDock.App -c Release -- --controls
+dotnet run --project src/GlassDock.App -c Release -- --lab
 ```
-App opens the Glass Material Laboratory. Compare Frosted, Clear and Refractive presets and five test scenes. Changes are session-only; close the window normally. Watchdog currently returns 0.
+Launch one App instance at a time. Default launch shows only the floating pill; hover its larger activation area to expand seven placeholder items. Right-click for development controls, recovery, the laboratory, or Exit. Bottom margin defaults to 24 DIP and is session-only.
+
+`--controls` also opens development controls and makes the overlay visible to window inspection tools/Alt+Tab. Default mode is a non-activating tool window. `--lab` opens only the Phase 1 laboratory; compare its three presets and five scenes. Close running GlassDock instances before rebuilding.
+
+The Windows taskbar remains unchanged by default. The development button starts a watchdog-owned test lasting at most 60 seconds. Ctrl+Alt+F12 restores immediately; normal exit and failure recovery also restore. Ctrl+Alt+Space opens only a Glass Home event placeholder. Bare Windows key and Windows shortcuts remain native; no keyboard hook exists.
+
+Independent recovery after a Release build (does not require App):
+```powershell
+& ./src/GlassDock.App/bin/Release/net10.0-windows10.0.26100.0/win-x64/Recovery/GlassDock.Watchdog.exe --restore
+& ./src/GlassDock.App/bin/Release/net10.0-windows10.0.26100.0/win-x64/Recovery/GlassDock.Watchdog.exe --status
+```
+Suppression is a reversible visibility experiment, not production taskbar replacement. See [recovery design](docs/DESKTOP_RECOVERY_DESIGN.md) and [desktop verification](docs/PHASE_2_3_VALIDATION.md) before testing.
 NuGet restore requires internet access for development dependencies; application networking is absent.
 Use GlassDock.sln in Visual Studio. The current development app is x64 and unpackaged.
 
 Read [product specification](PRODUCT_SPEC.md), [architecture](ARCHITECTURE.md), [roadmap](ROADMAP.md), and [validation](docs/PHASE_0_VALIDATION.md).
-Phase 1 has native in-app glass effects. Refraction is an explicitly labelled lighting approximation. No shell behavior or commercial services are part of the laboratory.
+Phase 2–3 reuses the Phase 1 glass graph with a native system-backdrop adapter. Refraction remains an explicitly labelled lighting approximation. No discovery, real app launching, full launcher, startup registration, commercial services or shell replacement is implemented.

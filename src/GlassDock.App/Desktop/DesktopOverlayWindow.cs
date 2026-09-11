@@ -45,6 +45,7 @@ public sealed class DesktopOverlayWindow : Window
     private bool menuOpen;
     private bool closing;
     private bool startingTest;
+    private int taskbarRevision;
     public double BottomMargin { get; private set; } = 24;
     public string Status { get; private set; } = "Safe development mode · taskbar unchanged.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
@@ -268,17 +269,29 @@ public sealed class DesktopOverlayWindow : Window
         if (startingTest || taskbarSession is { IsActive: true }) return;
         if (!keyboard.IsRegistered) { SetStatus("Taskbar test refused: development/recovery hotkeys are unavailable."); return; }
         startingTest = true;
+        var revision = ++taskbarRevision;
         try
         {
             if (taskbarSession is not null) await taskbarSession.DisposeAsync();
-            taskbarSession = await TaskbarDevelopmentSession.StartAsync(Path.Combine(AppContext.BaseDirectory, "Recovery", "GlassDock.Watchdog.exe"));
-            taskbarSession.Ended += (_, message) => DispatcherQueue.TryEnqueue(() =>
+            var session = await TaskbarDevelopmentSession.StartAsync(Path.Combine(AppContext.BaseDirectory, "Recovery", "GlassDock.Watchdog.exe"));
+            if (closing || revision != taskbarRevision)
             {
+                await session.DisposeAsync();
+                return;
+            }
+            taskbarSession = session;
+            session.Ended += (_, message) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!ReferenceEquals(taskbarSession, session) || closing) return;
                 heartbeat.Stop();
                 SetStatus(message);
             });
-            heartbeat.Start();
-            SetStatus("Taskbar hidden · maximum 60 seconds · Ctrl+Alt+F12 restores immediately.");
+            if (session.IsActive)
+            {
+                heartbeat.Start();
+                SetStatus("Taskbar hidden · maximum 60 seconds · Ctrl+Alt+F12 restores immediately.");
+            }
+            else SetStatus("Taskbar test ended during initialization; recovery was requested.");
         }
         catch (Exception exception) { SetStatus($"Taskbar test refused: {exception.Message}"); }
         finally { startingTest = false; }
@@ -286,6 +299,7 @@ public sealed class DesktopOverlayWindow : Window
 
     public async void RestoreTaskbar()
     {
+        taskbarRevision++;
         heartbeat.Stop();
         var restored = TaskbarRecovery.RestoreNow();
         if (taskbarSession is not null)
@@ -301,6 +315,7 @@ public sealed class DesktopOverlayWindow : Window
     private async void OnClosed(object sender, WindowEventArgs e)
     {
         closing = true;
+        taskbarRevision++;
         state.Hide();
         collapseDelay?.Cancel();
         heartbeat.Stop();

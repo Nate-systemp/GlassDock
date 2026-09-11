@@ -20,11 +20,12 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
         surface.Width = width;
         surface.Height = height;
         icons.Opacity = opacity;
-        var duration = new UISettings().AnimationsEnabled ? 200 : 1;
+        var animationsEnabled = new UISettings().AnimationsEnabled;
+        var duration = animationsEnabled ? 200 : 1;
         active = new Storyboard();
         Add(surface, "Width", width, expanded ? 560 : 120, duration);
         Add(surface, "Height", height, expanded ? 84 : 5, duration);
-        Add(icons, "Opacity", opacity, expanded ? 1 : 0, expanded ? 150 : 90);
+        Add(icons, "Opacity", opacity, expanded ? 1 : 0, animationsEnabled ? (expanded ? 150 : 90) : 1);
         var pending = new TaskCompletionSource<bool>();
         completion = pending;
         active.Completed += (_, _) => pending.TrySetResult(true);
