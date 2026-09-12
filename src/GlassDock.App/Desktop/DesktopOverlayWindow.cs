@@ -40,7 +40,7 @@ public sealed class DesktopOverlayWindow : Window
     };
     private readonly StackPanel icons = new()
     {
-        Orientation = Orientation.Horizontal, Spacing = 12, Height = 84, Opacity = 0,
+        Orientation = Orientation.Horizontal, Spacing = 6, Height = 68, Opacity = 0,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
     };
@@ -159,25 +159,69 @@ public sealed class DesktopOverlayWindow : Window
             if (previous >= 0) icons.Children.RemoveAt(previous);
             icons.Children.Insert(index, button);
         }
+        if (state.State == DockState.Expanded)
+        {
+            var targetWidth = CalculateTargetDockWidth();
+            surface.Width = targetWidth;
+            UpdateBackdropBounds();
+        }
+    }
+
+    private double CalculateTargetDockWidth()
+    {
+        var count = VisibleDockApplications.Count;
+        if (count == 0) return 120;
+        const double buttonWidth = 48;
+        const double spacing = 6;
+        const double horizontalPadding = 24;
+        var target = count * buttonWidth + (count - 1) * spacing + horizontalPadding;
+        return Math.Clamp(target, 120, 600);
     }
 
     private Button CreateApplicationButton(DockApplicationItem item)
     {
-        var image = new Image { Width = 32, Height = 32, Stretch = Stretch.Uniform };
+        var image = new Image
+        {
+            Width = 40,
+            Height = 40,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
         var running = new Border
         {
-            Width = 4, Height = 3, CornerRadius = new CornerRadius(1.5),
+            Width = 4,
+            Height = 3,
+            CornerRadius = new CornerRadius(1.5),
             Background = new SolidColorBrush(Colors.White),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 1)
         };
-        var content = new Grid { Width = 40, Height = 42 };
+        var content = new Grid
+        {
+            Width = 44,
+            Height = 48
+        };
         content.Children.Add(image);
         content.Children.Add(running);
         var button = new Button
         {
-            Width = 56, Height = 52, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Colors.Transparent), Content = content
+            Width = 48,
+            Height = 52,
+            Padding = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Content = content
         };
+        button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(32, 255, 255, 255));
+        button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(56, 255, 255, 255));
+        button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Colors.Transparent);
+        button.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Colors.Transparent);
+
         ApplicationIcon? renderedIcon = null;
         void Update()
         {
@@ -197,8 +241,16 @@ public sealed class DesktopOverlayWindow : Window
         }
         Update();
         item.PropertyChanged += (_, _) => Update();
-        button.PointerEntered += (_, _) => ScaleItem(button, 1.08f);
-        button.PointerExited += (_, _) => ScaleItem(button, 1);
+        button.PointerEntered += (_, _) =>
+        {
+            Canvas.SetZIndex(button, 10);
+            ScaleItem(button, 1.24f);
+        };
+        button.PointerExited += (_, _) =>
+        {
+            Canvas.SetZIndex(button, 0);
+            ScaleItem(button, 1.0f);
+        };
         button.Click += (_, _) =>
         {
             if (!applications.Activate(item)) SetStatus($"Windows could not launch or focus {item.Name}.");
@@ -209,11 +261,15 @@ public sealed class DesktopOverlayWindow : Window
     private static void ScaleItem(FrameworkElement item, float scale)
     {
         var visual = ElementCompositionPreview.GetElementVisual(item);
-        visual.CenterPoint = new Vector3((float)item.ActualWidth / 2, (float)item.ActualHeight / 2, 0);
+        visual.CenterPoint = new Vector3((float)item.ActualWidth / 2, (float)item.ActualHeight * 0.88f, 0);
         if (!new UISettings().AnimationsEnabled) { visual.Scale = new Vector3(scale, scale, 1); return; }
-        using var effect = visual.Compositor.CreateVector3KeyFrameAnimation();
-        effect.InsertKeyFrame(1, new Vector3(scale, scale, 1));
-        effect.Duration = TimeSpan.FromMilliseconds(110);
+        var compositor = visual.Compositor;
+        using var effect = compositor.CreateVector3KeyFrameAnimation();
+        var easing = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.16f, 1.0f),
+            new Vector2(0.30f, 1.0f));
+        effect.InsertKeyFrame(1f, new Vector3(scale, scale, 1), easing);
+        effect.Duration = TimeSpan.FromMilliseconds(180);
         visual.StartAnimation("Scale", effect);
     }
 
@@ -236,7 +292,8 @@ public sealed class DesktopOverlayWindow : Window
         var revision = state.Expand();
         windowManager.SetInteractionRegion(true);
         ApplyMaterial(true);
-        if (await animation.AnimateAsync(true))
+        var targetWidth = CalculateTargetDockWidth();
+        if (await animation.AnimateAsync(true, targetWidth))
         {
             state.Complete(revision);
             icons.IsHitTestVisible = state.State == DockState.Expanded;

@@ -36,11 +36,16 @@ internal static class ApplicationNative
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] internal static extern nuint SHGetFileInfo(nint pidl, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("user32.dll")] internal static extern bool DestroyIcon(nint icon);
     [DllImport("user32.dll")] internal static extern bool DrawIconEx(nint dc, int x, int y, nint icon, int width, int height, uint step, nint brush, uint flags);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] internal static extern int SHCreateItemFromParsingName([MarshalAs(UnmanagedType.LPWStr)] string path, nint pbc, in Guid riid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
+    [DllImport("shell32.dll", PreserveSig = true)] internal static extern int SHCreateItemFromIDList(nint pidl, in Guid riid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern uint PrivateExtractIcons(string lpszFile, int nIconIndex, int cxIcon, int cyIcon, [Out] nint[] phicon, [Out] uint[] piconid, uint nIcons, uint flags);
     [DllImport("gdi32.dll")] internal static extern nint CreateCompatibleDC(nint dc);
     [DllImport("gdi32.dll")] internal static extern bool DeleteDC(nint dc);
     [DllImport("gdi32.dll")] internal static extern bool DeleteObject(nint value);
     [DllImport("gdi32.dll")] internal static extern nint SelectObject(nint dc, nint value);
     [DllImport("gdi32.dll")] internal static extern nint CreateDIBSection(nint dc, ref BitmapInfo info, uint usage, out nint bits, nint section, uint offset);
+    [DllImport("gdi32.dll")] internal static extern int GetDIBits(nint dc, nint bitmap, uint start, uint lines, [Out] byte[] bits, ref BitmapInfo info, uint usage);
+    [DllImport("gdi32.dll")] internal static extern int GetObject(nint obj, int count, out BitmapObject info);
     [StructLayout(LayoutKind.Sequential)] internal struct PropertyKey { public Guid Format; public uint Id; }
     [StructLayout(LayoutKind.Explicit, Size = 24)] internal struct PropVariant { [FieldOffset(0)] public ushort Type; [FieldOffset(8)] public nint Value; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] internal struct ShellFileInfo
@@ -86,6 +91,44 @@ internal static class ApplicationNative
         void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
         void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string text);
         void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BitmapObject
+    {
+        public int Type;
+        public int Width;
+        public int Height;
+        public int WidthBytes;
+        public ushort Planes;
+        public ushort BitsPixel;
+        public nint Bits;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SIZE
+    {
+        public int Width;
+        public int Height;
+        public SIZE(int width, int height) { Width = width; Height = height; }
+    }
+    [Flags]
+    internal enum SIIGBF
+    {
+        ResizeToFit = 0x00,
+        BiggerSizeOk = 0x01,
+        MemoryOnly = 0x02,
+        IconOnly = 0x04,
+        ThumbnailOnly = 0x08,
+        InCacheOnly = 0x10,
+        CropToSquare = 0x20,
+        WideThumbnails = 0x40,
+        IconBackground = 0x80,
+        ScaleUp = 0x100
+    }
+    [ComImport, Guid("BCC18B79-BA16-442F-80C4-8A59C30C463B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellItemImageFactory
+    {
+        [PreserveSig]
+        int GetImage([In, MarshalAs(UnmanagedType.Struct)] SIZE size, [In] SIIGBF flags, [Out] out nint bitmap);
     }
 }
 

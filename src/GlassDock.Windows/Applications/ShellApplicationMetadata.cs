@@ -48,12 +48,26 @@ internal static class ShellApplicationMetadata
 
     internal static IReadOnlyList<PinnedApplication> ReadPinned(WindowsApplicationIconService icons)
     {
+        try
+        {
+            var comPins = ReadPinnedFromCom(icons);
+            if (comPins.Count > 0) return comPins;
+        }
+        catch (Exception exception) when (exception is COMException or InvalidCastException or IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return ReadPinnedFromTaskband(icons);
+    }
+
+    private static IReadOnlyList<PinnedApplication> ReadPinnedFromCom(WindowsApplicationIconService icons)
+    {
         object? instance = null;
         ApplicationNative.IEnumFullIdList? enumeration = null;
         try
         {
             instance = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("90AA3A4E-1CBA-4233-B8BB-535773D48449"), true)!);
-            var list = (ApplicationNative.IPinnedList)instance!;
+            if (instance is not ApplicationNative.IPinnedList list) return Array.Empty<PinnedApplication>();
             Marshal.ThrowExceptionForHR(list.EnumObjects(out enumeration));
             var result = new List<PinnedApplication>();
             while (true)
@@ -80,7 +94,6 @@ internal static class ShellApplicationMetadata
                     if (!string.IsNullOrEmpty(link.Path)) target = link.Path;
                     var executable = target?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true ? target : null;
                     var identity = new ApplicationIdentity(appId, executable, link.Arguments, parsing);
-                    // Packaged pins can return a bare AUMID instead of an absolute Shell parsing path.
                     var launchTarget = parsing.Equals(appId, StringComparison.OrdinalIgnoreCase)
                         ? "shell:AppsFolder\\" + parsing : parsing;
                     result.Add(new(identity, Name(pidl, 0) ?? Path.GetFileNameWithoutExtension(parsing), launchTarget,
@@ -95,6 +108,106 @@ internal static class ShellApplicationMetadata
             if (enumeration is not null) Marshal.ReleaseComObject(enumeration);
             if (instance is not null) Marshal.ReleaseComObject(instance);
         }
+    }
+
+    private static IReadOnlyList<PinnedApplication> ReadPinnedFromTaskband(WindowsApplicationIconService icons)
+    {
+        var result = new List<PinnedApplication>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var userPinned = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            @"Microsoft\Internet Explorer\Quick Launch\User Pinned");
+
+        var lnkFiles = new List<string>();
+        if (Directory.Exists(userPinned))
+        {
+            try
+            {
+                lnkFiles.AddRange(Directory.GetFiles(userPinned, "*.lnk", SearchOption.AllDirectories));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+
+        var order = new List<string>();
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband");
+            if (key?.GetValue("Favorites") is byte[] bytes)
+            {
+                for (var i = 0; i < bytes.Length - 10; i += 2)
+                {
+                    if (bytes[i] >= 32 && bytes[i] < 127 && bytes[i + 1] == 0)
+                    {
+                        var start = i;
+                        while (i < bytes.Length - 1 && bytes[i + 1] == 0 && bytes[i] >= 32 && bytes[i] < 127) i += 2;
+                        var s = Encoding.Unicode.GetString(bytes, start, i - start);
+                        if ((s.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) || s.Contains('!')) &&
+                            !s.Contains('\\') && !order.Contains(s, StringComparer.OrdinalIgnoreCase))
+                        {
+                            order.Add(s);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or IOException) { }
+
+        var sortedLnks = lnkFiles.OrderBy(f =>
+        {
+            var fname = Path.GetFileName(f);
+            var idx = order.FindIndex(o => o.Equals(fname, StringComparison.OrdinalIgnoreCase));
+            return idx >= 0 ? idx : 1000;
+        }).ToList();
+
+        foreach (var path in sortedLnks)
+        {
+            try
+            {
+                var link = ResolveLink(path);
+                var executable = link.Path?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true ? link.Path : null;
+
+                string? appId = null;
+                if (ApplicationNative.SHParseDisplayName(path, 0, out var pidl, 0, out _) >= 0)
+                {
+                    try
+                    {
+                        var iid = typeof(ApplicationNative.IPropertyStore).GUID;
+                        if (ApplicationNative.SHGetPropertyStoreFromIDList(pidl, 0, in iid, out var properties) >= 0)
+                        {
+                            try { appId = Property(properties, "System.AppUserModel.ID"); }
+                            finally { Marshal.ReleaseComObject(properties); }
+                        }
+                    }
+                    finally { Marshal.FreeCoTaskMem(pidl); }
+                }
+
+                var identity = new ApplicationIdentity(appId, executable, link.Arguments, path);
+                if (!seen.Add(identity.Key)) continue;
+
+                var name = Path.GetFileNameWithoutExtension(path);
+                var icon = icons.FromShell(identity.Key, path);
+                result.Add(new PinnedApplication(identity, name, path, icon));
+            }
+            catch (Exception ex) when (ex is IOException or COMException or UnauthorizedAccessException) { }
+        }
+
+        foreach (var item in order)
+        {
+            if (item.Length > 5 && item.Contains('!') && !item.StartsWith('!') && !item.EndsWith('!') &&
+                !item.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            {
+                var appId = item;
+                var launchTarget = "shell:AppsFolder\\" + appId;
+                var identity = new ApplicationIdentity(appId, null, null, launchTarget);
+                if (!seen.Add(identity.Key)) continue;
+
+                var icon = icons.FromShell(identity.Key, launchTarget);
+                var name = appId.Contains('_') ? appId.Split('_')[0] : appId.Split('!')[0];
+                result.Add(new PinnedApplication(identity, name, launchTarget, icon));
+            }
+        }
+
+        return result;
     }
 }
 

@@ -10,10 +10,10 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
     private Storyboard? active;
     private TaskCompletionSource<bool>? completion;
 
-    public Task<bool> AnimateAsync(bool expanded)
+    public Task<bool> AnimateAsync(bool expanded, double targetWidth = 560)
     {
         var started = System.Diagnostics.Stopwatch.StartNew();
-        Trace($"AnimateAsync({expanded}), previousPending={completion is { Task.IsCompleted: false }}");
+        Trace($"AnimateAsync({expanded}, targetWidth={targetWidth}), previousPending={completion is { Task.IsCompleted: false }}");
         var width = surface.ActualWidth;
         var height = surface.ActualHeight;
         var opacity = icons.Opacity;
@@ -37,10 +37,10 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
         {
             // Diretso na papunta sa final size, walang medium stop
             Add(indicator, "Opacity", indicatorOpacity, (150, indicatorOpacity), (300, 0));
-            Add(surface, "Width", width, (420, 560));
-            Add(surface, "Height", height, (420, 84));
+            Add(surface, "Width", width, (420, targetWidth));
+            Add(surface, "Height", height, (420, 68));
             Add(surface, "Opacity", surfaceOpacity, (140, surfaceOpacity), (440, 1));
-            Add(icons, "Opacity", opacity, (400, opacity), (720, 1));
+            Add(icons, "Opacity", opacity, (360, opacity), (680, 1));
         }
         else
         {
