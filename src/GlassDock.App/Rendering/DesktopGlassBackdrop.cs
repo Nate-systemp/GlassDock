@@ -42,22 +42,31 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         mask = compositor.CreateSurfaceBrush(maskSurface);
         output = compositor.CreateMaskBrush();
         output.Mask = mask;
+        var stage = "backdrop source";
         try
         {
             source = compositor.CreateBackdropBrush();
+            stage = "effect factory";
+            // Separate named leaves keep the graph tree-shaped. Both sample the same
+            // live desktop brush; neither material branch reintroduces sharp pixels.
             factory = compositor.CreateEffectFactory(
-                GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop")), GlassEffectGraph.Properties);
+                GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop"), new W.CompositionEffectSourceParameter("BaseBackdrop")),
+                GlassEffectGraph.Properties.Concat(["BaseBlur.BlurAmount"]));
+            stage = "effect brush";
             effect = factory.CreateBrush();
             effect.SetSourceParameter("Backdrop", source);
+            effect.SetSourceParameter("BaseBackdrop", source);
             output.Source = effect;
             RenderingMode = "Native system backdrop · shared glass graph";
+            stage = "material parameters";
             Apply(material);
         }
         catch (Exception exception) when (exception is COMException or ArgumentException)
         {
             fallback = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(230, 35, 45, 62));
             output.Source = fallback;
-            RenderingMode = $"Desktop solid fallback (0x{exception.HResult:X8})";
+            RenderingMode = $"Desktop solid fallback: {stage} (0x{exception.HResult:X8})";
+            System.Diagnostics.Debug.WriteLine(exception);
         }
         target.SystemBackdrop = output;
         RenderingModeChanged?.Invoke(this, EventArgs.Empty);
@@ -68,6 +77,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         material = RefractionLayer.ForNativeBackend(value);
         if (effect is null) return;
         foreach (var (name, scalar) in GlassEffectGraph.Scalars(material)) effect.Properties.InsertScalar(name, scalar);
+        effect.Properties.InsertScalar("BaseBlur.BlurAmount", (float)material.BlurAmount);
         effect.Properties.InsertColor("Tint.Color", GlassEffectGraph.Tint(material));
     }
 

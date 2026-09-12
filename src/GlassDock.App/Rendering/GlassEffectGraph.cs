@@ -12,31 +12,38 @@ internal static class GlassEffectGraph
         ["Blur.BlurAmount", "Color.Saturation", "Light.Exposure", "Tint.Color",
          "Material.Source1Amount", "Material.Source2Amount"];
 
-    public static IGraphicsEffect Create(IGraphicsEffectSource source) => new ArithmeticCompositeEffect
+    public static IGraphicsEffect Create(IGraphicsEffectSource source, IGraphicsEffectSource? blurredBaseSource = null)
     {
-        Name = "Material", Source1 = source,
-        Source2 = new CompositeEffect
+        var blurred = new GaussianBlurEffect
         {
-            Mode = Microsoft.Graphics.Canvas.CanvasComposite.SourceOver,
-            Sources =
+            Name = "Blur", BlurAmount = 28, BorderMode = EffectBorderMode.Hard, Source = source
+        };
+        return new ArithmeticCompositeEffect
+        {
+            // Desktop translucency must not blend sharp desktop pixels back over the blur.
+            Name = "Material", Source1 = blurredBaseSource is not null
+                ? new GaussianBlurEffect { Name = "BaseBlur", BlurAmount = 28, BorderMode = EffectBorderMode.Hard, Source = blurredBaseSource }
+                : source,
+            Source2 = new CompositeEffect
             {
-                new ExposureEffect
+                Mode = Microsoft.Graphics.Canvas.CanvasComposite.SourceOver,
+                Sources =
                 {
-                    Name = "Light",
-                    Source = new SaturationEffect
+                    new ExposureEffect
                     {
-                        Name = "Color",
-                        Source = new GaussianBlurEffect
+                        Name = "Light",
+                        Source = new SaturationEffect
                         {
-                            Name = "Blur", BlurAmount = 28, BorderMode = EffectBorderMode.Hard, Source = source
+                            Name = "Color",
+                            Source = blurred
                         }
-                    }
-                },
-                new ColorSourceEffect { Name = "Tint", Color = Color.FromArgb(26, 220, 234, 255) }
-            }
-        },
-        MultiplyAmount = 0, Offset = 0, Source1Amount = .12f, Source2Amount = .88f
-    };
+                    },
+                    new ColorSourceEffect { Name = "Tint", Color = Color.FromArgb(26, 220, 234, 255) }
+                }
+            },
+            MultiplyAmount = 0, Offset = 0, Source1Amount = .12f, Source2Amount = .88f
+        };
+    }
 
     public static IEnumerable<(string Name, float Value)> Scalars(GlassMaterial material)
     {

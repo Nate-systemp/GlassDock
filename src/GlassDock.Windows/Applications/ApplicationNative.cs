@@ -142,5 +142,3 @@ internal static class ApplicationNative
         int GetImage([In, MarshalAs(UnmanagedType.Struct)] SIZE size, [In] SIIGBF flags, [Out] out nint bitmap);
     }
 }
-
-

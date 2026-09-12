@@ -18,9 +18,16 @@ internal sealed class WindowsApplicationIconService
         if (cache.TryGetValue(key, out var cached)) return cached;
 
         // 1. High-resolution Shell item image factory (supports PIDLs, shortcuts, UWP shell:AppsFolder)
-        var image = FromImageFactory(suppliedPidl, parsing, TargetIconSize)
-                    ?? FromImageFactory(suppliedPidl, parsing, MediumIconSize)
-                    ?? FromImageFactory(suppliedPidl, parsing, FallbackIconSize);
+        ApplicationIcon? image = null;
+        foreach (var requestedSize in new[] { TargetIconSize, MediumIconSize, FallbackIconSize })
+        {
+            var candidate = FromImageFactory(suppliedPidl, parsing, requestedSize);
+            if (candidate is not null && (image is null ||
+                Math.Min(candidate.Width, candidate.Height) > Math.Min(image.Width, image.Height))) image = candidate;
+            // A successful small result must not prevent trying another native Shell size.
+            // 256px covers the padded tile at 1.24x hover through 400% DPI without enlargement.
+            if (image is not null && Math.Min(image.Width, image.Height) >= TargetIconSize) break;
+        }
 
         // 2. If it's a .lnk shortcut and image is null or small, resolve link target executable
         if (image is null && !string.IsNullOrWhiteSpace(parsing) &&
@@ -86,8 +93,8 @@ internal sealed class WindowsApplicationIconService
         }
 
         // 3. Window handle fallback (WM_GETICON big/small or class icon)
-        ApplicationNative.SendMessageTimeout(window, 0x7F, 2 /* ICON_BIG */, 0, 2, 75, out var icon);
-        if (icon == 0) ApplicationNative.SendMessageTimeout(window, 0x7F, 1 /* ICON_SMALL2 */, 0, 2, 75, out icon);
+        ApplicationNative.SendMessageTimeout(window, 0x7F, 1 /* ICON_BIG */, 0, 2, 75, out var icon);
+        if (icon == 0) ApplicationNative.SendMessageTimeout(window, 0x7F, 2 /* ICON_SMALL2 */, 0, 2, 75, out icon);
         if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -14 /* GCLP_HICON */);
         if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -34 /* GCLP_HICONSM */);
         var image = icon == 0 ? null : FromHIcon(icon);
@@ -210,7 +217,7 @@ internal sealed class WindowsApplicationIconService
         {
             if (iconInfo.hbmColor != 0)
             {
-                var colorIcon = FromHBitmap(iconInfo.hbmColor);
+                var colorIcon = FromHBitmap(iconInfo.hbmColor, preserveMissingAlpha: true);
                 if (colorIcon is not null)
                 {
                     // Check if color bitmap already had genuine alpha values
@@ -218,7 +225,7 @@ internal sealed class WindowsApplicationIconService
                     for (var i = 3; i < colorIcon.Pixels.Length; i += 4)
                     {
                         var a = colorIcon.Pixels[i];
-                        if (a > 0 && a < 255) { hasRealAlpha = true; break; }
+                        if (a != 0) { hasRealAlpha = true; break; }
                     }
 
                     if (hasRealAlpha) return colorIcon;
@@ -303,13 +310,13 @@ internal sealed class WindowsApplicationIconService
         }
     }
 
-    private static ApplicationIcon? FromHBitmap(nint bitmap)
+    private static ApplicationIcon? FromHBitmap(nint bitmap, bool preserveMissingAlpha = false)
     {
         if (bitmap == 0) return null;
         if (ApplicationNative.GetObject(bitmap, Marshal.SizeOf<ApplicationNative.BitmapObject>(), out var obj) == 0) return null;
         var width = obj.Width;
         var height = Math.Abs(obj.Height);
-        if (width <= 0 || height <= 0) return null;
+        if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return null;
 
         var dc = ApplicationNative.CreateCompatibleDC(0);
         if (dc == 0) return null;
@@ -319,12 +326,12 @@ internal sealed class WindowsApplicationIconService
             {
                 Size = 40,
                 Width = width,
-                Height = height, // GetDIBits requires positive height
+                Height = height, // Positive height returns bottom-up scan lines.
                 Planes = 1,
                 Bits = 32
             };
             var pixels = new byte[width * height * 4];
-            if (ApplicationNative.GetDIBits(dc, bitmap, 0, (uint)height, pixels, ref info, 0) == 0) return null;
+            if (ApplicationNative.GetDIBits(dc, bitmap, 0, (uint)height, pixels, ref info, 0) != height) return null;
 
             // GetDIBits with positive height fills scan lines bottom-to-top.
             // Flip rows vertically into top-to-bottom order expected by UI frameworks.
@@ -343,11 +350,9 @@ internal sealed class WindowsApplicationIconService
 
             if (!hasAlpha)
             {
-                // If completely missing alpha channel, assign opaque alpha to all non-black pixels
-                for (var i = 0; i < topDown.Length; i += 4)
-                {
-                    if ((topDown[i] | topDown[i + 1] | topDown[i + 2]) != 0) topDown[i + 3] = 255;
-                }
+                // HICON transparency must come from its mask, never from RGB == black.
+                // A Shell bitmap without alpha falls back to the mask-aware HICON path.
+                if (!preserveMissingAlpha) return null;
             }
             else
             {
@@ -356,7 +361,8 @@ internal sealed class WindowsApplicationIconService
                 for (var i = 0; i < topDown.Length; i += 4)
                 {
                     var a = topDown[i + 3];
-                    if (topDown[i] > a || topDown[i + 1] > a || topDown[i + 2] > a)
+                    if (a == 0) { topDown[i] = topDown[i + 1] = topDown[i + 2] = 0; continue; }
+                    if (a < 255 && (topDown[i] > a || topDown[i + 1] > a || topDown[i + 2] > a))
                     {
                         isStraight = true;
                         break;

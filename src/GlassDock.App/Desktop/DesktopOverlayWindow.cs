@@ -1,10 +1,8 @@
 using System.Numerics;
 using System.Collections.ObjectModel;
-using System.Runtime.InteropServices.WindowsRuntime;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
 using GlassDock.Windows.Applications;
-using Microsoft.UI.Xaml.Media.Imaging;
 using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Desktop;
@@ -166,57 +164,63 @@ public sealed class DesktopOverlayWindow : Window
             UpdateBackdropBounds();
         }
     }
+private double CalculateTargetDockWidth()
+{
+    var count = VisibleDockApplications.Count;
 
-    private double CalculateTargetDockWidth()
-    {
-        var count = VisibleDockApplications.Count;
-        if (count == 0) return 120;
-        const double buttonWidth = 48;
-        const double spacing = 6;
-        const double horizontalPadding = 24;
-        var target = count * buttonWidth + (count - 1) * spacing + horizontalPadding;
-        return Math.Clamp(target, 120, 600);
-    }
+    if (count == 0)
+        return 100;
 
-    private Button CreateApplicationButton(DockApplicationItem item)
+    const double buttonWidth = 40;
+    const double spacing = 4;
+    const double horizontalPadding = 28;
+
+    var target =
+        count * buttonWidth +
+        (count - 1) * spacing +
+        horizontalPadding;
+
+    return Math.Clamp(target, 100, 560);
+}
+
+private Button CreateApplicationButton(DockApplicationItem item)
+{
+    var image = new AdaptiveAppIcon(size: 28, maximumHoverScale: 1.24);
+
+    var running = new Border
     {
-        var image = new Image
-        {
-            Width = 40,
-            Height = 40,
-            Stretch = Stretch.Uniform,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var running = new Border
-        {
-            Width = 4,
-            Height = 3,
-            CornerRadius = new CornerRadius(1.5),
-            Background = new SolidColorBrush(Colors.White),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 1)
-        };
-        var content = new Grid
-        {
-            Width = 44,
-            Height = 48
-        };
-        content.Children.Add(image);
-        content.Children.Add(running);
-        var button = new Button
-        {
-            Width = 48,
-            Height = 52,
-            Padding = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Center,
-            CornerRadius = new CornerRadius(12),
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderBrush = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Content = content
-        };
+        Width = 4,
+        Height = 3,
+        CornerRadius = new CornerRadius(1.5),
+        Background = new SolidColorBrush(Colors.White),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Bottom,
+        Margin = new Thickness(0, 0, 0, 1)
+    };
+
+    var content = new Grid
+    {
+        Width = 40,
+        Height = 44
+    };
+
+    content.Children.Add(image);
+    content.Children.Add(running);
+
+    var button = new Button
+    {
+        Width = 40,
+        Height = 44,
+        Padding = new Thickness(0),
+        Margin = new Thickness(0),
+        VerticalAlignment = VerticalAlignment.Center,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        CornerRadius = new CornerRadius(10),
+        Background = new SolidColorBrush(Colors.Transparent),
+        BorderBrush = new SolidColorBrush(Colors.Transparent),
+        BorderThickness = new Thickness(0),
+        Content = content
+    };
         button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(32, 255, 255, 255));
         button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(56, 255, 255, 255));
         button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Colors.Transparent);
@@ -233,11 +237,7 @@ public sealed class DesktopOverlayWindow : Window
             running.Width = item.IsActive ? 10 : 4;
             if (ReferenceEquals(renderedIcon, item.Application.Icon)) return;
             renderedIcon = item.Application.Icon;
-            if (renderedIcon is null) { image.Source = null; return; }
-            var bitmap = new WriteableBitmap(renderedIcon.Width, renderedIcon.Height);
-            using (var pixels = bitmap.PixelBuffer.AsStream()) pixels.Write(renderedIcon.Pixels);
-            bitmap.Invalidate();
-            image.Source = bitmap;
+            image.SetIcon(renderedIcon);
         }
         Update();
         item.PropertyChanged += (_, _) => Update();
