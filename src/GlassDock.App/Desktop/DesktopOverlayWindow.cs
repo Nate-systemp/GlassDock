@@ -1,4 +1,10 @@
 using System.Numerics;
+using System.Collections.ObjectModel;
+using System.Runtime.InteropServices.WindowsRuntime;
+using GlassDock.App.ViewModels;
+using GlassDock.Core.Applications;
+using GlassDock.Windows.Applications;
+using Microsoft.UI.Xaml.Media.Imaging;
 using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Desktop;
@@ -39,6 +45,10 @@ public sealed class DesktopOverlayWindow : Window
         Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
     };
     private readonly DockStateMachine state = new();
+    private readonly IApplicationService applicationService = new WindowsApplicationService();
+    private readonly DockApplicationsViewModel applications;
+    private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
+    public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
     private readonly DesktopGlassBackdrop desktopBackdrop = new();
     private readonly WindowsOverlayManager windowManager;
     private readonly WindowsKeyboardService keyboard;
@@ -82,7 +92,9 @@ public sealed class DesktopOverlayWindow : Window
         surface.SizeChanged += (_, _) => UpdateBackdropBounds();
         root.SizeChanged += (_, _) => UpdateBackdropBounds();
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
-        CreateItems();
+        applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
+        applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
+        applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
         keyboard = new WindowsKeyboardService(hwnd);
         keyboard.HomeRequested += async (_, _) => await ToggleDockAsync();
@@ -96,6 +108,7 @@ public sealed class DesktopOverlayWindow : Window
             windowManager.SetInteractionRegion(false);
             state.Show();
             ApplyMaterial(false);
+            applicationService.Start();
             await StartTaskbarTestAsync(whileAppActive: true);
         };
         surface.RenderingModeChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
@@ -125,28 +138,72 @@ public sealed class DesktopOverlayWindow : Window
         menu.Items.Add(item);
     }
 
-    private void CreateItems()
+    private void SynchronizeItems()
     {
-        var items = new (string Name, string Glyph, uint Color)[]
+        var present = VisibleDockApplications.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var id in applicationButtons.Keys.Where(id => !present.Contains(id)).ToArray())
         {
-
-        };
-        foreach (var (name, glyph, color) in items)
-        {
-            var button = new Button
-            {
-                Width = 56, Height = 52, VerticalAlignment = VerticalAlignment.Center,
-                CornerRadius = new CornerRadius(14),
-                Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(215, (byte)(color >> 16), (byte)(color >> 8), (byte)color)),
-                Content = new FontIcon { Glyph = glyph, FontSize = 23, Foreground = new SolidColorBrush(Colors.White) }
-            };
-            AutomationProperties.SetName(button, $"{name} placeholder");
-            ToolTipService.SetToolTip(button, $"{name} · placeholder only");
-            button.PointerEntered += (_, _) => ScaleItem(button, 1.08f);
-            button.PointerExited += (_, _) => ScaleItem(button, 1);
-            button.Click += (_, _) => SetStatus($"{name} is a visual placeholder. No application was launched.");
-            icons.Children.Add(button);
+            icons.Children.Remove(applicationButtons[id]);
+            applicationButtons.Remove(id);
         }
+        for (var index = 0; index < VisibleDockApplications.Count; index++)
+        {
+            var item = VisibleDockApplications[index];
+            if (!applicationButtons.TryGetValue(item.Id, out var button))
+            {
+                button = CreateApplicationButton(item);
+                applicationButtons.Add(item.Id, button);
+            }
+            var previous = icons.Children.IndexOf(button);
+            if (previous == index) continue;
+            if (previous >= 0) icons.Children.RemoveAt(previous);
+            icons.Children.Insert(index, button);
+        }
+    }
+
+    private Button CreateApplicationButton(DockApplicationItem item)
+    {
+        var image = new Image { Width = 32, Height = 32, Stretch = Stretch.Uniform };
+        var running = new Border
+        {
+            Width = 4, Height = 3, CornerRadius = new CornerRadius(1.5),
+            Background = new SolidColorBrush(Colors.White),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom
+        };
+        var content = new Grid { Width = 40, Height = 42 };
+        content.Children.Add(image);
+        content.Children.Add(running);
+        var button = new Button
+        {
+            Width = 56, Height = 52, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
+            CornerRadius = new CornerRadius(14), Background = new SolidColorBrush(Colors.Transparent), Content = content
+        };
+        ApplicationIcon? renderedIcon = null;
+        void Update()
+        {
+            AutomationProperties.SetName(button, item.Name);
+            AutomationProperties.SetItemStatus(button, item.IsActive ? "Active" : item.IsRunning ? "Running" : "Pinned");
+            ToolTipService.SetToolTip(button, item.Name);
+            running.Visibility = item.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+            running.Opacity = item.IsActive ? 1 : 0.55;
+            running.Width = item.IsActive ? 10 : 4;
+            if (ReferenceEquals(renderedIcon, item.Application.Icon)) return;
+            renderedIcon = item.Application.Icon;
+            if (renderedIcon is null) { image.Source = null; return; }
+            var bitmap = new WriteableBitmap(renderedIcon.Width, renderedIcon.Height);
+            using (var pixels = bitmap.PixelBuffer.AsStream()) pixels.Write(renderedIcon.Pixels);
+            bitmap.Invalidate();
+            image.Source = bitmap;
+        }
+        Update();
+        item.PropertyChanged += (_, _) => Update();
+        button.PointerEntered += (_, _) => ScaleItem(button, 1.08f);
+        button.PointerExited += (_, _) => ScaleItem(button, 1);
+        button.Click += (_, _) =>
+        {
+            if (!applications.Activate(item)) SetStatus($"Windows could not launch or focus {item.Name}.");
+        };
+        return button;
     }
 
     private static void ScaleItem(FrameworkElement item, float scale)
@@ -356,6 +413,7 @@ public sealed class DesktopOverlayWindow : Window
     private async void OnClosed(object sender, WindowEventArgs e)
     {
         closing = true;
+        applications.Dispose();
         taskbarRevision++;
         state.Hide();
         collapseDelay?.Cancel();

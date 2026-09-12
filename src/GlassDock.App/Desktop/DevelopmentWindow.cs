@@ -41,7 +41,7 @@ internal sealed class DevelopmentWindow : Window
         panel.Children.Add(lab);
         panel.Children.Add(status);
         panel.Children.Add(rendering);
-        panel.Children.Add(new TextBlock { Text = "Bare Windows key toggles the dock; Windows-key shortcuts pass through. No applications are launched by dock items.",
+        panel.Children.Add(new TextBlock { Text = "Bare Windows key toggles the dock; Windows-key shortcuts pass through. Dock items launch pinned apps or focus existing windows.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var exit = new Button { Content = "Exit GlassDock" };
         exit.Click += (_, _) => dock.Close();
