@@ -343,9 +343,9 @@ private Button CreateApplicationButton(DockApplicationItem item)
     {
         var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
         {
-            BlurAmount = 24, Opacity = 0.78, CornerRadius = 12,
-            ShadowOpacity = 0.28, ShadowBlur = 24,
-            ShadowOffset = 6, EdgeHighlight = 0.22,
+            BlurAmount = 20, Opacity = 0.78, CornerRadius = 12,
+            ShadowOpacity = 0.28, ShadowBlur = 20,
+            ShadowOffset = 6, EdgeHighlight = 0,
             BorderOpacity = 0.18
         };
         surface.Apply(material);

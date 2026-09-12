@@ -38,7 +38,7 @@ internal static class GlassEffectGraph
                             Source = blurred
                         }
                     },
-                    new ColorSourceEffect { Name = "Tint", Color = Color.FromArgb(26, 220, 234, 255) }
+                    new ColorSourceEffect { Name = "Tint", Color = Color.FromArgb(4, 0, 0, 0) }
                 }
             },
             MultiplyAmount = 0, Offset = 0, Source1Amount = .12f, Source2Amount = .88f
