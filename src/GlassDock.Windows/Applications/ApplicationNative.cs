@@ -35,6 +35,8 @@ internal static class ApplicationNative
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] internal static extern bool ShellExecuteEx(ref ShellExecuteInfo info);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] internal static extern nuint SHGetFileInfo(nint pidl, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("user32.dll")] internal static extern bool DestroyIcon(nint icon);
+    [DllImport("user32.dll")] internal static extern bool GetIconInfo(nint hIcon, out IconInfo piconinfo);
+    [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool DrawIconEx(nint dc, int x, int y, nint icon, int width, int height, uint step, nint brush, uint flags);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] internal static extern int SHCreateItemFromParsingName([MarshalAs(UnmanagedType.LPWStr)] string path, nint pbc, in Guid riid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
     [DllImport("shell32.dll", PreserveSig = true)] internal static extern int SHCreateItemFromIDList(nint pidl, in Guid riid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
@@ -46,6 +48,15 @@ internal static class ApplicationNative
     [DllImport("gdi32.dll")] internal static extern nint CreateDIBSection(nint dc, ref BitmapInfo info, uint usage, out nint bits, nint section, uint offset);
     [DllImport("gdi32.dll")] internal static extern int GetDIBits(nint dc, nint bitmap, uint start, uint lines, [Out] byte[] bits, ref BitmapInfo info, uint usage);
     [DllImport("gdi32.dll")] internal static extern int GetObject(nint obj, int count, out BitmapObject info);
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct IconInfo
+    {
+        public bool fIcon;
+        public int xHotspot;
+        public int yHotspot;
+        public nint hbmMask;
+        public nint hbmColor;
+    }
     [StructLayout(LayoutKind.Sequential)] internal struct PropertyKey { public Guid Format; public uint Id; }
     [StructLayout(LayoutKind.Explicit, Size = 24)] internal struct PropVariant { [FieldOffset(0)] public ushort Type; [FieldOffset(8)] public nint Value; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] internal struct ShellFileInfo

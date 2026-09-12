@@ -8,7 +8,9 @@ namespace GlassDock.Windows.Applications;
 
 internal sealed class WindowsApplicationIconService
 {
-    private const int TargetIconSize = 96;
+    private const int TargetIconSize = 256;
+    private const int MediumIconSize = 128;
+    private const int FallbackIconSize = 96;
     private readonly Dictionary<string, ApplicationIcon> cache = new(StringComparer.Ordinal);
 
     internal ApplicationIcon? FromShell(string key, string parsing, nint suppliedPidl = 0)
@@ -16,9 +18,24 @@ internal sealed class WindowsApplicationIconService
         if (cache.TryGetValue(key, out var cached)) return cached;
 
         // 1. High-resolution Shell item image factory (supports PIDLs, shortcuts, UWP shell:AppsFolder)
-        var image = FromImageFactory(suppliedPidl, parsing, TargetIconSize);
+        var image = FromImageFactory(suppliedPidl, parsing, TargetIconSize)
+                    ?? FromImageFactory(suppliedPidl, parsing, MediumIconSize)
+                    ?? FromImageFactory(suppliedPidl, parsing, FallbackIconSize);
 
-        // 2. High-resolution executable/resource extraction
+        // 2. If it's a .lnk shortcut and image is null or small, resolve link target executable
+        if (image is null && !string.IsNullOrWhiteSpace(parsing) &&
+            parsing.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        {
+            var resolved = ShellApplicationMetadata.ResolveLink(parsing);
+            if (!string.IsNullOrWhiteSpace(resolved.Path) && File.Exists(resolved.Path))
+            {
+                image = FromImageFactory(0, resolved.Path, TargetIconSize)
+                        ?? FromImageFactory(0, resolved.Path, MediumIconSize)
+                        ?? FromExecutable(resolved.Path, TargetIconSize);
+            }
+        }
+
+        // 3. High-resolution executable/resource extraction
         if (image is null && !string.IsNullOrWhiteSpace(parsing) &&
             (parsing.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
              parsing.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) ||
@@ -27,7 +44,7 @@ internal sealed class WindowsApplicationIconService
             image = FromExecutable(parsing, TargetIconSize);
         }
 
-        // 3. Fallback to SHGetFileInfo
+        // 4. Fallback to SHGetFileInfo
         if (image is null)
         {
             var pidl = suppliedPidl;
@@ -38,7 +55,7 @@ internal sealed class WindowsApplicationIconService
                 {
                     try
                     {
-                        image = RenderIcon(info.Icon, TargetIconSize);
+                        image = FromHIcon(info.Icon);
                     }
                     finally { ApplicationNative.DestroyIcon(info.Icon); }
                 }
@@ -68,10 +85,12 @@ internal sealed class WindowsApplicationIconService
             if (exeIcon is not null) return exeIcon;
         }
 
-        // 3. Window handle fallback (WM_GETICON or class icon)
-        ApplicationNative.SendMessageTimeout(window, 0x7F, 1, 0, 2, 75, out var icon);
-        if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -14);
-        var image = icon == 0 ? null : RenderIcon(icon, TargetIconSize);
+        // 3. Window handle fallback (WM_GETICON big/small or class icon)
+        ApplicationNative.SendMessageTimeout(window, 0x7F, 2 /* ICON_BIG */, 0, 2, 75, out var icon);
+        if (icon == 0) ApplicationNative.SendMessageTimeout(window, 0x7F, 1 /* ICON_SMALL2 */, 0, 2, 75, out icon);
+        if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -14 /* GCLP_HICON */);
+        if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -34 /* GCLP_HICONSM */);
+        var image = icon == 0 ? null : FromHIcon(icon);
         if (image is not null) cache[key] = image;
         return image;
     }
@@ -111,6 +130,19 @@ internal sealed class WindowsApplicationIconService
                         ApplicationNative.DeleteObject(hbitmap);
                     }
                 }
+
+                // If BiggerSizeOk failed, try standard ResizeToFit
+                if (factory.GetImage(new ApplicationNative.SIZE(size, size), ApplicationNative.SIIGBF.IconOnly, out hbitmap) >= 0 && hbitmap != 0)
+                {
+                    try
+                    {
+                        return FromHBitmap(hbitmap);
+                    }
+                    finally
+                    {
+                        ApplicationNative.DeleteObject(hbitmap);
+                    }
+                }
             }
         }
         catch (Exception error) when (error is COMException or InvalidCastException or DllNotFoundException)
@@ -128,22 +160,39 @@ internal sealed class WindowsApplicationIconService
         if (!File.Exists(path)) return null;
         var icons = new nint[1];
         var ids = new uint[1];
-        if (ApplicationNative.PrivateExtractIcons(path, 0, 256, 256, icons, ids, 1, 0) > 0 && icons[0] != 0)
+
+        // Query 256x256 first for crisp high-DPI assets
+        if (ApplicationNative.PrivateExtractIcons(path, 0, size, size, icons, ids, 1, 0) > 0 && icons[0] != 0)
         {
             try
             {
-                return RenderIcon(icons[0], size);
+                return FromHIcon(icons[0]);
             }
             finally
             {
                 ApplicationNative.DestroyIcon(icons[0]);
             }
         }
-        if (ApplicationNative.PrivateExtractIcons(path, 0, size, size, icons, ids, 1, 0) > 0 && icons[0] != 0)
+
+        // Fallback to 128x128
+        if (size > MediumIconSize && ApplicationNative.PrivateExtractIcons(path, 0, MediumIconSize, MediumIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
         {
             try
             {
-                return RenderIcon(icons[0], size);
+                return FromHIcon(icons[0]);
+            }
+            finally
+            {
+                ApplicationNative.DestroyIcon(icons[0]);
+            }
+        }
+
+        // Fallback to 96x96
+        if (ApplicationNative.PrivateExtractIcons(path, 0, FallbackIconSize, FallbackIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
+        {
+            try
+            {
+                return FromHIcon(icons[0]);
             }
             finally
             {
@@ -151,6 +200,107 @@ internal sealed class WindowsApplicationIconService
             }
         }
         return null;
+    }
+
+    private static ApplicationIcon? FromHIcon(nint icon)
+    {
+        if (icon == 0) return null;
+        if (!ApplicationNative.GetIconInfo(icon, out var iconInfo)) return null;
+        try
+        {
+            if (iconInfo.hbmColor != 0)
+            {
+                var colorIcon = FromHBitmap(iconInfo.hbmColor);
+                if (colorIcon is not null)
+                {
+                    // Check if color bitmap already had genuine alpha values
+                    var hasRealAlpha = false;
+                    for (var i = 3; i < colorIcon.Pixels.Length; i += 4)
+                    {
+                        var a = colorIcon.Pixels[i];
+                        if (a > 0 && a < 255) { hasRealAlpha = true; break; }
+                    }
+
+                    if (hasRealAlpha) return colorIcon;
+
+                    // If color bitmap had no alpha variation, use 1-bit mask bitmap to accurately set transparency
+                    if (iconInfo.hbmMask != 0)
+                    {
+                        ApplyMask(colorIcon.Pixels, colorIcon.Width, colorIcon.Height, iconInfo.hbmMask);
+                    }
+                    return colorIcon;
+                }
+            }
+
+            // Fallback for monochrome icons
+            if (iconInfo.hbmMask != 0 && ApplicationNative.GetObject(iconInfo.hbmMask, Marshal.SizeOf<ApplicationNative.BitmapObject>(), out var maskObj) != 0)
+            {
+                var width = maskObj.Width;
+                var height = maskObj.Height / 2; // Monochrome icon masks have double height (AND mask + XOR mask)
+                if (width > 0 && height > 0)
+                {
+                    var pixels = new byte[width * height * 4];
+                    ApplyMask(pixels, width, height, iconInfo.hbmMask);
+                    return new ApplicationIcon(width, height, pixels);
+                }
+            }
+            return null;
+        }
+        finally
+        {
+            if (iconInfo.hbmColor != 0) ApplicationNative.DeleteObject(iconInfo.hbmColor);
+            if (iconInfo.hbmMask != 0) ApplicationNative.DeleteObject(iconInfo.hbmMask);
+        }
+    }
+
+    private static void ApplyMask(byte[] pixels, int width, int height, nint hbmMask)
+    {
+        var dc = ApplicationNative.CreateCompatibleDC(0);
+        if (dc == 0) return;
+        try
+        {
+            var maskInfo = new ApplicationNative.BitmapInfo
+            {
+                Size = 40,
+                Width = width,
+                Height = height,
+                Planes = 1,
+                Bits = 32
+            };
+            var maskPixels = new byte[width * height * 4];
+            if (ApplicationNative.GetDIBits(dc, hbmMask, 0, (uint)height, maskPixels, ref maskInfo, 0) != 0)
+            {
+                // Mask fills bottom-up. Flip vertically to match pixels
+                var stride = width * 4;
+                for (var y = 0; y < height; y++)
+                {
+                    var srcOffset = (height - 1 - y) * stride;
+                    var dstOffset = y * stride;
+                    for (var x = 0; x < width; x++)
+                    {
+                        var pIdx = dstOffset + x * 4;
+                        var mIdx = srcOffset + x * 4;
+                        // In GDI icon mask: white (0xFFFFFF) indicates transparent; black (0x000000) indicates opaque.
+                        var isTransparent = maskPixels[mIdx] != 0 || maskPixels[mIdx + 1] != 0 || maskPixels[mIdx + 2] != 0;
+                        if (isTransparent)
+                        {
+                            pixels[pIdx] = 0;
+                            pixels[pIdx + 1] = 0;
+                            pixels[pIdx + 2] = 0;
+                            pixels[pIdx + 3] = 0;
+                        }
+                        else
+                        {
+                            pixels[pIdx + 3] = 255;
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ApplicationNative.DeleteDC(dc);
+        }
     }
 
     private static ApplicationIcon? FromHBitmap(nint bitmap)
@@ -190,54 +340,52 @@ internal sealed class WindowsApplicationIconService
             {
                 if (topDown[i] != 0) { hasAlpha = true; break; }
             }
+
             if (!hasAlpha)
             {
+                // If completely missing alpha channel, assign opaque alpha to all non-black pixels
                 for (var i = 0; i < topDown.Length; i += 4)
                 {
                     if ((topDown[i] | topDown[i + 1] | topDown[i + 2]) != 0) topDown[i + 3] = 255;
+                }
+            }
+            else
+            {
+                // Verify if straight alpha needs premultiplication for WinUI 3 WriteableBitmap
+                var isStraight = false;
+                for (var i = 0; i < topDown.Length; i += 4)
+                {
+                    var a = topDown[i + 3];
+                    if (topDown[i] > a || topDown[i + 1] > a || topDown[i + 2] > a)
+                    {
+                        isStraight = true;
+                        break;
+                    }
+                }
+                if (isStraight)
+                {
+                    for (var i = 0; i < topDown.Length; i += 4)
+                    {
+                        var a = topDown[i + 3];
+                        if (a == 0)
+                        {
+                            topDown[i] = 0;
+                            topDown[i + 1] = 0;
+                            topDown[i + 2] = 0;
+                        }
+                        else if (a < 255)
+                        {
+                            topDown[i] = (byte)((topDown[i] * a + 127) / 255);
+                            topDown[i + 1] = (byte)((topDown[i + 1] * a + 127) / 255);
+                            topDown[i + 2] = (byte)((topDown[i + 2] * a + 127) / 255);
+                        }
+                    }
                 }
             }
             return new ApplicationIcon(width, height, topDown);
         }
         finally
         {
-            ApplicationNative.DeleteDC(dc);
-        }
-    }
-
-    private static ApplicationIcon? RenderIcon(nint icon, int size)
-    {
-        if (icon == 0) return null;
-        var dc = ApplicationNative.CreateCompatibleDC(0);
-        if (dc == 0) return null;
-        var info = new ApplicationNative.BitmapInfo { Size = 40, Width = size, Height = -size, Planes = 1, Bits = 32 };
-        var bitmap = ApplicationNative.CreateDIBSection(dc, ref info, 0, out var bits, 0, 0);
-        nint previous = 0;
-        try
-        {
-            if (bitmap == 0 || bits == 0) return null;
-            var pixels = new byte[size * size * 4];
-            previous = ApplicationNative.SelectObject(dc, bitmap);
-            if (!ApplicationNative.DrawIconEx(dc, 0, 0, icon, size, size, 0, 0, 3)) return null;
-            Marshal.Copy(bits, pixels, 0, pixels.Length);
-            var hasAlpha = false;
-            for (var i = 3; i < pixels.Length; i += 4)
-            {
-                if (pixels[i] != 0) { hasAlpha = true; break; }
-            }
-            if (!hasAlpha)
-            {
-                for (var i = 0; i < pixels.Length; i += 4)
-                {
-                    if ((pixels[i] | pixels[i + 1] | pixels[i + 2]) != 0) pixels[i + 3] = 255;
-                }
-            }
-            return new ApplicationIcon(size, size, pixels);
-        }
-        finally
-        {
-            if (previous != 0) ApplicationNative.SelectObject(dc, previous);
-            if (bitmap != 0) ApplicationNative.DeleteObject(bitmap);
             ApplicationNative.DeleteDC(dc);
         }
     }
