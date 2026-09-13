@@ -12,7 +12,8 @@ public sealed record ApplicationIdentity(string? AppUserModelId, string? Executa
 public sealed record ApplicationIcon(int Width, int Height, byte[] Pixels);
 public sealed record PinnedApplication(ApplicationIdentity Identity, string Name, string LaunchTarget, ApplicationIcon? Icon);
 public sealed record ApplicationWindow(ApplicationIdentity Identity, string Name, long Handle, int ProcessId,
-    long ProcessStartTicks, bool IsActive, ApplicationIcon? Icon);
+    long ProcessStartTicks, bool IsActive, ApplicationIcon? Icon, string Title = "", bool IsMinimized = false,
+    long LastActivatedTicks = 0);
 public sealed record DockApplication(string Id, ApplicationIdentity Identity, string Name, string? LaunchTarget,
     bool IsPinned, IReadOnlyList<ApplicationWindow> Windows, ApplicationIcon? Icon)
 {
@@ -27,4 +28,8 @@ public interface IApplicationService : IDisposable
     void Start();
     void RequestRefresh();
     bool LaunchOrActivate(DockApplication application);
+    bool Launch(DockApplication application);
+    bool ActivateWindow(ApplicationWindow window);
+    bool CloseWindow(ApplicationWindow window);
+    bool SetPinned(DockApplication application, bool pinned);
 }

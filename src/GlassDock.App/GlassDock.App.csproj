@@ -3,25 +3,44 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PlatformTarget>x64</PlatformTarget>
+
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />
     <ProjectReference Include="../GlassDock.Windows/GlassDock.Windows.csproj" />
     <ProjectReference Include="../GlassDock.Watchdog/GlassDock.Watchdog.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
-  <Target Name="CopyRecoveryHelper" AfterTargets="Build">
+
+  <Target Name="CopyRecoveryHelper" AfterTargets="Publish">
     <ItemGroup>
-      <RecoveryFiles Include="../GlassDock.Watchdog/bin/$(Configuration)/net10.0-windows10.0.26100.0/*" />
+      <RecoveryFiles Include="../GlassDock.Watchdog/bin/$(Configuration)/net10.0-windows10.0.26100.0/$(RuntimeIdentifier)/**/*" />
     </ItemGroup>
-    <Copy SourceFiles="@(RecoveryFiles)" DestinationFolder="$(OutDir)Recovery" SkipUnchangedFiles="true" />
+
+    <Copy
+      SourceFiles="@(RecoveryFiles)"
+      DestinationFiles="@(RecoveryFiles->'$(PublishDir)Recovery/%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="'@(RecoveryFiles)' != ''" />
+  </Target>
+
+  <Target Name="CopyAppPriToPublish" AfterTargets="Publish">
+    <Copy
+      SourceFiles="$(TargetDir)GlassDock.App.pri"
+      DestinationFiles="$(PublishDir)GlassDock.App.pri"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(TargetDir)GlassDock.App.pri')" />
   </Target>
 </Project>

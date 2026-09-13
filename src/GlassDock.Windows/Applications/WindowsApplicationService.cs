@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -10,6 +11,9 @@ namespace GlassDock.Windows.Applications;
 public sealed class WindowsApplicationService : IApplicationService
 {
     private readonly AutoResetEvent refresh = new(false);
+    private readonly ConcurrentDictionary<nint, long> activationTimes = new();
+    private readonly WindowsApplicationLauncher launcher = new();
+    private readonly DockPinStore pinStore = new();
     private readonly NativeMethods.WinEventProc callback;
     private readonly List<nint> hooks = [];
     private Thread? worker;
@@ -17,8 +21,10 @@ public sealed class WindowsApplicationService : IApplicationService
     private IReadOnlyList<PinnedApplication> currentPins = Array.Empty<PinnedApplication>();
     public event EventHandler<ApplicationSnapshot>? SnapshotChanged;
 
-    public WindowsApplicationService() => callback = (_, eventId, _, objectId, childId, _, _) =>
+    public WindowsApplicationService() => callback = (_, eventId, window, objectId, childId, _, _) =>
     {
+        if (eventId == 3) activationTimes[window] = Stopwatch.GetTimestamp();
+        if (eventId == 0x8001 && objectId == 0) activationTimes.TryRemove(window, out _);
         if (eventId == 3 || (objectId == 0 && childId == 0)) RequestRefresh();
     };
 
@@ -59,7 +65,7 @@ public sealed class WindowsApplicationService : IApplicationService
                     {
                         try
                         {
-                            pins = ShellApplicationMetadata.ReadPinned(icons);
+                            pins = pinStore.Apply(ShellApplicationMetadata.ReadPinned(icons), icons);
                             Volatile.Write(ref currentPins, pins);
                             pinWarning = null;
                         }
@@ -87,7 +93,7 @@ public sealed class WindowsApplicationService : IApplicationService
         finally { refresh.Dispose(); }
     }
 
-    private static IReadOnlyList<ApplicationWindow> ReadWindows(WindowsApplicationIconService? icons)
+    private IReadOnlyList<ApplicationWindow> ReadWindows(WindowsApplicationIconService? icons)
     {
         var result = new List<ApplicationWindow>();
         using var currentProcess = Process.GetCurrentProcess();
@@ -150,7 +156,8 @@ public sealed class WindowsApplicationService : IApplicationService
                 var name = FileVersionInfo.GetVersionInfo(path).FileDescription;
                 if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(path);
                 result.Add(new(identity, name, window, (int)pid, process.StartTime.ToUniversalTime().Ticks, window == foreground,
-                    icons?.FromWindow(identity.Key, window, path, appId)));
+                    icons?.FromWindow(identity.Key, window, path, appId), title.ToString(), ApplicationNative.IsIconic(window),
+                    activationTimes.GetValueOrDefault(window)));
             }
             catch (Exception error) when (error is Win32Exception or InvalidOperationException or ArgumentException or IOException or COMException)
             { Debug.WriteLine($"Skipping unavailable application window: {error.HResult:X8}"); }
@@ -178,38 +185,59 @@ public sealed class WindowsApplicationService : IApplicationService
         else if (application.IsPinned) { RequestRefresh(); return false; }
         foreach (var existing in application.Windows)
         {
-            var window = (nint)existing.Handle;
-            if (!ApplicationNative.IsWindow(window)) continue;
-            try
-            {
-                // Frame-hosted applications have a different HWND owner; validate the recorded app process too.
-                using var process = Process.GetProcessById(existing.ProcessId);
-                if (process.StartTime.ToUniversalTime().Ticks != existing.ProcessStartTicks) continue;
-                ApplicationNative.GetWindowThreadProcessId(window, out var owner);
-                if (owner != existing.ProcessId && !Path.GetFileName(ProcessPath(owner)).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase)) continue;
-                if (ApplicationNative.IsIconic(window)) ApplicationNative.ShowWindowAsync(window, 9);
-                var focused = ApplicationNative.SetForegroundWindow(window);
-                RequestRefresh();
-                return focused; // Never launch a duplicate merely because Windows denied foreground focus.
-            }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception) { }
+            if (!IsEligible(existing)) continue;
+            return ActivateWindow(existing); // Never relaunch because Windows denied foreground focus.
         }
-        if (!application.IsPinned || application.LaunchTarget is null) { RequestRefresh(); return false; }
-        if (ApplicationNative.SHParseDisplayName(application.LaunchTarget, 0, out var pidl, 0, out _) < 0) return false;
-        try
-        {
-            var info = new ApplicationNative.ShellExecuteInfo
-            {
-                Size = (uint)Marshal.SizeOf<ApplicationNative.ShellExecuteInfo>(), Mask = 0x4 | 0x400,
-                IdList = pidl, Show = 1
-            }; // SEE_MASK_IDLIST | SEE_MASK_FLAG_NO_UI: launch the exact original pin.
-            var launched = ApplicationNative.ShellExecuteEx(ref info);
-            RequestRefresh();
-            return launched;
-        }
-        finally { Marshal.FreeCoTaskMem(pidl); }
+        return application.IsPinned && Launch(application);
     }
 
+    public bool Launch(DockApplication application)
+    {
+        var launched = launcher.Launch(application);
+        RequestRefresh();
+        return launched;
+    }
+
+    public bool SetPinned(DockApplication application, bool pinned)
+    {
+        var saved = pinStore.Set(application, pinned);
+        RequestRefresh();
+        return saved;
+    }
+
+    internal static bool IsEligible(ApplicationWindow existing)
+    {
+        var window = (nint)existing.Handle;
+        if (!ApplicationNative.IsWindow(window) || !ApplicationNative.IsWindowVisible(window)) return false;
+        try
+        {
+            using var process = Process.GetProcessById(existing.ProcessId);
+            if (process.StartTime.ToUniversalTime().Ticks != existing.ProcessStartTicks) return false;
+            ApplicationNative.GetWindowThreadProcessId(window, out var owner);
+            if (owner != existing.ProcessId && !Path.GetFileName(ProcessPath(owner)).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase)) return false;
+            return ApplicationNative.DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) < 0 || cloaked == 0;
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception) { return false; }
+    }
+
+    public bool ActivateWindow(ApplicationWindow existing)
+    {
+        if (!IsEligible(existing)) { RequestRefresh(); return false; }
+        var window = (nint)existing.Handle;
+        if (ApplicationNative.IsIconic(window)) ApplicationNative.ShowWindowAsync(window, 9);
+        var focused = ApplicationNative.SetForegroundWindow(window);
+        RequestRefresh();
+        return focused;
+    }
+
+    public bool CloseWindow(ApplicationWindow existing)
+    {
+        if (!IsEligible(existing)) { RequestRefresh(); return false; }
+        // The application handles WM_CLOSE, including any unsaved-document confirmation.
+        var sent = NativeMethods.PostMessageW((nint)existing.Handle, 0x0010, 0, 0);
+        RequestRefresh();
+        return sent;
+    }
     public void Dispose()
     {
         if (stopping) return;

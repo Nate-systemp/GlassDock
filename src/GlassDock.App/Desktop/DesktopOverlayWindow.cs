@@ -45,6 +45,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly DockStateMachine state = new();
     private readonly IApplicationService applicationService = new WindowsApplicationService();
     private readonly DockApplicationsViewModel applications;
+    private readonly WindowPreviewCoordinator previews;
     private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
     private readonly DesktopGlassBackdrop desktopBackdrop = new();
@@ -91,6 +92,10 @@ public sealed class DesktopOverlayWindow : Window
         root.SizeChanged += (_, _) => UpdateBackdropBounds();
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
+        previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - 68);
+        previews.HoldChanged += (_, _) => { if (previews.HoldsDock) collapseDelay?.Cancel(); else ScheduleCollapse(); };
+        previews.ActionFailed += (_, message) => SetStatus(message);
+        AppWindow.Changed += (_, _) => previews.Reposition();
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
@@ -141,6 +146,7 @@ public sealed class DesktopOverlayWindow : Window
         var present = VisibleDockApplications.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var id in applicationButtons.Keys.Where(id => !present.Contains(id)).ToArray())
         {
+            previews.Detach(id);
             icons.Children.Remove(applicationButtons[id]);
             applicationButtons.Remove(id);
         }
@@ -231,7 +237,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         {
             AutomationProperties.SetName(button, item.Name);
             AutomationProperties.SetItemStatus(button, item.IsActive ? "Active" : item.IsRunning ? "Running" : "Pinned");
-            ToolTipService.SetToolTip(button, item.Name);
+            ToolTipService.SetToolTip(button, WindowPreviewCoordinator.CreateTooltip(item.Name));
             running.Visibility = item.IsRunning ? Visibility.Visible : Visibility.Collapsed;
             running.Opacity = item.IsActive ? 1 : 0.55;
             running.Width = item.IsActive ? 10 : 4;
@@ -255,6 +261,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         {
             if (!applications.Activate(item)) SetStatus($"Windows could not launch or focus {item.Name}.");
         };
+        previews.Attach(button, item);
         return button;
     }
 
@@ -308,6 +315,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
     private async Task CollapseDockAsync()
     {
+        previews.Hide();
         collapseDelay?.Cancel();
         if (closing || state.State is DockState.Hidden or DockState.Idle or DockState.Collapsing) return;
         var revision = state.Collapse();
@@ -331,7 +339,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         try
         {
             await Task.Delay(280, delay.Token);
-            if (menuOpen || closing) return;
+            if (menuOpen || closing || previews.HoldsDock) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             await CollapseDockAsync();
         }
@@ -364,6 +372,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         windowManager.SetInteractionRegion(state.State != DockState.Idle, BottomMargin);
         UpdateBackdropBounds();
         SetStatus($"Indicator bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
+        previews.Reposition();
     }
 
     public void ShowControls()
@@ -470,6 +479,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
     private async void OnClosed(object sender, WindowEventArgs e)
     {
         closing = true;
+        previews.Dispose();
         applications.Dispose();
         taskbarRevision++;
         state.Hide();

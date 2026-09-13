@@ -13,6 +13,7 @@ public sealed class DockApplicationsViewModel : IDisposable
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
     public string? Warning { get; private set; }
     public event EventHandler? WarningChanged;
+    public event EventHandler? SnapshotApplied;
 
     public DockApplicationsViewModel(IApplicationService service, DispatcherQueue dispatcher)
     {
@@ -25,12 +26,17 @@ public sealed class DockApplicationsViewModel : IDisposable
     {
         if (disposed) return;
         applications.Apply(snapshot);
+        SnapshotApplied?.Invoke(this, EventArgs.Empty);
         if (Warning == snapshot.Warning) return;
         Warning = snapshot.Warning;
         WarningChanged?.Invoke(this, EventArgs.Empty);
     });
 
     public bool Activate(DockApplicationItem item) => service.LaunchOrActivate(item.Application);
+    public bool Launch(DockApplicationItem item) => service.Launch(item.Application);
+    public bool ActivateWindow(ApplicationWindow window) => service.ActivateWindow(window);
+    public bool CloseWindow(ApplicationWindow window) => service.CloseWindow(window);
+    public bool SetPinned(DockApplicationItem item, bool pinned) => service.SetPinned(item.Application, pinned);
     public void Dispose()
     {
         disposed = true;
