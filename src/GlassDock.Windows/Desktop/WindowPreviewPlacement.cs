@@ -250,6 +250,23 @@ public sealed class WindowPreviewPlacement : IDisposable
         );
     }
 
+    public bool ContainsPointer(PreviewRect? clientRegion = null)
+    {
+        if (!GetCursorPos(out var point) || !GetWindowRect(window, out var bounds) ||
+            point.X < bounds.Left || point.X >= bounds.Right ||
+            point.Y < bounds.Top || point.Y >= bounds.Bottom) return false;
+        if (clientRegion is not { } region) return true;
+        var dpi = NativeMethods.GetDpiForWindow(window) / 96d;
+        if (dpi <= 0) dpi = 1;
+        var x = (point.X - bounds.Left) / dpi;
+        var y = (point.Y - bounds.Top) / dpi;
+        return x >= region.X && x < region.X + region.Width &&
+            y >= region.Y && y < region.Y + region.Height;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out NativeMethods.Point point);
+
     public void Dispose()
     {
         NativeMethods.RemoveWindowSubclass(

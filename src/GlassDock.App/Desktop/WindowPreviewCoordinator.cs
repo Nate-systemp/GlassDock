@@ -93,7 +93,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         preview.PointerArrived += (_, _) => { pointerOwner = preview; pending?.Cancel(); };
         preview.PointerDeparted += (_, _) =>
         {
-            preview?.Collapse();
+            WindowPreviewWindow.Trace("COORD DEPART");
             if (!ReferenceEquals(pointerOwner, preview)) return;
             pointerOwner = null; Leave();
         };
@@ -108,6 +108,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private async void Leave()
     {
+        WindowPreviewWindow.Trace("LEAVE scheduled");
         pending?.Cancel();
         var delay = new CancellationTokenSource(); pending = delay;
         try { await Task.Delay(400, delay.Token); if (pointerOwner is null) Hide(); }

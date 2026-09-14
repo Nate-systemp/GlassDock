@@ -61,14 +61,17 @@ internal sealed class WindowPreviewWindow : Window
         placement = new(hwnd, inspection);
         root.PointerEntered += (_, _) =>
         {
+            Trace("ROOT ENTER");
+            if (!placement.ContainsPointer()) return;
             PointerArrived?.Invoke(this, EventArgs.Empty);
             Expand();
         };
         root.PointerExited += (_, e) =>
         {
-            // Routed child exits are not exits from the preview surface.
             var point = e.GetCurrentPoint(root).Position;
-            if (point.X >= 0 && point.Y >= 0 && point.X < root.ActualWidth && point.Y < root.ActualHeight) return;
+            Trace($"ROOT EXIT point={point} inside={placement.ContainsPointer()} bounds={root.ActualWidth}x{root.ActualHeight} source={e.OriginalSource.GetType().Name}");
+            if (placement.ContainsPointer()) return;
+            Collapse();
             PointerDeparted?.Invoke(this, EventArgs.Empty);
         };
         root.KeyDown += (_, e) =>
@@ -84,10 +87,11 @@ internal sealed class WindowPreviewWindow : Window
             Rebuild(); progress = animationFrom = animationTo = 1; Draw();
         };
         animation = DispatcherQueue.CreateTimer();
-        animation.Interval = TimeSpan.FromMilliseconds(16);
+        animation.Interval = TimeSpan.FromMilliseconds(10);
         animation.Tick += (_, _) =>
         {
             var moving = Advance();
+            Trace($"TICK p={progress:F3} target={animationTo} hover={string.Join(',', cards.Select(c => c.Emphasis.ToString("F2")))} moving={moving}");
             Draw();
             if (!moving) animation.Stop();
         };
@@ -120,50 +124,92 @@ internal sealed class WindowPreviewWindow : Window
 
     private void StartTransition(double target)
     {
+        Trace($"TRANSITION p={progress:F3} target={target} enabled={new UISettings().AnimationsEnabled}");
         Advance();
         animationFrom = progress;
         animationTo = target;
         animationStarted = elapsed.Elapsed.TotalMilliseconds;
-        if (!new UISettings().AnimationsEnabled) { progress = animationFrom = target; Draw(); return; }
+        // This explicitly requested preview transformation remains visible, like dock expansion.
         animation.Start();
     }
 
-    private bool Advance()
-    {
-        var now = elapsed.Elapsed.TotalMilliseconds;
-        var t = Math.Clamp((now - animationStarted) / 210, 0, 1);
-        progress = Lerp(animationFrom, animationTo, Ease(t));
-        var moving = t < 1 && animationFrom != animationTo;
-        foreach (var card in cards)
-        {
-            var hover = Math.Clamp((now - card.HoverStarted) / 160, 0, 1);
-            card.Emphasis = Lerp(card.EmphasisFrom, card.EmphasisTo, Ease(hover));
-            card.Dimming = Lerp(card.DimmingFrom, card.DimmingTo, Ease(hover));
-            moving |= hover < 1 && (card.EmphasisFrom != card.EmphasisTo || card.DimmingFrom != card.DimmingTo);
-        }
-        return moving;
-    }
+   
 
     private void AnimateSelection()
     {
         Advance();
-        var enabled = new UISettings().AnimationsEnabled;
         foreach (var card in cards)
         {
             var emphasis = session.SelectedWindow == card.Window.Handle ? 1d : 0;
             var dimming = session.SelectedWindow is not null && emphasis == 0 ? 1d : 0;
             if (card.EmphasisTo == emphasis && card.DimmingTo == dimming) continue;
-            card.EmphasisFrom = enabled ? card.Emphasis : emphasis;
-            card.DimmingFrom = enabled ? card.Dimming : dimming;
+            card.EmphasisFrom = card.Emphasis;
+            card.DimmingFrom = card.Dimming;
             card.EmphasisTo = emphasis; card.DimmingTo = dimming;
             card.HoverStarted = elapsed.Elapsed.TotalMilliseconds;
         }
-        if (enabled) animation.Start(); else { Advance(); Draw(); }
+        animation.Start();
+    }
+    private bool Advance()
+    {
+        var now = elapsed.Elapsed.TotalMilliseconds;
+
+        var t = Math.Clamp(
+            (now - animationStarted) / 260,
+            0,
+            1
+        );
+
+        progress = Lerp(
+            animationFrom,
+            animationTo,
+            Ease(t)
+        );
+
+        var moving =
+            t < 1 &&
+            animationFrom != animationTo;
+
+        foreach (var card in cards)
+        {
+            var hover = Math.Clamp(
+                (now - card.HoverStarted) / 160,
+                0,
+                1
+            );
+
+            card.Emphasis = Lerp(
+                card.EmphasisFrom,
+                card.EmphasisTo,
+                Ease(hover)
+            );
+
+            card.Dimming = Lerp(
+                card.DimmingFrom,
+                card.DimmingTo,
+                Ease(hover)
+            );
+
+            moving |=
+                hover < 1 &&
+                (
+                    card.EmphasisFrom != card.EmphasisTo ||
+                    card.DimmingFrom != card.DimmingTo
+                );
+        }
+
+        return moving;
     }
 
-    private static double Ease(double t) => 1 - Math.Pow(1 - t, 3);
-    private static double Lerp(double from, double to, double amount) => from + (to - from) * amount;
+        private static double Ease(double t)
+            => t * t * (3 - 2 * t);
 
+        private static double Lerp(
+            double from,
+            double to,
+            double amount
+        )
+            => from + (to - from) * amount;
     public void Refresh(double anchor, double top)
     {
         anchorX = anchor; dockTop = top;
@@ -179,6 +225,7 @@ internal sealed class WindowPreviewWindow : Window
 
     private void Rebuild()
     {
+        Trace("REBUILD");
         var previous = cards.ToDictionary(card => (card.Window.Handle, card.Window.ProcessId, card.Window.ProcessStartTicks));
         ClearCards();
         var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
@@ -212,10 +259,14 @@ internal sealed class WindowPreviewWindow : Window
             button.VerticalContentAlignment = VerticalAlignment.Stretch;
             AutomationProperties.SetName(button, title.Text);
             AutomationProperties.SetItemStatus(button, window.IsMinimized ? "Minimized" : window.IsActive ? "Active" : "Running");
-            button.PointerEntered += (_, _) => { Expand(); session.Select(window.Handle); AnimateSelection(); };
+            button.PointerEntered += (_, _) =>
+            {
+                if (!ContainsPointer(button)) return;
+                Expand(); session.Select(window.Handle); AnimateSelection();
+            };
             button.PointerExited += (_, _) =>
             {
-                if (session.SelectedWindow != window.Handle) return;
+                if (ContainsPointer(button) || session.SelectedWindow != window.Handle) return;
                 session.Select(null); AnimateSelection();
             };
             button.Click += (_, _) => WindowChosen?.Invoke(this, window);
@@ -276,6 +327,9 @@ internal sealed class WindowPreviewWindow : Window
         Canvas.SetZIndex(more, 30);
     }
 
+    private bool ContainsPointer(Button button) => placement.ContainsPointer(new PreviewRect(
+        Canvas.GetLeft(button), Canvas.GetTop(button), button.ActualWidth, button.ActualHeight));
+
     private void ClearCards()
     {
         foreach (var card in cards) card.Thumbnail.Dispose();
@@ -284,8 +338,13 @@ internal sealed class WindowPreviewWindow : Window
 
     public void Hide()
     {
+        Trace("HIDE");
         animation.Stop(); placement.Hide(); ClearCards();
     }
 
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) => new(global::Windows.UI.Color.FromArgb(a, r, g, b));
+    internal static void Trace(string message)
+    {
+        System.IO.File.AppendAllText(@"C:\Dev\GlassDock\artifacts\preview-runtime.trace", $"{DateTime.Now:HH:mm:ss.fff} {message}\n");
+    }
 }
