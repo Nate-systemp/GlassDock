@@ -5,6 +5,26 @@ namespace GlassDock.Windows.Interop;
 
 internal static class NativeMethods
 {
+    [DllImport("user32.dll")] internal static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] internal static extern bool ValidateRect(nint window, nint rectangle);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern nint CreateWindowExW(uint extendedStyle, string className, string title, uint style,
+        int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyWindow(nint window);
+    [DllImport("user32.dll")] internal static extern nint SetThreadDpiAwarenessContext(nint context);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsIconic(nint window);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetLayeredWindowAttributes(nint window, uint colorKey, byte alpha, uint flags);
+    [DllImport("user32.dll")] internal static extern nuint SetTimer(nint window, nuint id, uint milliseconds, nint callback);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool KillTimer(nint window, nuint id);
+    [DllImport("gdi32.dll")] internal static extern int CombineRgn(nint destination, nint first, nint second, int mode);
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    internal static extern int DwmGetFrameBounds(nint window, uint attribute, out Rect bounds, int size);
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    internal static extern int DwmGetWindowAttribute(nint window, uint attribute, out int value, int size);
     [StructLayout(LayoutKind.Sequential)] internal struct AppBarData
     {
         public uint Size; public nint Window; public uint CallbackMessage; public uint Edge; public Rect Rectangle; public nint Parameter;
@@ -17,6 +37,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] internal static extern bool PostMessageW(nint hwnd, uint message, nuint wParam, nint lParam);
     [DllImport("user32.dll")] internal static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetWindowRect(nint hwnd, out Rect rect);
     [StructLayout(LayoutKind.Sequential)] internal struct KeyboardData
     {
         public uint Key, ScanCode, Flags, Time; public nuint ExtraInfo;

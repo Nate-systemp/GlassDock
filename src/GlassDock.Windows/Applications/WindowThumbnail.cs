@@ -47,4 +47,26 @@ public sealed class WindowThumbnail : IDisposable
         if (thumbnail != 0) DwmUnregisterThumbnail(thumbnail);
         thumbnail = 0;
     }
+
+    /// <summary>Full-size desktop mirror, trimming only the source's invisible resize margins.</summary>
+    public bool UpdateDesktop(PreviewRect frame, PreviewRect windowBounds)
+    {
+        if (thumbnail == 0 || windowBounds.Width <= 0 || windowBounds.Height <= 0 ||
+            DwmQueryThumbnailSourceSize(thumbnail, out var size) < 0 || size.Width <= 0 || size.Height <= 0) return false;
+        var source = new NativeMethods.Rect { Right = size.Width, Bottom = size.Height };
+        if (size.Width != (int)frame.Width || size.Height != (int)frame.Height)
+        {
+            source.Left = (int)Math.Clamp(Math.Round((frame.X - windowBounds.X) * size.Width / windowBounds.Width), 0, size.Width);
+            source.Top = (int)Math.Clamp(Math.Round((frame.Y - windowBounds.Y) * size.Height / windowBounds.Height), 0, size.Height);
+            source.Right = (int)Math.Clamp(Math.Round((frame.X + frame.Width - windowBounds.X) * size.Width / windowBounds.Width), source.Left, size.Width);
+            source.Bottom = (int)Math.Clamp(Math.Round((frame.Y + frame.Height - windowBounds.Y) * size.Height / windowBounds.Height), source.Top, size.Height);
+        }
+        if (source.Right <= source.Left || source.Bottom <= source.Top) return false;
+        var properties = new Properties
+        {
+            Flags = 1 | 2 | 4 | 8 | 16, Opacity = 255, Visible = 1, Source = source,
+            Destination = new() { Right = (int)frame.Width, Bottom = (int)frame.Height }
+        };
+        return DwmUpdateThumbnailProperties(thumbnail, ref properties) >= 0;
+    }
 }

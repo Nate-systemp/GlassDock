@@ -21,6 +21,8 @@ internal sealed class WindowPreviewWindow : Window
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly WindowPreviewPlacement placement;
     private readonly WindowPreviewSession session;
+    private readonly DesktopWindowHighlight desktopHighlight = new();
+    private readonly DesktopWindowFocus desktopFocus;
     private readonly nint hwnd;
     private readonly nint dock;
     private readonly List<Card> cards = [];
@@ -68,6 +70,8 @@ internal sealed class WindowPreviewWindow : Window
         presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        desktopFocus = new(hwnd);
+        desktopFocus.Dismissed += (_, _) => desktopHighlight.Hide();
         placement = new(hwnd, inspection);
         root.PointerEntered += (_, _) =>
         {
@@ -105,7 +109,7 @@ internal sealed class WindowPreviewWindow : Window
             Draw();
             if (!moving) animation.Stop();
         };
-        Closed += (_, _) => { animation.Stop(); ClearCards(); placement.Dispose(); };
+        Closed += (_, _) => { animation.Stop(); desktopFocus.Dispose(); desktopHighlight.Dispose(); ClearCards(); placement.Dispose(); };
     }
 
     public void Show(double anchor, double top)
@@ -126,6 +130,8 @@ internal sealed class WindowPreviewWindow : Window
 
     public void Collapse()
     {
+        desktopFocus.Hide();
+        desktopHighlight.Hide();
         if (session.State is not (WindowPreviewState.Expanded or WindowPreviewState.WindowHovered)) return;
         session.Collapse();
         StartTransition(0);
@@ -147,6 +153,15 @@ internal sealed class WindowPreviewWindow : Window
 
     private void AnimateSelection()
     {
+        var selectedWindow = session.Windows.FirstOrDefault(window => window.Handle == session.SelectedWindow);
+        if (selectedWindow is null)
+        {
+            desktopHighlight.Hide();
+            // Let the next card's enter event retarget the existing overlays in the same input turn.
+            DispatcherQueue.TryEnqueue(() => { if (session.SelectedWindow is null) desktopFocus.Hide(); });
+        }
+        else if (desktopFocus.Show(selectedWindow)) desktopHighlight.Show((nint)selectedWindow.Handle);
+        else desktopHighlight.Hide();
         Advance();
         foreach (var card in cards)
         {
@@ -335,14 +350,16 @@ internal sealed class WindowPreviewWindow : Window
 
     private void ClearCards()
     {
+        desktopHighlight.Hide();
         foreach (var card in cards) card.Thumbnail.Dispose();
         cards.Clear(); root.Children.Clear();
     }
 
     public void Hide()
     {
+        desktopFocus.Hide();
         Trace("HIDE");
-        animation.Stop(); placement.Hide(); ClearCards();
+        desktopHighlight.Hide(); animation.Stop(); placement.Hide(); ClearCards();
     }
 
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b) => new(global::Windows.UI.Color.FromArgb(a, r, g, b));
