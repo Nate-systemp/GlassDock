@@ -149,17 +149,13 @@ internal sealed class WindowPreviewWindow : Window
         animation.Start();
     }
 
-   
+    private async Task HideDesktopFocusDelayed() { await Task.Delay(80); if (session.SelectedWindow is null) { desktopFocus.Hide(); desktopHighlight.Hide(); } }
 
     private void AnimateSelection()
     {
+        
         var selectedWindow = session.Windows.FirstOrDefault(window => window.Handle == session.SelectedWindow);
-        if (selectedWindow is null)
-        {
-            desktopHighlight.Hide();
-            // Let the next card's enter event retarget the existing overlays in the same input turn.
-            DispatcherQueue.TryEnqueue(() => { if (session.SelectedWindow is null) desktopFocus.Hide(); });
-        }
+        if (selectedWindow is null) _ = HideDesktopFocusDelayed();
         else if (desktopFocus.Show(selectedWindow)) desktopHighlight.Show((nint)selectedWindow.Handle);
         else desktopHighlight.Hide();
         Advance();
@@ -173,7 +169,9 @@ internal sealed class WindowPreviewWindow : Window
             card.EmphasisTo = emphasis; card.DimmingTo = dimming;
             card.HoverStarted = elapsed.Elapsed.TotalMilliseconds;
         }
+        
         animation.Start();
+        
     }
     private bool Advance()
     {
