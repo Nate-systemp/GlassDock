@@ -14,6 +14,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly Func<double> dockTop;
     private readonly nint dock;
     private readonly WindowPreviewSession session = new();
+    private readonly WindowFrameCache frameCache = new();
     private WindowPreviewWindow? preview;
     private readonly Dictionary<string, Button> buttons = [];
     private CancellationTokenSource? pending;
@@ -28,6 +29,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     {
         this.applications = applications; this.dockRoot = dockRoot; this.dock = dock; this.dockTop = dockTop;
         applications.SnapshotApplied += OnSnapshot;
+        TrackFrames();
     }
 
     public void Attach(Button button, DockApplicationItem item)
@@ -73,6 +75,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
             ToolTipService.SetToolTip(button, null);
             EnsurePreview();
             preview!.Show(Anchor(button), dockTop());
+            foreach (var window in item.Application.Windows) frameCache.Report(window, "preview-cards-shown");
         }
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException)
@@ -83,7 +86,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private void EnsurePreview()
     {
         if (preview is not null) return;
-        preview = new(dock, session);
+        preview = new(dock, session, frameCache);
         preview.Closed += (_, _) =>
         {
             if (ReferenceEquals(pointerOwner, preview)) pointerOwner = null;
@@ -100,9 +103,18 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         preview.WindowChosen += (_, window) =>
         {
             var selected = session.Activate(window.Handle);
+            frameCache.Report(window, "preview-click-before-activation");
             if (selected is not null && !applications.ActivateWindow(selected))
                 ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
+            frameCache.Report(window, "preview-click-activation-requested");
             Hide();
+        };
+        preview.WindowCloseRequested += (_, window) =>
+        {
+            // WM_CLOSE preserves the application's own save/confirmation handling.
+            // The service refreshes the snapshot; OnSnapshot rebuilds only after the HWND disappears.
+            if (!applications.CloseWindow(window))
+                ActionFailed?.Invoke(this, "That window is no longer available to close.");
         };
     }
 
@@ -120,12 +132,16 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private void OnSnapshot(object? sender, EventArgs args)
     {
+        TrackFrames();
         if (session.ApplicationId is not { } id) return;
         var item = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id);
         if (item is null || !item.IsRunning) { Hide(); return; }
         session.Refresh(item.Application.Windows);
         Reposition();
     }
+
+    private void TrackFrames() => frameCache.Track(
+        applications.VisibleDockApplications.SelectMany(item => item.Application.Windows));
 
     public void Reposition()
     {
@@ -203,6 +219,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         applications.SnapshotApplied -= OnSnapshot;
         pending?.Cancel();
         preview?.Close(); preview = null;
+        frameCache.Dispose();
         buttons.Clear();
     }
 
