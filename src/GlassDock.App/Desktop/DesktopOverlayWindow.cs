@@ -338,7 +338,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         collapseDelay = delay;
         try
         {
-            await Task.Delay(280, delay.Token);
+            await Task.Delay(650, delay.Token);
             if (menuOpen || closing || previews.HoldsDock) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             await CollapseDockAsync();

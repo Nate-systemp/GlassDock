@@ -35,22 +35,58 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
         // disables optional animations. Other UI animations retain their OS policy.
         if (expanded)
         {
-            // Diretso na papunta sa final size, walang medium stop
-            Add(indicator, "Opacity", indicatorOpacity, (150, indicatorOpacity), (300, 0));
-            Add(surface, "Width", width, (420, targetWidth));
-            Add(surface, "Height", height, (420, 68));
-            Add(surface, "Opacity", surfaceOpacity, (140, surfaceOpacity), (440, 1));
-            Add(icons, "Opacity", opacity, (360, opacity), (680, 1));
+            Add(indicator, "Opacity",
+                indicatorOpacity,
+                (100, indicatorOpacity),
+                (220, 0));
+
+            Add(surface, "Width",
+                width,
+                (320, targetWidth));
+
+            Add(surface, "Height",
+                height,
+                (320, 68));
+
+            Add(surface, "Opacity",
+                surfaceOpacity,
+                (90, surfaceOpacity),
+                (320, 1));
+
+            Add(icons, "Opacity",
+                opacity,
+                (220, opacity),
+                (380, 1));
         }
         else
         {
-            // Start contracting before the icons fade; finish as the plain indicator.
-            Add(surface, "Width", width, (620, 120));
-            Add(surface, "Height", height, (500, 5));
-            Add(icons, "Opacity", opacity, (60, opacity), (260, 0));
-            Add(surface, "Opacity", surfaceOpacity, (340, surfaceOpacity), (580, 0));
-            Add(indicator, "Width", indicatorWidth, (340, indicatorWidth), (620, 120));
-            Add(indicator, "Opacity", indicatorOpacity, (400, indicatorOpacity), (620, 1));
+            Add(surface, "Width",
+                width,
+                (300, 120));
+
+            Add(surface, "Height",
+                height,
+                (280, 5));
+
+            Add(icons, "Opacity",
+                opacity,
+                (60, opacity),
+                (220, 0));
+
+            Add(surface, "Opacity",
+                surfaceOpacity,
+                (180, surfaceOpacity),
+                (300, 0));
+
+            Add(indicator, "Width",
+                indicatorWidth,
+                (180, indicatorWidth),
+                (300, 120));
+
+            Add(indicator, "Opacity",
+                indicatorOpacity,
+                (200, indicatorOpacity),
+                (300, 1));
         }
         var pending = new TaskCompletionSource<bool>();
         completion = pending;
@@ -77,7 +113,7 @@ internal sealed class DockAnimationController(GlassSurface surface, FrameworkEle
             animation.KeyFrames.Add(new EasingDoubleKeyFrame
             {
                 KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(milliseconds)), Value = value,
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             });
         }
         Storyboard.SetTarget(animation, target);

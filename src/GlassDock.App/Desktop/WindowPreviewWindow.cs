@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Applications;
 using GlassDock.Core.Materials;
@@ -50,7 +51,16 @@ internal sealed class WindowPreviewWindow : Window
         Title = "GlassDock — Window previews";
         Content = root;
         SystemBackdrop = backdrop;
-        backdrop.Apply(GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with { BlurAmount = 20, Opacity = .78, CornerRadius = 12, EdgeHighlight = 0.08, BorderOpacity = 0.12 });
+        backdrop.Apply(
+        GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
+            {
+                BlurAmount = 8,
+                Opacity = .08,
+                CornerRadius = 12,
+                EdgeHighlight = 0,
+                BorderOpacity = 0.03
+            }
+        );
         var inspection = Environment.GetCommandLineArgs().Contains("--controls", StringComparer.OrdinalIgnoreCase);
         AppWindow.IsShownInSwitchers = inspection;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
@@ -233,24 +243,15 @@ internal sealed class WindowPreviewWindow : Window
         expanded = WindowPreviewLayout.Create(session.Windows.Count - page, area.Width / dpi - 24, area.Height / dpi - 24, true);
         foreach (var window in session.Windows.Skip(page).Take(expanded.Capacity).Reverse())
         {
-            var title = new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title,
-                FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 5, 10, 4),
-                VerticalAlignment = VerticalAlignment.Bottom, Foreground = Brush(240, 245, 247, 255)
-            };
-            var fallback = new TextBlock
-            {
-                Text = window.IsMinimized ? "Minimized window" : "Preview unavailable",
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12, Opacity = .75
-            };
-            var grid = new Grid();
-            grid.Children.Add(fallback); grid.Children.Add(title);
+            var title = new TextBlock { Text = string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Foreground = Brush(240, 245, 247, 255) };
+            var fallback = new TextBlock { Text = window.IsMinimized ? "Minimized window" : "Preview unavailable", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Opacity = .75 };
+            var appIcon = new AdaptiveAppIcon(size: 22, maximumHoverScale: 1.0); appIcon.SetIcon(window.Icon); appIcon.VerticalAlignment = VerticalAlignment.Center;
+            var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(10, 0, 10, 5), Height = 28, VerticalAlignment = VerticalAlignment.Bottom }; footer.Children.Add(appIcon); footer.Children.Add(title);
+            var grid = new Grid(); grid.Children.Add(fallback); grid.Children.Add(footer);
             var border = new Border
             {
                 CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1),
-                BorderBrush = Brush(45, 235, 243, 255), Background = Brush(30, 25, 30, 45), Child = grid
+                BorderBrush = Brush(55, 190, 200, 215), Background = Brush(55, 18, 21, 28), Child = grid
             };
             var button = new Button { Content = border, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Brush(0, 0, 0, 0) };
             foreach (var resource in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed" })
@@ -303,7 +304,9 @@ internal sealed class WindowPreviewWindow : Window
             var selected = session.SelectedWindow == card.Window.Handle;
             rect = new(rect.X - rect.Width * .02 * card.Emphasis, rect.Y - 4 * card.Emphasis,
                 rect.Width * (1 + .04 * card.Emphasis), rect.Height * (1 + .04 * card.Emphasis));
-            var opacity = (index == 0 ? 1 : .66 + .34 * progress) * (1 - .18 * card.Dimming * progress);
+            var opacity =
+            (index == 0 ? 1 : .66 + .34 * progress) *
+            (1 - .78 * card.Dimming * progress);
             if (index >= 3) opacity *= progress;
             var visible = progress > 0 || index < 3;
             card.Button.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;

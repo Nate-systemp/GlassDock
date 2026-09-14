@@ -64,12 +64,23 @@ public sealed class WindowsOverlayManager : IDisposable
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }
 
-    private void EnsureTopmost()
+   private void EnsureTopmost()
     {
-        if (NativeMethods.IsWindow(hwnd))
-            NativeMethods.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0010 | 0x0001 | 0x0002);
-    }
+        if (!NativeMethods.IsWindow(hwnd))
+            return;
 
+        NativeMethods.SetWindowPos(
+            hwnd,
+            -1, // HWND_TOPMOST
+            0,
+            0,
+            0,
+            0,
+            0x0001 | // SWP_NOSIZE
+            0x0002 | // SWP_NOMOVE
+            0x0010   // SWP_NOACTIVATE
+        );
+    }
     public void Dispose()
     {
         if (foregroundHook != 0) NativeMethods.UnhookWinEvent(foregroundHook);
@@ -80,14 +91,53 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public PixelRect Position(double margin)
     {
-        var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.Point(), 1);
-        var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
-        if (!NativeMethods.GetMonitorInfo(monitor, ref info)) throw new Win32Exception();
-        var screen = new PixelRect(info.Monitor.Left, info.Monitor.Top,
-            info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top);
-        var rect = DesktopPlacement.BottomCenter(screen, Width, Height, margin, Scale);
-        if (!NativeMethods.SetWindowPos(hwnd, -1, rect.X, rect.Y, rect.Width, rect.Height, 0x0010 | 0x0020 | 0x0040))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        var monitor = NativeMethods.MonitorFromPoint(
+            new NativeMethods.Point(),
+            1
+        );
+
+        var info = new NativeMethods.MonitorInfo
+        {
+            Size = Marshal.SizeOf<NativeMethods.MonitorInfo>()
+        };
+
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info))
+            throw new Win32Exception();
+
+        var screen = new PixelRect(
+            info.Monitor.Left,
+            info.Monitor.Top,
+            info.Monitor.Right - info.Monitor.Left,
+            info.Monitor.Bottom - info.Monitor.Top
+        );
+
+        var rect = DesktopPlacement.BottomCenter(
+            screen,
+            Width,
+            Height,
+            margin,
+            Scale
+        );
+
+        if (!NativeMethods.SetWindowPos(
+            hwnd,
+            -1, // HWND_TOPMOST
+            rect.X,
+            rect.Y,
+            rect.Width,
+            rect.Height,
+            0x0010 | // SWP_NOACTIVATE
+            0x0020 | // SWP_FRAMECHANGED
+            0x0040   // SWP_SHOWWINDOW
+        ))
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error()
+            );
+        }
+
+        EnsureTopmost();
+
         return rect;
     }
 
