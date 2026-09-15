@@ -8,10 +8,37 @@ namespace GlassDock.Windows.Applications;
 
 internal sealed class WindowsApplicationIconService
 {
-    private const int TargetIconSize = 256;
-    private const int MediumIconSize = 128;
-    private const int FallbackIconSize = 96;
-    private readonly Dictionary<string, ApplicationIcon> cache = new(StringComparer.Ordinal);
+    private readonly int targetIconSize;
+    private readonly int mediumIconSize;
+    private readonly int fallbackIconSize;
+    private readonly int cacheCapacity;
+    private readonly bool allowLargerIcons;
+
+    private readonly Dictionary<string, ApplicationIcon> cache =
+        new(StringComparer.Ordinal);
+
+    private readonly Queue<string> cacheOrder = new();
+
+    internal WindowsApplicationIconService(
+        int targetIconSize = 256,
+        int cacheCapacity = 128,
+        bool allowLargerIcons = true)
+    {
+        this.targetIconSize = Math.Clamp(targetIconSize, 32, 256);
+        this.cacheCapacity = Math.Clamp(cacheCapacity, 8, 256);
+        this.allowLargerIcons = allowLargerIcons;
+
+        if (this.targetIconSize >= 128)
+        {
+            mediumIconSize = 128;
+            fallbackIconSize = 96;
+        }
+        else
+        {
+            mediumIconSize = Math.Min(this.targetIconSize, 48);
+            fallbackIconSize = Math.Min(mediumIconSize, 32);
+        }
+    }
 
     internal ApplicationIcon? FromShell(string key, string parsing, nint suppliedPidl = 0)
     {
@@ -19,14 +46,14 @@ internal sealed class WindowsApplicationIconService
 
         // 1. High-resolution Shell item image factory (supports PIDLs, shortcuts, UWP shell:AppsFolder)
         ApplicationIcon? image = null;
-        foreach (var requestedSize in new[] { TargetIconSize, MediumIconSize, FallbackIconSize })
+        foreach (var requestedSize in new[] { targetIconSize, mediumIconSize, fallbackIconSize })
         {
-            var candidate = FromImageFactory(suppliedPidl, parsing, requestedSize);
+            var candidate = FromImageFactory(suppliedPidl, parsing, requestedSize, allowLargerIcons);
             if (candidate is not null && (image is null ||
                 Math.Min(candidate.Width, candidate.Height) > Math.Min(image.Width, image.Height))) image = candidate;
             // A successful small result must not prevent trying another native Shell size.
             // 256px covers the padded tile at 1.24x hover through 400% DPI without enlargement.
-            if (image is not null && Math.Min(image.Width, image.Height) >= TargetIconSize) break;
+            if (image is not null && Math.Min(image.Width, image.Height) >= targetIconSize) break;
         }
 
         // 2. If it's a .lnk shortcut and image is null or small, resolve link target executable
@@ -36,9 +63,9 @@ internal sealed class WindowsApplicationIconService
             var resolved = ShellApplicationMetadata.ResolveLink(parsing);
             if (!string.IsNullOrWhiteSpace(resolved.Path) && File.Exists(resolved.Path))
             {
-                image = FromImageFactory(0, resolved.Path, TargetIconSize)
-                        ?? FromImageFactory(0, resolved.Path, MediumIconSize)
-                        ?? FromExecutable(resolved.Path, TargetIconSize);
+                image = FromImageFactory(0, resolved.Path, targetIconSize, allowLargerIcons)
+                        ?? FromImageFactory(0, resolved.Path, mediumIconSize, allowLargerIcons)
+                        ?? FromExecutable(resolved.Path, targetIconSize);
             }
         }
 
@@ -48,7 +75,7 @@ internal sealed class WindowsApplicationIconService
              parsing.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) ||
              parsing.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
         {
-            image = FromExecutable(parsing, TargetIconSize);
+            image = FromExecutable(parsing, targetIconSize);
         }
 
         // 4. Fallback to SHGetFileInfo
@@ -70,7 +97,7 @@ internal sealed class WindowsApplicationIconService
             finally { if (suppliedPidl == 0) Marshal.FreeCoTaskMem(pidl); }
         }
 
-        if (image is not null) cache[key] = image;
+        if (image is not null) Store(key, image);
         return image;
     }
 
@@ -98,17 +125,45 @@ internal sealed class WindowsApplicationIconService
         if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -14 /* GCLP_HICON */);
         if (icon == 0) icon = ApplicationNative.GetClassLongPtr(window, -34 /* GCLP_HICONSM */);
         var image = icon == 0 ? null : FromHIcon(icon);
-        if (image is not null) cache[key] = image;
+        if (image is not null) Store(key, image);
         return image;
     }
 
     internal void Retain(IEnumerable<string> identities)
     {
         var live = identities.ToHashSet(StringComparer.Ordinal);
-        foreach (var key in cache.Keys.Where(key => !live.Contains(key)).ToArray()) cache.Remove(key);
+
+        foreach (var key in cache.Keys.Where(key => !live.Contains(key)).ToArray())
+            cache.Remove(key);
+
+        // Rebuild the FIFO bookkeeping so removed identities are not retained
+        // indirectly by the queue.
+        var survivors = cacheOrder.Where(cache.ContainsKey).Distinct(StringComparer.Ordinal).ToArray();
+        cacheOrder.Clear();
+
+        foreach (var key in survivors)
+            cacheOrder.Enqueue(key);
     }
 
-    private static ApplicationIcon? FromImageFactory(nint pidl, string? parsing, int size)
+    private void Store(string key, ApplicationIcon image)
+    {
+        if (cache.ContainsKey(key))
+        {
+            cache[key] = image;
+            return;
+        }
+
+        cache[key] = image;
+        cacheOrder.Enqueue(key);
+
+        while (cache.Count > cacheCapacity && cacheOrder.Count > 0)
+        {
+            var oldest = cacheOrder.Dequeue();
+            cache.Remove(oldest);
+        }
+    }
+
+    private static ApplicationIcon? FromImageFactory(nint pidl, string? parsing, int size, bool allowLargerIcons)
     {
         ApplicationNative.IShellItemImageFactory? factory = null;
         try
@@ -125,20 +180,33 @@ internal sealed class WindowsApplicationIconService
             }
             if (hr >= 0 && factory is not null)
             {
-                var flags = ApplicationNative.SIIGBF.IconOnly | ApplicationNative.SIIGBF.BiggerSizeOk;
-                if (factory.GetImage(new ApplicationNative.SIZE(size, size), flags, out var hbitmap) >= 0 && hbitmap != 0)
+                nint hbitmap = 0;
+
+                if (allowLargerIcons)
                 {
-                    try
+                    var flags =
+                        ApplicationNative.SIIGBF.IconOnly |
+                        ApplicationNative.SIIGBF.BiggerSizeOk;
+
+                    if (factory.GetImage(
+                            new ApplicationNative.SIZE(size, size),
+                            flags,
+                            out hbitmap) >= 0 &&
+                        hbitmap != 0)
                     {
-                        return FromHBitmap(hbitmap);
-                    }
-                    finally
-                    {
-                        ApplicationNative.DeleteObject(hbitmap);
+                        try
+                        {
+                            return FromHBitmap(hbitmap);
+                        }
+                        finally
+                        {
+                            ApplicationNative.DeleteObject(hbitmap);
+                        }
                     }
                 }
 
-                // If BiggerSizeOk failed, try standard ResizeToFit
+                // Home uses this path with allowLargerIcons=false, which asks
+                // Shell to resize to the small requested search-icon size.
                 if (factory.GetImage(new ApplicationNative.SIZE(size, size), ApplicationNative.SIIGBF.IconOnly, out hbitmap) >= 0 && hbitmap != 0)
                 {
                     try
@@ -162,7 +230,7 @@ internal sealed class WindowsApplicationIconService
         return null;
     }
 
-    private static ApplicationIcon? FromExecutable(string path, int size)
+    private ApplicationIcon? FromExecutable(string path, int size)
     {
         if (!File.Exists(path)) return null;
         var icons = new nint[1];
@@ -182,7 +250,7 @@ internal sealed class WindowsApplicationIconService
         }
 
         // Fallback to 128x128
-        if (size > MediumIconSize && ApplicationNative.PrivateExtractIcons(path, 0, MediumIconSize, MediumIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
+        if (size > mediumIconSize && ApplicationNative.PrivateExtractIcons(path, 0, mediumIconSize, mediumIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
         {
             try
             {
@@ -195,7 +263,7 @@ internal sealed class WindowsApplicationIconService
         }
 
         // Fallback to 96x96
-        if (ApplicationNative.PrivateExtractIcons(path, 0, FallbackIconSize, FallbackIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
+        if (ApplicationNative.PrivateExtractIcons(path, 0, fallbackIconSize, fallbackIconSize, icons, ids, 1, 0) > 0 && icons[0] != 0)
         {
             try
             {

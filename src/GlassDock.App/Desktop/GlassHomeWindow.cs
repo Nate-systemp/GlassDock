@@ -84,6 +84,7 @@ internal sealed class GlassHomeWindow : Window
     private bool launching;
     private string? launchError;
     private int refreshQueued;
+    private string renderedResultsKey = string.Empty;
     private bool HasQuery => !string.IsNullOrWhiteSpace(search.Text);
     private readonly TranslateTransform contentOffset = new();
     private readonly DispatcherQueueTimer polling;
@@ -902,6 +903,12 @@ internal sealed class GlassHomeWindow : Window
     private void OnQueryChanged(object sender, TextChangedEventArgs args)
     {
         launchError = null;
+
+        // Do not index the machine merely because Glass Home was opened.
+        // The metadata worker starts only when the user actually searches.
+        if (HasQuery)
+            applicationIndex.Start();
+
         RefreshResults(false);
     }
 
@@ -918,58 +925,189 @@ internal sealed class GlassHomeWindow : Window
 
     private void RefreshResults(bool preserveSelection)
     {
-        if (closed) return;
-        var snapshot = applicationIndex.Snapshot;
-        selection.Replace(GlassSearch.Find(snapshot.Applications.Concat(settings), search.Text), preserveSelection);
-        resultsList.Items.Clear();
-        foreach (var result in selection.Results)
-        {
-            var row = new Grid { ColumnSpacing = 12, Height = 54 };
-            row.ColumnDefinitions.Add(new() { Width = new GridLength(36) });
-            row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-            if (result.Icon is not null)
-            {
-                var icon = new AdaptiveAppIcon(32, 1); icon.SetIcon(result.Icon); row.Children.Add(icon);
-            }
-            else row.Children.Add(new FontIcon { Glyph = result.ResultType == GlassSearchResultType.Setting ? "\uE713" : "\uE71D",
-                FontSize = 24, Foreground = Brush(220) });
-            var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
-            labels.Children.Add(new TextBlock
-            {
-                Text = result.Title,
-                FontFamily = UiFont,
-                FontSize = 15,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = Brush(238),
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
+        if (closed)
+            return;
 
-            labels.Children.Add(new TextBlock
+        var snapshot = applicationIndex.Snapshot;
+
+        selection.Replace(
+            GlassSearch.Find(
+                snapshot.Applications.Concat(settings),
+                search.Text),
+            preserveSelection);
+
+        // Only the at-most-eight visible matches request real app icons.
+        // The installed-app index itself stays metadata-only.
+        if (HasQuery && selection.Results.Count > 0)
+            applicationIndex.RequestIcons(selection.Results);
+
+        var renderKey =
+            string.Join(
+                "\u001F",
+                selection.Results.Select(
+                    result =>
+                    {
+                        var icon =
+                            result.Icon ??
+                            applicationIndex.GetIcon(result.StableId);
+
+                        return
+                            result.StableId +
+                            "|" +
+                            result.Title +
+                            "|" +
+                            result.Subtitle +
+                            "|" +
+                            (icon is null ? "0" : "1");
+                    }));
+
+        // Avoid throwing away/recreating the same WinUI tree for every
+        // metadata/icon worker notification.
+        if (!string.Equals(
+                renderedResultsKey,
+                renderKey,
+                StringComparison.Ordinal))
+        {
+            renderedResultsKey = renderKey;
+            resultsList.Items.Clear();
+
+            foreach (var result in selection.Results)
             {
-                Text = result.Subtitle,
-                FontFamily = UiFont,
-                FontSize = 11.5,
-                Foreground = Brush(165),
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-            Grid.SetColumn(labels, 1); row.Children.Add(labels);
-            var item = new ListViewItem
-            {
-                Content = row,
-                Tag = result,
-                IsTabStop = false,
-                CornerRadius = new CornerRadius(12),
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(10, 2, 10, 2)
-            };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, result.Title + ", " + result.Subtitle);
-            resultsList.Items.Add(item);
+                var row = new Grid
+                {
+                    ColumnSpacing = 12,
+                    Height = 54
+                };
+
+                row.ColumnDefinitions.Add(
+                    new()
+                    {
+                        Width = new GridLength(36)
+                    });
+
+                row.ColumnDefinitions.Add(
+                    new()
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                var appIcon =
+                    result.Icon ??
+                    applicationIndex.GetIcon(result.StableId);
+
+                if (appIcon is not null)
+                {
+                    var icon =
+                        new AdaptiveAppIcon(
+                            32,
+                            1);
+
+                    icon.SetIcon(appIcon);
+                    row.Children.Add(icon);
+                }
+                else
+                {
+                    row.Children.Add(
+                        new FontIcon
+                        {
+                            Glyph =
+                                result.ResultType ==
+                                GlassSearchResultType.Setting
+                                    ? "\uE713"
+                                    : "\uE71D",
+                            FontSize = 24,
+                            Foreground = Brush(220)
+                        });
+                }
+
+                var labels = new StackPanel
+                {
+                    VerticalAlignment =
+                        VerticalAlignment.Center,
+                    Spacing = 2
+                };
+
+                labels.Children.Add(
+                    new TextBlock
+                    {
+                        Text = result.Title,
+                        FontFamily = UiFont,
+                        FontSize = 15,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = Brush(238),
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis
+                    });
+
+                labels.Children.Add(
+                    new TextBlock
+                    {
+                        Text = result.Subtitle,
+                        FontFamily = UiFont,
+                        FontSize = 11.5,
+                        Foreground = Brush(165),
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis
+                    });
+
+                Grid.SetColumn(
+                    labels,
+                    1);
+
+                row.Children.Add(labels);
+
+                var item =
+                    new ListViewItem
+                    {
+                        Content = row,
+                        Tag = result,
+                        IsTabStop = false,
+                        CornerRadius =
+                            new CornerRadius(12),
+                        HorizontalContentAlignment =
+                            HorizontalAlignment.Stretch,
+                        Padding =
+                            new Thickness(
+                                10,
+                                2,
+                                10,
+                                2)
+                    };
+
+                Microsoft.UI.Xaml.Automation
+                    .AutomationProperties.SetName(
+                        item,
+                        result.Title +
+                        ", " +
+                        result.Subtitle);
+
+                resultsList.Items.Add(item);
+            }
         }
-        resultsList.SelectedIndex = selection.Index;
-        searchStatus.Text = launchError ?? (snapshot.IsIndexing ? "Indexing applications…" : snapshot.Warning ??
-            (selection.Results.Count == 0 ? "No results" : ""));
-        searchStatus.Visibility = HasQuery && searchStatus.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (session.State != GlassHomeState.Hidden) ApplyFrame();
+
+        resultsList.SelectedIndex =
+            selection.Index;
+
+        searchStatus.Text =
+            launchError ??
+            (snapshot.IsIndexing
+                ? "Indexing applications…"
+                : snapshot.Warning ??
+                  (selection.Results.Count == 0
+                      ? "No results"
+                      : ""));
+
+        searchStatus.Visibility =
+            HasQuery &&
+            searchStatus.Text.Length > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        if (session.State != GlassHomeState.Hidden)
+            ApplyFrame();
     }
 
     private void OnSearchKeyDown(object sender, KeyRoutedEventArgs args)
@@ -1025,7 +1163,6 @@ internal sealed class GlassHomeWindow : Window
             animation.Stop();
             progress = 0;
             search.Text = "";
-            applicationIndex.Start();
             ConfigurePlacement(); RefreshResults(false); ApplyFrame();
             AppWindow.Show();
 
@@ -1176,6 +1313,11 @@ internal sealed class GlassHomeWindow : Window
         session.Hide();
         polling.Stop();
         animation.Stop();
+
+        // Release transient search-result controls while Home is hidden.
+        // The metadata index and its small bounded icon cache remain reusable.
+        resultsList.Items.Clear();
+        renderedResultsKey = string.Empty;
 
         AppWindow.Hide(); // Keep the HWND and SystemBackdrop; reconnect restores the retained mask.
     }
