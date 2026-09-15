@@ -1,5 +1,13 @@
 # Glass Home application and Settings search
 
+## Spotlight-inspired visual polish (2026-09-15)
+
+The user's screenshot showed a rectangular outer outline and an inset TextBox with a blue focus underline. Home now disables its own DWM border using [DWMWA_BORDER_COLOR / DWMWA_COLOR_NONE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute), removes the GlassSurface rim, and overrides the native TextBox background/border brushes in normal, hover, focused and disabled states. The editor itself remains native, retaining caret, selection, IME and keyboard focus behavior. Unsupported DWM border attributes are ignored on older Windows.
+
+The search row uses 23-DIP text, a subdued 22-DIP search icon, balanced 26-DIP side spacing and a 16-DIP icon gap. The material uses a 20-DIP corner radius, softer blur and no edge stroke. Results use rounded, subtle neutral selection/hover fills. Scope is limited to GlassHomeWindow and its existing InteractiveGlassWindowHost; search, dock, expansion and hotkey logic are unchanged.
+
+Validation: scripts/Validate.ps1 rebuilt the full Release solution with zero warnings/errors. Core tests: 81 passed; the existing dual-Windows-key test still fails at line 49 and stops the script before Windows tests. No new tests were added for these visual values. Live visual verification was not completed; the existing elevated GlassDock process requires restarting to display the new build.
+
 ## Scope and behavior
 
 This follow-up implements only the user's app/Settings search request on the existing Phase 1 Glass Home working tree. It does not implement pinned launcher content, recent files, power actions, Task View, or web search. Existing browse placeholders remain as supplied.

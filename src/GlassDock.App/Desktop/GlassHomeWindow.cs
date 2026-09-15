@@ -24,9 +24,10 @@ internal sealed class GlassHomeWindow : Window
     private readonly Grid root = new() { RequestedTheme = ElementTheme.Dark };
     private readonly TextBox search = new()
     {
-        PlaceholderText = "Search apps and settings...", FontSize = 20,
-        BorderThickness = new Thickness(0), Padding = new Thickness(12, 8, 12, 8),
-        Background = Brush(0), Foreground = Brush(245), VerticalAlignment = VerticalAlignment.Center
+        PlaceholderText = "Search apps and settings…", FontSize = 23,
+        BorderThickness = new Thickness(0), Padding = new Thickness(0, 8, 0, 8),
+        BorderBrush = Brush(0), Background = Brush(0), Foreground = Brush(245),
+        VerticalAlignment = VerticalAlignment.Center, UseSystemFocusVisuals = false
     };
     private readonly StackPanel extra = new() { Spacing = 18, Margin = new Thickness(24, 12, 24, 24) };
     private readonly WindowsApplicationIndex applicationIndex = new();
@@ -58,8 +59,9 @@ internal sealed class GlassHomeWindow : Window
         Title = "GlassDock — Glass Home";
         var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
         {
-            BlurAmount = 20, Opacity = .78, CornerRadius = 24, ShadowOpacity = .28,
-            ShadowBlur = 20, ShadowOffset = 6, EdgeHighlight = 0, BorderOpacity = .18
+            BlurAmount = 28, Opacity = .84, CornerRadius = 20, ShadowOpacity = .20,
+            ShadowBlur = 24, ShadowOffset = 6, EdgeHighlight = 0, BorderOpacity = 0,
+            BorderThickness = 0
         };
         surface.Apply(material);
         backdrop.Apply(material);
@@ -117,12 +119,23 @@ internal sealed class GlassHomeWindow : Window
         var content = new Grid();
         content.RowDefinitions.Add(new() { Height = new GridLength(86) });
         content.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
-        var searchRow = new Grid { Margin = new Thickness(24, 0, 16, 0), ColumnSpacing = 8 };
+        var searchRow = new Grid { Margin = new Thickness(26, 0, 26, 0), ColumnSpacing = 16 };
         searchRow.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         searchRow.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-        searchRow.Children.Add(new FontIcon { Glyph = "\uE721", FontSize = 20, Foreground = Brush(190) });
-        foreach (var key in new[] { "TextControlBackground", "TextControlBackgroundPointerOver", "TextControlBackgroundFocused" })
+        searchRow.Children.Add(new FontIcon { Glyph = "\uE721", FontSize = 22, Foreground = Brush(165) });
+        // Keep the native editor/caret/IME, but remove WinUI's inset field and accent underline in every state.
+        foreach (var key in new[] { "TextControlBackground", "TextControlBackgroundPointerOver", "TextControlBackgroundFocused",
+            "TextControlBackgroundDisabled", "TextControlBorderBrush", "TextControlBorderBrushPointerOver",
+            "TextControlBorderBrushFocused", "TextControlBorderBrushDisabled", "TextControlElevationBorderBrush" })
             search.Resources[key] = Brush(0);
+        search.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
+        search.Resources["TextControlPlaceholderForeground"] = Brush(155);
+        search.Resources["TextControlPlaceholderForegroundFocused"] = Brush(155);
+        search.Resources["TextControlPlaceholderForegroundPointerOver"] = Brush(175);
+        resultsList.Resources["ListViewItemBackgroundSelected"] = Brush(28);
+        resultsList.Resources["ListViewItemBackgroundSelectedPointerOver"] = Brush(38);
+        resultsList.Resources["ListViewItemBackgroundSelectedPressed"] = Brush(46);
+        resultsList.Resources["ListViewItemBackgroundPointerOver"] = Brush(16);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, "Search apps and settings");
         Grid.SetColumn(search, 1); searchRow.Children.Add(search); content.Children.Add(searchRow);
         extra.RenderTransform = contentOffset;
@@ -197,7 +210,7 @@ internal sealed class GlassHomeWindow : Window
             labels.Children.Add(new TextBlock { Text = result.Title, FontSize = 16, Foreground = Brush(245), TextTrimming = TextTrimming.CharacterEllipsis });
             labels.Children.Add(new TextBlock { Text = result.Subtitle, FontSize = 12, Foreground = Brush(180), TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(labels, 1); row.Children.Add(labels);
-            var item = new ListViewItem { Content = row, Tag = result, IsTabStop = false,
+            var item = new ListViewItem { Content = row, Tag = result, IsTabStop = false, CornerRadius = new CornerRadius(10),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(10, 2, 10, 2) };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, result.Title + ", " + result.Subtitle);
             resultsList.Items.Add(item);

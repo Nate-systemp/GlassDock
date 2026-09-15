@@ -130,6 +130,10 @@ public sealed class InteractiveGlassWindowHost : IDisposable
 
     private void ConfigureTransparency()
     {
+        // Win11's DWM outline surrounds the rectangular HWND, outside our rounded glass mask.
+        // Suppress only this window's outline; unsupported Windows versions simply ignore it.
+        var noBorder = unchecked((int)0xFFFFFFFE); // DWMWA_COLOR_NONE
+        NativeMethods.DwmSetWindowAttribute(hwnd, 34, ref noBorder, sizeof(int)); // DWMWA_BORDER_COLOR
         //
         // Mirror the native transparency path used by WindowsOverlayManager.
         //
