@@ -27,6 +27,13 @@ scripts contains repeatable validation; .github/workflows contains Windows CI; d
 Future flow: views → viewmodels → services → Windows abstraction → OS APIs.
 App owns UI lifecycle and dependency composition. Do not scatter native calls in UI code.
 Introduce dependency injection when services exist, without adding a container now.
+
+### Glass Home search follow-up
+The user separately authorized app and Windows Settings search in the existing Glass Home. Core owns the unified GlassSearchResult model, deterministic matching, and selection. Windows owns WindowsApplicationIndex and WindowsSettingsCatalog. The retained Home window composes them and renders at most eight results, keeping search TextBox focus for arrow navigation. The query controls result-panel height; GlassHomeSession still alone controls the 30-physical-pixel expansion transition.
+
+The index starts once on first Home open. One STA background worker extends the existing ShellApplicationMetadata helper to enumerate AppsFolder and user/common Start Menu application shortcuts. It uses existing application identity, shortcut resolution, and WindowsApplicationIconService code. Searchable metadata is published before icons; immutable list snapshots are filtered only in memory. Coalesced dispatcher callbacks read the current query, preserve selected identity during index/icon refresh, and ignore closed/hidden windows. No asynchronous query tasks or per-keypress discovery run. Disposal stops work between Shell calls without blocking UI shutdown on Shell extensions.
+
+WindowsApplicationLauncher now exposes the same ShellExecuteEx path for search targets and a background STA launch wrapper. Shortcut, Shell parsing path, packaged AppsFolder target, and Settings URI are retained intact. Home hides only after successful launch and only for the session that initiated it. See docs/GLASS_HOME_SEARCH.md for evidence and limitations.
 Async UI operations use cancellation/revision checks. Development exceptions are written locally to development-error.log; no telemetry or application networking exists. Only an explicit taskbar test starts heartbeat and visibility checks.
 Avoid speculative empty interfaces such as IDockService until their contracts can be tested.
 

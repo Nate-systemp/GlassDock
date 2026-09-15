@@ -40,3 +40,6 @@ Implemented: primary-monitor floating pill, expanded glass dock, placeholder ico
 Local checks cover launch, material rendering, expansion/collapse, laboratory regression and recovery after normal exit, parent failure, helper failure and lease expiry. See docs/PHASE_2_3_VALIDATION.md for evidence and limits.
 
 Stop here. Full Glass Home, discovery, real launching, multi-monitor management, status, licensing, updater and automatic startup require separate authorization.
+
+## Separately authorized Glass Home search follow-up (2026-09-15)
+The current user request authorizes functional search in the already-working Compact/Expanded Home: installed applications and Windows Settings only, cached discovery, icons, ranked matching, keyboard selection, and launching. This narrow authorization supersedes the earlier discovery stop for these features only. Preserve the existing Home interaction, dock, previews, hotkeys, recovery and laboratory. Stop before pinned launcher content, recent files, power menu, Task View, and web search. Implementation and validation limits are recorded in docs/GLASS_HOME_SEARCH.md; this does not declare the entire launcher or shell roadmap complete.

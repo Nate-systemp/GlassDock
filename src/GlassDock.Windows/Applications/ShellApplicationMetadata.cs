@@ -7,6 +7,101 @@ namespace GlassDock.Windows.Applications;
 
 internal static class ShellApplicationMetadata
 {
+    /// <summary>Enumerate the Shell's installed-app namespace, then application shortcuts in both Start menus.</summary>
+    internal static void ReadAvailable(Action<GlassSearchResult> add, Func<bool> stopping, Action<string> warn)
+    {
+        object? shell = null, folder = null, items = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", true)!);
+            folder = ((dynamic)shell!).NameSpace("shell:AppsFolder");
+            if (folder is null) throw new InvalidOperationException("AppsFolder is unavailable.");
+            items = ((dynamic)folder).Items();
+            int count = ((dynamic)items).Count;
+            for (var i = 0; i < count && !stopping(); i++)
+            {
+                object? item = null;
+                try
+                {
+                    item = ((dynamic)items).Item(i);
+                    string name = ((dynamic)item!).Name;
+                    string path = ((dynamic)item).Path;
+                    if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(path))
+                    {
+                        var target = Path.IsPathRooted(path) || path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+                            ? path : "shell:AppsFolder\\" + path;
+                        add(ReadAvailableEntry(name, target));
+                    }
+                }
+                catch (Exception error) when (IsDiscoveryError(error)) { warn("Some application entries could not be read."); }
+                finally { if (item is not null) Marshal.ReleaseComObject(item); }
+            }
+        }
+        catch (Exception error) when (IsDiscoveryError(error)) { warn("AppsFolder is unavailable; searching Start Menu shortcuts."); }
+        finally
+        {
+            if (items is not null) Marshal.ReleaseComObject(items);
+            if (folder is not null) Marshal.ReleaseComObject(folder);
+            if (shell is not null) Marshal.ReleaseComObject(shell);
+        }
+
+        foreach (var location in new[] { Environment.SpecialFolder.Programs, Environment.SpecialFolder.CommonPrograms })
+        {
+            if (stopping()) return;
+            var directory = Environment.GetFolderPath(location);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) continue;
+            try
+            {
+                var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint };
+                foreach (var shortcut in Directory.EnumerateFiles(directory, "*.lnk", options))
+                {
+                    if (stopping()) return;
+                    try
+                    {
+                        var link = ResolveLink(shortcut);
+                        // Exclude document and website shortcuts; retain virtual Shell/packaged links.
+                        if (!string.IsNullOrWhiteSpace(link.Path) && !link.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                            && !link.Path.StartsWith("::", StringComparison.Ordinal) && !link.Path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) continue;
+                        add(ReadAvailableEntry(Path.GetFileNameWithoutExtension(shortcut), shortcut));
+                    }
+                    catch (Exception error) when (IsDiscoveryError(error)) { warn("Some Start Menu shortcuts could not be read."); }
+                }
+            }
+            catch (Exception error) when (IsDiscoveryError(error)) { warn("Some Start Menu folders could not be read."); }
+        }
+    }
+
+    internal static bool IsDiscoveryError(Exception error) => error is COMException or InvalidCastException
+        or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException
+        or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException;
+
+    private static GlassSearchResult ReadAvailableEntry(string name, string target)
+    {
+        string? appId = null, executable = null;
+        if (ApplicationNative.SHParseDisplayName(target, 0, out var pidl, 0, out _) >= 0)
+        {
+            try
+            {
+                var iid = typeof(ApplicationNative.IPropertyStore).GUID;
+                if (ApplicationNative.SHGetPropertyStoreFromIDList(pidl, 0, in iid, out var properties) >= 0)
+                {
+                    try
+                    {
+                        appId = Property(properties, "System.AppUserModel.ID");
+                        executable = Property(properties, "System.Link.TargetParsingPath");
+                    }
+                    finally { Marshal.ReleaseComObject(properties); }
+                }
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        var link = ResolveLink(target);
+        if (!string.IsNullOrWhiteSpace(link.Path)) executable = link.Path;
+        var identity = new ApplicationIdentity(appId, executable, link.Arguments, target);
+        return new(identity.Key, name, "Application", [], GlassSearchResultType.Application, target);
+    }
+
     internal static string? Property(ApplicationNative.IPropertyStore store, string name)
     {
         if (ApplicationNative.PSGetPropertyKeyFromName(name, out var key) < 0) return null;
@@ -210,4 +305,3 @@ internal static class ShellApplicationMetadata
         return result;
     }
 }
-

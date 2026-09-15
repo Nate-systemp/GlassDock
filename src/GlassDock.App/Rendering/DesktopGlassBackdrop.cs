@@ -24,6 +24,18 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionMaskBrush? output;
     private W.CompositionBrush? fallback;
     private GlassMaterial material = new();
+
+    // Retain the latest mask geometry because AppWindow.Hide()/Show()
+    // can disconnect and reconnect the SystemBackdrop.
+    private bool hasBounds;
+    private double lastWindowWidth;
+    private double lastWindowHeight;
+    private double lastWidth;
+    private double lastHeight;
+    private double lastBottom;
+    private double lastScale = 1;
+    private double lastOpacity = 1;
+
     public string RenderingMode { get; private set; } = "Desktop backdrop connecting";
     public event EventHandler? RenderingModeChanged;
 
@@ -60,6 +72,16 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             RenderingMode = "Native system backdrop · shared glass graph";
             stage = "material parameters";
             Apply(material);
+
+            if (hasBounds)
+                ApplyBounds(
+                    lastWindowWidth,
+                    lastWindowHeight,
+                    lastWidth,
+                    lastHeight,
+                    lastBottom,
+                    lastScale,
+                    lastOpacity);
         }
         catch (Exception exception) when (exception is COMException or ArgumentException)
         {
@@ -81,17 +103,79 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         effect.Properties.InsertColor("Tint.Color", GlassEffectGraph.Tint(material));
     }
 
-    public void SetBounds(double windowWidth, double windowHeight, double width, double height, double bottom, double scale, double opacity = 1)
+    public void SetBounds(
+        double windowWidth,
+        double windowHeight,
+        double width,
+        double height,
+        double bottom,
+        double scale,
+        double opacity = 1)
     {
-        if (geometry is null || visual is null || maskSurface is null) return;
+        hasBounds = true;
+        lastWindowWidth = windowWidth;
+        lastWindowHeight = windowHeight;
+        lastWidth = width;
+        lastHeight = height;
+        lastBottom = bottom;
+        lastScale = scale;
+        lastOpacity = opacity;
+
+        ApplyBounds(
+            windowWidth,
+            windowHeight,
+            width,
+            height,
+            bottom,
+            scale,
+            opacity);
+    }
+
+    private void ApplyBounds(
+        double windowWidth,
+        double windowHeight,
+        double width,
+        double height,
+        double bottom,
+        double scale,
+        double opacity)
+    {
+        if (geometry is null ||
+            visual is null ||
+            maskSurface is null)
+        {
+            return;
+        }
+
         visual.Opacity = (float)opacity;
-        var size = new Vector2((float)(windowWidth * scale), (float)(windowHeight * scale));
+
+        var size =
+            new Vector2(
+                (float)(windowWidth * scale),
+                (float)(windowHeight * scale));
+
         visual.Size = size;
         maskSurface.SourceSize = size;
-        geometry.Offset = new Vector2((float)((windowWidth - width) / 2 * scale), (float)((windowHeight - bottom - height) * scale));
-        geometry.Size = new Vector2((float)(width * scale), (float)(height * scale));
-        var radius = (float)(Math.Min(material.CornerRadius, height / 2) * scale);
-        geometry.CornerRadius = new Vector2(radius);
+
+        geometry.Offset =
+            new Vector2(
+                (float)((windowWidth - width) / 2 * scale),
+                (float)((windowHeight - bottom - height) * scale));
+
+        geometry.Size =
+            new Vector2(
+                (float)(width * scale),
+                (float)(height * scale));
+
+        var radius =
+            (float)(
+                Math.Min(
+                    material.CornerRadius,
+                    height / 2) *
+                scale);
+
+        geometry.CornerRadius =
+            new Vector2(radius);
     }
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)

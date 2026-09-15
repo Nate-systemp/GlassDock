@@ -16,7 +16,7 @@ A full-screen launcher, eventually invoked by the bare Windows key, preferably o
 ## 7. Application launcher
 Installed, pinned, recent and system apps; Settings, Control Panel, File Explorer, Terminal and appropriate utilities. Discovery and launching start in Phase 5.
 ## 8. Search
-Fast application search with predictable keyboard navigation; indexing and ranking remain undecided.
+The separately authorized Glass Home search follow-up searches cached installed applications and a Windows Settings catalog. Matching ranks exact, starts-with, word-prefix, then substring matches. Compact search results and keyboard navigation are independent of the existing mouse-driven Expanded Home state. Pinned apps, recent files, power actions, Task View, and web search are outside this follow-up.
 ## 9. Running applications
 Visual running/active indicators and window activation behavior, without unsafe shell interference.
 ## 10. System status

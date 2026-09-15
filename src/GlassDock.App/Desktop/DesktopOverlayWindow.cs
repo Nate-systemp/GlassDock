@@ -56,7 +56,7 @@ public sealed class DesktopOverlayWindow : Window
     private CancellationTokenSource? collapseDelay;
     private TaskbarDevelopmentSession? taskbarSession;
     private DevelopmentWindow? controls;
-    private Window? home;
+    private GlassHomeWindow? home;
     private Window? lab;
     private bool menuOpen;
     private bool closing;
@@ -100,8 +100,19 @@ public sealed class DesktopOverlayWindow : Window
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
         keyboard = new WindowsKeyboardService(hwnd);
-        keyboard.HomeRequested += async (_, _) => await ToggleDockAsync();
-        keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
+
+keyboard.HomeRequested +=
+    async (_, _) =>
+        await ToggleDockAsync();
+
+keyboard.LauncherRequested +=
+    (_, _) =>
+        ShowHome();
+
+keyboard.RecoveryRequested +=
+    (_, _) =>
+        RestoreTaskbar();
+
         root.PointerEntered += Entered;
         root.PointerMoved += (_, _) => collapseDelay?.Cancel();
         root.PointerExited += Exited;
@@ -387,27 +398,15 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
     public void ShowHome()
     {
+        if (closing) return;
         if (home is null)
         {
-            home = new Window
-            {
-                Title = "GlassDock — Glass Home integration placeholder",
-                Content = new StackPanel
-                {
-                    Padding = new Thickness(32), Spacing = 16,
-                    Children =
-                    {
-                        new TextBlock { Text = "Glass Home", FontSize = 28 },
-                        new TextBlock { Text = "Development event received.\nThe launcher is not implemented.\nBare Windows key remains handled by Windows.", TextWrapping = TextWrapping.Wrap }
-                    }
-                }
-            };
-            home.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(520, 260));
-            home.Closed += (_, _) => home = null;
+            var window = new GlassHomeWindow();
+            home = window;
+            window.Closed += (_, _) => { if (ReferenceEquals(home, window)) home = null; };
         }
-        home.Activate();
+        home.Toggle();
     }
-
     public void ShowLab()
     {
         if (lab is null)
