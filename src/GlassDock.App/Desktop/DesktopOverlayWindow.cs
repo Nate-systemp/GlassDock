@@ -565,16 +565,13 @@ private Button CreateApplicationButton(DockApplicationItem item)
             top +
             dockHeight;
 
+        // True stadium / pill geometry:
+        // the end radius is exactly half of the dock height.
         var radius =
-            Math.Min(
-                26,
-                dockHeight / 2);
-
-        radius =
             Math.Max(
                 0,
                 Math.Min(
-                    radius,
+                    dockHeight / 2,
                     dockWidth / 2));
 
         var eased =
@@ -634,8 +631,8 @@ private Button CreateApplicationButton(DockApplicationItem item)
         // dock corner itself. That makes the corner and bump one curve.
         var edgeMergeThreshold =
             Math.Min(
-                42,
-                requestedHalfWidth * 0.55);
+                radius + 12,
+                requestedHalfWidth * 0.68);
 
         var leftEdge =
             rise > 0.01 &&
@@ -679,9 +676,11 @@ private Button CreateApplicationButton(DockApplicationItem item)
         // Merge a little below the normal top-right/top-left tangent.
         // The cubic reaches this point vertically, so the dock side stays
         // rounded with no visible kink.
+        // Merge at the side midpoint so the bump and the capsule end
+        // become one smooth continuous rounded profile.
         var cornerMergeY =
             top +
-            radius * 0.72;
+            radius;
 
         PathFigure figure;
 
@@ -802,7 +801,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
                             new global::Windows.Foundation.Point(
                                 right,
                                 top +
-                                radius * 0.08),
+                                radius * 0.18),
 
                         Point3 =
                             new global::Windows.Foundation.Point(
@@ -1052,9 +1051,11 @@ private Button CreateApplicationButton(DockApplicationItem item)
                 : 68;
 
         var radius =
-            Math.Min(
-                26,
-                dockHeight / 2);
+            Math.Max(
+                0,
+                Math.Min(
+                    dockHeight / 2,
+                    dockWidth / 2));
 
         var left =
             (root.ActualWidth -
@@ -1072,7 +1073,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
         // Only a tiny inset is needed now because the dock corner itself
         // becomes the outer half of the edge wave.
-        const double crestInset = 5;
+        const double crestInset = 4;
 
         var minimum =
             topStart +
@@ -1215,7 +1216,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
             // expanded shell so it visually belongs with Glass Home.
             BlurAmount = 20,
             Opacity = 0.78,
-            CornerRadius = expanded ? 26 : 12,
+            CornerRadius = expanded ? 34 : 2.5,
 
             // Slightly softer depth and a restrained luminous edge.
             ShadowOpacity = expanded ? 0.24 : 0.28,

@@ -263,8 +263,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var radius =
             (float)(
                 Math.Min(
-                    material.CornerRadius,
-                    lastHeight / 2) *
+                    Math.Min(
+                        material.CornerRadius,
+                        lastHeight / 2),
+                    lastWidth / 2) *
                 scale);
 
         radius =
@@ -320,7 +322,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         var crestInset =
             (float)(
-                5 *
+                4 *
                 scale);
 
         var center =
@@ -348,8 +350,9 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         var edgeMergeThreshold =
             Math.Min(
-                (float)(42 * scale),
-                requestedHalfWidth * 0.55f);
+                radius +
+                (float)(12 * scale),
+                requestedHalfWidth * 0.68f);
 
         var leftEdge =
             rise > 0.01f &&
@@ -391,8 +394,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         var cornerMergeY =
             top +
-            radius *
-            0.72f;
+            radius;
 
         using var builder =
             new CanvasPathBuilder(
@@ -414,7 +416,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 new Vector2(
                     left,
                     top +
-                    radius * 0.08f),
+                    radius * 0.18f),
 
                 new Vector2(
                     center -
@@ -477,7 +479,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                     new Vector2(
                         right,
                         top +
-                        radius * 0.08f),
+                        radius * 0.18f),
 
                     new Vector2(
                         right,
