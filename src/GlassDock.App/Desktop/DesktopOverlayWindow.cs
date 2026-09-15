@@ -114,7 +114,7 @@ keyboard.RecoveryRequested +=
         RestoreTaskbar();
 
         root.PointerEntered += Entered;
-        root.PointerMoved += (_, _) => collapseDelay?.Cancel();
+        root.PointerMoved += Moved;
         root.PointerExited += Exited;
         root.Loaded += async (_, _) =>
         {
@@ -189,8 +189,8 @@ private double CalculateTargetDockWidth()
         return 100;
 
     const double buttonWidth = 40;
-    const double spacing = 4;
-    const double horizontalPadding = 28;
+    const double spacing = 6;
+    const double horizontalPadding = 36;
 
     var target =
         count * buttonWidth +
@@ -258,16 +258,6 @@ private Button CreateApplicationButton(DockApplicationItem item)
         }
         Update();
         item.PropertyChanged += (_, _) => Update();
-        button.PointerEntered += (_, _) =>
-        {
-            Canvas.SetZIndex(button, 10);
-            ScaleItem(button, 1.24f);
-        };
-        button.PointerExited += (_, _) =>
-        {
-            Canvas.SetZIndex(button, 0);
-            ScaleItem(button, 1.0f);
-        };
         button.Click += (_, _) =>
         {
             if (!applications.Activate(item)) SetStatus($"Windows could not launch or focus {item.Name}.");
@@ -276,25 +266,31 @@ private Button CreateApplicationButton(DockApplicationItem item)
         return button;
     }
 
-    private static void ScaleItem(FrameworkElement item, float scale)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(item);
-        visual.CenterPoint = new Vector3((float)item.ActualWidth / 2, (float)item.ActualHeight * 0.88f, 0);
-        if (!new UISettings().AnimationsEnabled) { visual.Scale = new Vector3(scale, scale, 1); return; }
-        var compositor = visual.Compositor;
-        using var effect = compositor.CreateVector3KeyFrameAnimation();
-        var easing = compositor.CreateCubicBezierEasingFunction(
-            new Vector2(0.16f, 1.0f),
-            new Vector2(0.30f, 1.0f));
-        effect.InsertKeyFrame(1f, new Vector3(scale, scale, 1), easing);
-        effect.Duration = TimeSpan.FromMilliseconds(180);
-        visual.StartAnimation("Scale", effect);
-    }
-
     private async void Entered(object sender, PointerRoutedEventArgs e)
     {
         DockAnimationController.Trace($"PointerEntered state={state.State}");
+
+        // Capture the pointer before expansion so a stationary mouse already
+        // influences the closest icon as soon as the dock finishes opening.
+        var pointerX = e.GetCurrentPoint(icons).Position.X;
+
         await ExpandDockAsync();
+
+        if (state.State == DockState.Expanded)
+            animation.UpdateMagnification(pointerX);
+    }
+
+    private void Moved(object sender, PointerRoutedEventArgs e)
+    {
+        collapseDelay?.Cancel();
+
+        if (state.State != DockState.Expanded)
+            return;
+
+        var pointerX =
+            e.GetCurrentPoint(icons).Position.X;
+
+        animation.UpdateMagnification(pointerX);
     }
 
     private Task ToggleDockAsync() => state.State is DockState.Expanded or DockState.Expanding or DockState.Hovering
@@ -321,12 +317,15 @@ private Button CreateApplicationButton(DockApplicationItem item)
     private void Exited(object sender, PointerRoutedEventArgs e)
     {
         DockAnimationController.Trace($"PointerExited state={state.State}");
+
+        animation.ResetMagnification();
         ScheduleCollapse();
     }
 
     private async Task CollapseDockAsync()
     {
         previews.Hide();
+        animation.ResetMagnification();
         collapseDelay?.Cancel();
         if (closing || state.State is DockState.Hidden or DockState.Idle or DockState.Collapsing) return;
         var revision = state.Collapse();
@@ -362,11 +361,21 @@ private Button CreateApplicationButton(DockApplicationItem item)
     {
         var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
         {
-            BlurAmount = 20, Opacity = 0.78, CornerRadius = 12,
-            ShadowOpacity = 0.28, ShadowBlur = 20,
-            ShadowOffset = 6, EdgeHighlight = 0,
-            BorderOpacity = 0.18
+            // Keep the dock's current frosted character, but round the
+            // expanded shell so it visually belongs with Glass Home.
+            BlurAmount = 20,
+            Opacity = 0.78,
+            CornerRadius = expanded ? 26 : 12,
+
+            // Slightly softer depth and a restrained luminous edge.
+            ShadowOpacity = expanded ? 0.24 : 0.28,
+            ShadowBlur = expanded ? 26 : 20,
+            ShadowOffset = expanded ? 7 : 6,
+            EdgeHighlight = expanded ? 0.06 : 0,
+            BorderOpacity = expanded ? 0.22 : 0.18,
+            BorderThickness = 1
         };
+
         surface.Apply(material);
         desktopBackdrop.Apply(material);
         UpdateBackdropBounds();

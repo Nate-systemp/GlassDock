@@ -13,11 +13,47 @@ public static class GlassSearch
     {
         query = query.Trim();
         if (query.Length == 0) return [];
-        return entries.Select(entry => (Entry: entry, Rank: Rank(entry, query)))
-            .Where(item => item.Rank < int.MaxValue).OrderBy(item => item.Rank)
+
+        // Rank first, then collapse duplicate visible applications.
+        // This is a second safety net in case multiple discovery sources
+        // still produce different StableIds for the same app.
+        return entries
+            .Select(entry => (Entry: entry, Rank: Rank(entry, query)))
+            .Where(item => item.Rank < int.MaxValue)
+            .OrderBy(item => item.Rank)
             .ThenBy(item => item.Entry.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Entry.StableId, StringComparer.Ordinal)
-            .Take(8).Select(item => item.Entry).ToArray();
+            .GroupBy(
+                item => ResultIdentity(item.Entry),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(8)
+            .Select(item => item.Entry)
+            .ToArray();
+    }
+
+    private static string ResultIdentity(
+        GlassSearchResult entry)
+    {
+        // Settings should remain distinct by StableId. Applications with
+        // the same normalized visible title are presented as one app.
+        if (entry.ResultType == GlassSearchResultType.Setting)
+            return "setting|" + entry.StableId;
+
+        return "app|" + NormalizeTitle(entry.Title);
+    }
+
+    private static string NormalizeTitle(
+        string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return string.Join(
+            " ",
+            value.Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries));
     }
 
     private static int Rank(GlassSearchResult entry, string query) =>
