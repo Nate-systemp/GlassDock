@@ -220,18 +220,14 @@ internal sealed class WindowPreviewWindow : Window
         };
         animation = DispatcherQueue.CreateTimer();
 
+        // 60-ish FPS is already visually smooth and avoids the extra
+        // allocations / dispatch pressure of the former 100 FPS timer.
         animation.Interval =
-            TimeSpan.FromMilliseconds(10);
+            TimeSpan.FromMilliseconds(16);
 
         animation.Tick += (_, _) =>
         {
             var moving = Advance();
-
-            Trace(
-                $"TICK p={progress:F3} " +
-                $"target={animationTo} " +
-                $"hover={string.Join(',', cards.Select(c => c.Emphasis.ToString("F2")))} " +
-                $"moving={moving}");
 
             Draw();
             if (session.CompleteTransition(progress))
@@ -1246,9 +1242,19 @@ Canvas.SetTop(
                         g,
                         b));
 
+    private static readonly bool TraceEnabled =
+        string.Equals(
+            Environment.GetEnvironmentVariable(
+                "GLASSDOCK_PREVIEW_TRACE"),
+            "1",
+            StringComparison.Ordinal);
+
     internal static void Trace(
         string message)
     {
+        if (!TraceEnabled)
+            return;
+
         System.IO.File.AppendAllText(
             @"C:\Dev\GlassDock\artifacts\preview-runtime.trace",
             $"{DateTime.Now:HH:mm:ss.fff} {message}\n");
