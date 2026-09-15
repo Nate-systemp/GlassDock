@@ -16,6 +16,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using XamlPath = Microsoft.UI.Xaml.Shapes.Path;
 using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Desktop;
@@ -42,6 +43,63 @@ public sealed class DesktopOverlayWindow : Window
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
     };
+
+    // These paths are only the luminous outline. The glass BODY itself is
+    // deformed by DesktopGlassBackdrop.SetDockWave().
+    private readonly XamlPath dockWaveGlow = new()
+    {
+        IsHitTestVisible = false,
+        StrokeThickness = 3.2,
+        Stroke = new SolidColorBrush(
+            global::Windows.UI.Color.FromArgb(
+                42,
+                80,
+                175,
+                255)),
+        Opacity = 0
+    };
+
+    private readonly XamlPath dockWaveRim = new()
+    {
+        IsHitTestVisible = false,
+        StrokeThickness = 1.05,
+        Stroke = new LinearGradientBrush
+        {
+            StartPoint = new global::Windows.Foundation.Point(0, 0),
+            EndPoint = new global::Windows.Foundation.Point(1, 1),
+            GradientStops =
+            {
+                new GradientStop
+                {
+                    Offset = 0,
+                    Color = global::Windows.UI.Color.FromArgb(
+                        150,
+                        255,
+                        255,
+                        255)
+                },
+                new GradientStop
+                {
+                    Offset = 0.52,
+                    Color = global::Windows.UI.Color.FromArgb(
+                        70,
+                        185,
+                        225,
+                        255)
+                },
+                new GradientStop
+                {
+                    Offset = 1,
+                    Color = global::Windows.UI.Color.FromArgb(
+                        105,
+                        235,
+                        248,
+                        255)
+                }
+            }
+        },
+        Opacity = 0
+    };
     private readonly DockStateMachine state = new();
     private readonly IApplicationService applicationService = new WindowsApplicationService();
     private readonly DockApplicationsViewModel applications;
@@ -53,6 +111,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly WindowsKeyboardService keyboard;
     private readonly DockAnimationController animation;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer dockWaveTimer;
     private CancellationTokenSource? collapseDelay;
     private TaskbarDevelopmentSession? taskbarSession;
     private DevelopmentWindow? controls;
@@ -62,6 +121,16 @@ public sealed class DesktopOverlayWindow : Window
     private bool closing;
     private bool startingTest;
     private int taskbarRevision;
+
+    private bool dockWaveTimerRunning;
+    private double dockWaveTargetX;
+    private double dockWaveCurrentX;
+    private double dockWaveTargetStrength;
+    private double dockWaveCurrentStrength;
+
+    private const double DockWaveHalfWidth = 92;
+    private const double DockWaveRise = 12;
+
     public double BottomMargin { get; private set; } = 24;
     public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
@@ -85,11 +154,22 @@ public sealed class DesktopOverlayWindow : Window
         windowManager = new WindowsOverlayManager(hwnd);
         windowManager.Configure(inspection);
         root.Children.Add(surface);
+        root.Children.Add(dockWaveGlow);
+        root.Children.Add(dockWaveRim);
         root.Children.Add(indicator);
         root.Children.Add(icons);
         surface.RegisterPropertyChangedCallback(UIElement.OpacityProperty, (_, _) => UpdateBackdropBounds());
-        surface.SizeChanged += (_, _) => UpdateBackdropBounds();
-        root.SizeChanged += (_, _) => UpdateBackdropBounds();
+        surface.SizeChanged += (_, _) =>
+        {
+            UpdateBackdropBounds();
+            UpdateDockWaveOutline();
+        };
+
+        root.SizeChanged += (_, _) =>
+        {
+            UpdateBackdropBounds();
+            UpdateDockWaveOutline();
+        };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
         previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - 68);
@@ -99,6 +179,11 @@ public sealed class DesktopOverlayWindow : Window
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
+
+        dockWaveTimer = DispatcherQueue.CreateTimer();
+        dockWaveTimer.Interval = TimeSpan.FromMilliseconds(16);
+        dockWaveTimer.Tick += TickDockWave;
+
         keyboard = new WindowsKeyboardService(hwnd);
 
 keyboard.HomeRequested +=
@@ -272,12 +357,19 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
         // Capture the pointer before expansion so a stationary mouse already
         // influences the closest icon as soon as the dock finishes opening.
-        var pointerX = e.GetCurrentPoint(icons).Position.X;
+        var pointerX =
+            e.GetCurrentPoint(icons).Position.X;
+
+        var rootX =
+            e.GetCurrentPoint(root).Position.X;
 
         await ExpandDockAsync();
 
         if (state.State == DockState.Expanded)
+        {
             animation.UpdateMagnification(pointerX);
+            ShowDockWave(rootX);
+        }
     }
 
     private void Moved(object sender, PointerRoutedEventArgs e)
@@ -290,7 +382,752 @@ private Button CreateApplicationButton(DockApplicationItem item)
         var pointerX =
             e.GetCurrentPoint(icons).Position.X;
 
+        var rootX =
+            e.GetCurrentPoint(root).Position.X;
+
         animation.UpdateMagnification(pointerX);
+        ShowDockWave(rootX);
+    }
+
+    private void ShowDockWave(
+        double rootX)
+    {
+        if (!double.IsFinite(rootX) ||
+            state.State != DockState.Expanded)
+        {
+            return;
+        }
+
+        dockWaveTargetX =
+            ClampDockWaveCenter(
+                rootX);
+
+        dockWaveTargetStrength = 1;
+
+        if (dockWaveCurrentX <= 0)
+            dockWaveCurrentX = dockWaveTargetX;
+
+        StartDockWaveTimer();
+    }
+
+    private void HideDockWave()
+    {
+        dockWaveTargetStrength = 0;
+        StartDockWaveTimer();
+    }
+
+    private void TickDockWave(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args)
+    {
+        if (closing)
+        {
+            StopDockWaveTimer(
+                clear: true);
+
+            return;
+        }
+
+        dockWaveTargetX =
+            ClampDockWaveCenter(
+                dockWaveTargetX);
+
+        // Position responds quickly; height follows slightly slower.
+        // That combination reads as a flexible surface instead of a pill
+        // physically sliding over the dock.
+        dockWaveCurrentX =
+            Lerp(
+                dockWaveCurrentX,
+                dockWaveTargetX,
+                0.34);
+
+        dockWaveCurrentStrength =
+            Lerp(
+                dockWaveCurrentStrength,
+                dockWaveTargetStrength,
+                0.22);
+
+        if (Math.Abs(
+                dockWaveCurrentX -
+                dockWaveTargetX) <
+            0.08)
+        {
+            dockWaveCurrentX =
+                dockWaveTargetX;
+        }
+
+        if (Math.Abs(
+                dockWaveCurrentStrength -
+                dockWaveTargetStrength) <
+            0.003)
+        {
+            dockWaveCurrentStrength =
+                dockWaveTargetStrength;
+        }
+
+        desktopBackdrop.SetDockWave(
+            dockWaveCurrentX,
+            DockWaveHalfWidth,
+            DockWaveRise,
+            dockWaveCurrentStrength);
+
+        UpdateDockWaveOutline();
+
+        var xSettled =
+            Math.Abs(
+                dockWaveCurrentX -
+                dockWaveTargetX) <
+            0.08;
+
+        var strengthSettled =
+            Math.Abs(
+                dockWaveCurrentStrength -
+                dockWaveTargetStrength) <
+            0.003;
+
+        if (!xSettled ||
+            !strengthSettled)
+        {
+            return;
+        }
+
+        if (dockWaveTargetStrength <= 0)
+        {
+            dockWaveCurrentStrength = 0;
+            desktopBackdrop.ClearDockWave();
+            UpdateDockWaveOutline();
+        }
+
+        StopDockWaveTimer(
+            clear: false);
+    }
+
+    private void UpdateDockWaveOutline()
+    {
+        if (state.State != DockState.Expanded &&
+            state.State != DockState.Expanding)
+        {
+            return;
+        }
+
+        if (root.ActualWidth <= 0 ||
+            root.ActualHeight <= 0 ||
+            surface.ActualWidth <= 0 ||
+            surface.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var centerX =
+            dockWaveCurrentX > 0
+                ? dockWaveCurrentX
+                : root.ActualWidth / 2;
+
+        // WinUI Geometry instances cannot be assigned to two Path.Data
+        // properties at the same time. Give each stroke its own geometry
+        // instance, built from the exact same values so they stay aligned.
+        dockWaveGlow.Data =
+            CreateDockWaveGeometry(
+                centerX,
+                dockWaveCurrentStrength);
+
+        dockWaveRim.Data =
+            CreateDockWaveGeometry(
+                centerX,
+                dockWaveCurrentStrength);
+    }
+
+    private Geometry CreateDockWaveGeometry(
+        double centerX,
+        double strength)
+    {
+        var dockWidth =
+            surface.ActualWidth;
+
+        var dockHeight =
+            surface.ActualHeight;
+
+        var left =
+            (root.ActualWidth -
+             dockWidth) /
+            2;
+
+        var top =
+            root.ActualHeight -
+            BottomMargin -
+            dockHeight;
+
+        var right =
+            left +
+            dockWidth;
+
+        var bottom =
+            top +
+            dockHeight;
+
+        var radius =
+            Math.Min(
+                26,
+                dockHeight / 2);
+
+        radius =
+            Math.Max(
+                0,
+                Math.Min(
+                    radius,
+                    dockWidth / 2));
+
+        var eased =
+            Math.Clamp(
+                strength,
+                0,
+                1);
+
+        eased =
+            eased *
+            eased *
+            (3 - 2 * eased);
+
+        var rise =
+            DockWaveRise *
+            eased;
+
+        centerX =
+            ClampDockWaveCenter(
+                centerX);
+
+        var availableTop =
+            Math.Max(
+                0,
+                dockWidth -
+                radius * 2);
+
+        var requestedHalfWidth =
+            Math.Min(
+                DockWaveHalfWidth,
+                Math.Max(
+                    24,
+                    availableTop * 0.46));
+
+        var topStart =
+            left +
+            radius;
+
+        var topEnd =
+            right -
+            radius;
+
+        var leftRoom =
+            Math.Max(
+                0,
+                centerX -
+                topStart);
+
+        var rightRoom =
+            Math.Max(
+                0,
+                topEnd -
+                centerX);
+
+        // At an end, the crest stays where the first/last app is.
+        // Instead of ending the wave early, its OUTER side becomes the
+        // dock corner itself. That makes the corner and bump one curve.
+        var edgeMergeThreshold =
+            Math.Min(
+                42,
+                requestedHalfWidth * 0.55);
+
+        var leftEdge =
+            rise > 0.01 &&
+            leftRoom <
+            edgeMergeThreshold;
+
+        var rightEdge =
+            rise > 0.01 &&
+            rightRoom <
+            edgeMergeThreshold;
+
+        if (leftEdge &&
+            rightEdge)
+        {
+            // Very small docks cannot meaningfully merge both ends at once.
+            leftEdge = false;
+            rightEdge = false;
+        }
+
+        var leftSpan =
+            Math.Min(
+                requestedHalfWidth,
+                leftRoom);
+
+        var rightSpan =
+            Math.Min(
+                requestedHalfWidth,
+                rightRoom);
+
+        var waveStart =
+            centerX -
+            leftSpan;
+
+        var waveEnd =
+            centerX +
+            rightSpan;
+
+        const double kappa =
+            0.55228475;
+
+        // Merge a little below the normal top-right/top-left tangent.
+        // The cubic reaches this point vertically, so the dock side stays
+        // rounded with no visible kink.
+        var cornerMergeY =
+            top +
+            radius * 0.72;
+
+        PathFigure figure;
+
+        if (leftEdge)
+        {
+            figure =
+                new PathFigure
+                {
+                    StartPoint =
+                        new global::Windows.Foundation.Point(
+                            left,
+                            cornerMergeY),
+
+                    IsClosed = true,
+                    IsFilled = false
+                };
+
+            var outerDistance =
+                Math.Max(
+                    18,
+                    centerX - left);
+
+            // LEFT CORNER + BUMP are one continuous cubic.
+            figure.Segments.Add(
+                new BezierSegment
+                {
+                    Point1 =
+                        new global::Windows.Foundation.Point(
+                            left,
+                            top +
+                            radius * 0.08),
+
+                    Point2 =
+                        new global::Windows.Foundation.Point(
+                            centerX -
+                            outerDistance * 0.48,
+                            top - rise),
+
+                    Point3 =
+                        new global::Windows.Foundation.Point(
+                            centerX,
+                            top - rise)
+                });
+        }
+        else
+        {
+            figure =
+                new PathFigure
+                {
+                    StartPoint =
+                        new global::Windows.Foundation.Point(
+                            left + radius,
+                            top),
+
+                    IsClosed = true,
+                    IsFilled = false
+                };
+
+            if (rise > 0.01)
+            {
+                figure.Segments.Add(
+                    new LineSegment
+                    {
+                        Point =
+                            new global::Windows.Foundation.Point(
+                                waveStart,
+                                top)
+                    });
+
+                figure.Segments.Add(
+                    new BezierSegment
+                    {
+                        Point1 =
+                            new global::Windows.Foundation.Point(
+                                waveStart +
+                                leftSpan * 0.38,
+                                top),
+
+                        Point2 =
+                            new global::Windows.Foundation.Point(
+                                centerX -
+                                leftSpan * 0.46,
+                                top - rise),
+
+                        Point3 =
+                            new global::Windows.Foundation.Point(
+                                centerX,
+                                top - rise)
+                    });
+            }
+        }
+
+        //
+        // CREST -> RIGHT SIDE
+        //
+        if (rise > 0.01)
+        {
+            if (rightEdge)
+            {
+                var outerDistance =
+                    Math.Max(
+                        18,
+                        right - centerX);
+
+                // RIGHT BUMP + CORNER are one continuous cubic.
+                // Point1 keeps the crest tangent horizontal.
+                // Point2/Point3 make the end tangent vertical into the side.
+                figure.Segments.Add(
+                    new BezierSegment
+                    {
+                        Point1 =
+                            new global::Windows.Foundation.Point(
+                                centerX +
+                                outerDistance * 0.48,
+                                top - rise),
+
+                        Point2 =
+                            new global::Windows.Foundation.Point(
+                                right,
+                                top +
+                                radius * 0.08),
+
+                        Point3 =
+                            new global::Windows.Foundation.Point(
+                                right,
+                                cornerMergeY)
+                    });
+            }
+            else
+            {
+                figure.Segments.Add(
+                    new BezierSegment
+                    {
+                        Point1 =
+                            new global::Windows.Foundation.Point(
+                                centerX +
+                                rightSpan * 0.46,
+                                top - rise),
+
+                        Point2 =
+                            new global::Windows.Foundation.Point(
+                                waveEnd -
+                                rightSpan * 0.38,
+                                top),
+
+                        Point3 =
+                            new global::Windows.Foundation.Point(
+                                waveEnd,
+                                top)
+                    });
+
+                figure.Segments.Add(
+                    new LineSegment
+                    {
+                        Point =
+                            new global::Windows.Foundation.Point(
+                                right - radius,
+                                top)
+                    });
+
+                // Normal top-right rounded corner when the wave is not
+                // merging into this end.
+                figure.Segments.Add(
+                    new BezierSegment
+                    {
+                        Point1 =
+                            new global::Windows.Foundation.Point(
+                                right -
+                                radius +
+                                radius * kappa,
+                                top),
+
+                        Point2 =
+                            new global::Windows.Foundation.Point(
+                                right,
+                                top +
+                                radius -
+                                radius * kappa),
+
+                        Point3 =
+                            new global::Windows.Foundation.Point(
+                                right,
+                                top + radius)
+                    });
+            }
+        }
+        else
+        {
+            figure.Segments.Add(
+                new LineSegment
+                {
+                    Point =
+                        new global::Windows.Foundation.Point(
+                            right - radius,
+                            top)
+                });
+
+            figure.Segments.Add(
+                new BezierSegment
+                {
+                    Point1 =
+                        new global::Windows.Foundation.Point(
+                            right -
+                            radius +
+                            radius * kappa,
+                            top),
+
+                    Point2 =
+                        new global::Windows.Foundation.Point(
+                            right,
+                            top +
+                            radius -
+                            radius * kappa),
+
+                    Point3 =
+                        new global::Windows.Foundation.Point(
+                            right,
+                            top + radius)
+                });
+        }
+
+        //
+        // RIGHT SIDE + BOTTOM-RIGHT
+        //
+        figure.Segments.Add(
+            new LineSegment
+            {
+                Point =
+                    new global::Windows.Foundation.Point(
+                        right,
+                        bottom - radius)
+            });
+
+        figure.Segments.Add(
+            new BezierSegment
+            {
+                Point1 =
+                    new global::Windows.Foundation.Point(
+                        right,
+                        bottom -
+                        radius +
+                        radius * kappa),
+
+                Point2 =
+                    new global::Windows.Foundation.Point(
+                        right -
+                        radius +
+                        radius * kappa,
+                        bottom),
+
+                Point3 =
+                    new global::Windows.Foundation.Point(
+                        right - radius,
+                        bottom)
+            });
+
+        //
+        // BOTTOM + BOTTOM-LEFT
+        //
+        figure.Segments.Add(
+            new LineSegment
+            {
+                Point =
+                    new global::Windows.Foundation.Point(
+                        left + radius,
+                        bottom)
+            });
+
+        figure.Segments.Add(
+            new BezierSegment
+            {
+                Point1 =
+                    new global::Windows.Foundation.Point(
+                        left +
+                        radius -
+                        radius * kappa,
+                        bottom),
+
+                Point2 =
+                    new global::Windows.Foundation.Point(
+                        left,
+                        bottom -
+                        radius +
+                        radius * kappa),
+
+                Point3 =
+                    new global::Windows.Foundation.Point(
+                        left,
+                        bottom - radius)
+            });
+
+        //
+        // LEFT SIDE + TOP-LEFT
+        //
+        if (leftEdge)
+        {
+            figure.Segments.Add(
+                new LineSegment
+                {
+                    Point =
+                        new global::Windows.Foundation.Point(
+                            left,
+                            cornerMergeY)
+                });
+        }
+        else
+        {
+            figure.Segments.Add(
+                new LineSegment
+                {
+                    Point =
+                        new global::Windows.Foundation.Point(
+                            left,
+                            top + radius)
+                });
+
+            figure.Segments.Add(
+                new BezierSegment
+                {
+                    Point1 =
+                        new global::Windows.Foundation.Point(
+                            left,
+                            top +
+                            radius -
+                            radius * kappa),
+
+                    Point2 =
+                        new global::Windows.Foundation.Point(
+                            left +
+                            radius -
+                            radius * kappa,
+                            top),
+
+                    Point3 =
+                        new global::Windows.Foundation.Point(
+                            left + radius,
+                            top)
+                });
+        }
+
+        var result =
+            new PathGeometry();
+
+        result.Figures.Add(
+            figure);
+
+        return result;
+    }
+
+    private double ClampDockWaveCenter(
+        double value)
+    {
+        var dockWidth =
+            surface.ActualWidth > 0
+                ? surface.ActualWidth
+                : surface.Width;
+
+        if (!double.IsFinite(dockWidth) ||
+            dockWidth <= 0 ||
+            root.ActualWidth <= 0)
+        {
+            return value;
+        }
+
+        var dockHeight =
+            surface.ActualHeight > 0
+                ? surface.ActualHeight
+                : 68;
+
+        var radius =
+            Math.Min(
+                26,
+                dockHeight / 2);
+
+        var left =
+            (root.ActualWidth -
+             dockWidth) /
+            2;
+
+        var topStart =
+            left +
+            radius;
+
+        var topEnd =
+            left +
+            dockWidth -
+            radius;
+
+        // Only a tiny inset is needed now because the dock corner itself
+        // becomes the outer half of the edge wave.
+        const double crestInset = 5;
+
+        var minimum =
+            topStart +
+            crestInset;
+
+        var maximum =
+            topEnd -
+            crestInset;
+
+        return minimum <= maximum
+            ? Math.Clamp(
+                value,
+                minimum,
+                maximum)
+            : left +
+              dockWidth / 2;
+    }
+
+    private static double Lerp(
+        double current,
+        double target,
+        double amount) =>
+        current +
+        (target - current) *
+        Math.Clamp(
+            amount,
+            0,
+            1);
+
+    private void StartDockWaveTimer()
+    {
+        if (dockWaveTimerRunning)
+            return;
+
+        dockWaveTimerRunning = true;
+        dockWaveTimer.Start();
+    }
+
+    private void StopDockWaveTimer(
+        bool clear)
+    {
+        if (dockWaveTimerRunning)
+        {
+            dockWaveTimerRunning = false;
+            dockWaveTimer.Stop();
+        }
+
+        if (!clear)
+            return;
+
+        dockWaveCurrentStrength = 0;
+        dockWaveTargetStrength = 0;
+        dockWaveGlow.Opacity = 0;
+        dockWaveRim.Opacity = 0;
+        desktopBackdrop.ClearDockWave();
     }
 
     private Task ToggleDockAsync() => state.State is DockState.Expanded or DockState.Expanding or DockState.Hovering
@@ -311,6 +1148,13 @@ private Button CreateApplicationButton(DockApplicationItem item)
         {
             state.Complete(revision);
             icons.IsHitTestVisible = state.State == DockState.Expanded;
+
+            if (state.State == DockState.Expanded)
+            {
+                dockWaveGlow.Opacity = 0.22;
+                dockWaveRim.Opacity = 0.78;
+                UpdateDockWaveOutline();
+            }
         }
     }
 
@@ -319,6 +1163,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         DockAnimationController.Trace($"PointerExited state={state.State}");
 
         animation.ResetMagnification();
+        HideDockWave();
         ScheduleCollapse();
     }
 
@@ -326,6 +1171,11 @@ private Button CreateApplicationButton(DockApplicationItem item)
     {
         previews.Hide();
         animation.ResetMagnification();
+        HideDockWave();
+
+        dockWaveGlow.Opacity = 0;
+        dockWaveRim.Opacity = 0;
+
         collapseDelay?.Cancel();
         if (closing || state.State is DockState.Hidden or DockState.Idle or DockState.Collapsing) return;
         var revision = state.Collapse();
@@ -371,8 +1221,10 @@ private Button CreateApplicationButton(DockApplicationItem item)
             ShadowOpacity = expanded ? 0.24 : 0.28,
             ShadowBlur = expanded ? 26 : 20,
             ShadowOffset = expanded ? 7 : 6,
-            EdgeHighlight = expanded ? 0.06 : 0,
-            BorderOpacity = expanded ? 0.22 : 0.18,
+            // Expanded mode uses the continuously deformed outline below,
+            // so disable GlassSurface's static rounded-rectangle rim.
+            EdgeHighlight = expanded ? 0 : 0,
+            BorderOpacity = expanded ? 0 : 0.18,
             BorderThickness = 1
         };
 
@@ -381,8 +1233,30 @@ private Button CreateApplicationButton(DockApplicationItem item)
         UpdateBackdropBounds();
     }
 
-    private void UpdateBackdropBounds() => desktopBackdrop.SetBounds(root.ActualWidth, root.ActualHeight,
-        surface.ActualWidth, surface.ActualHeight, BottomMargin, root.XamlRoot?.RasterizationScale ?? 1, surface.Opacity);
+    private void UpdateBackdropBounds()
+    {
+        desktopBackdrop.SetBounds(
+            root.ActualWidth,
+            root.ActualHeight,
+            surface.ActualWidth,
+            surface.ActualHeight,
+            BottomMargin,
+            root.XamlRoot?.RasterizationScale ?? 1,
+            surface.Opacity);
+
+        if (state.State is DockState.Expanded or DockState.Expanding)
+        {
+            desktopBackdrop.SetDockWave(
+                dockWaveCurrentX > 0
+                    ? dockWaveCurrentX
+                    : root.ActualWidth / 2,
+                DockWaveHalfWidth,
+                DockWaveRise,
+                dockWaveCurrentStrength);
+
+            UpdateDockWaveOutline();
+        }
+    }
 
     public void SetBottomMargin(double margin)
     {
@@ -493,6 +1367,10 @@ private Button CreateApplicationButton(DockApplicationItem item)
         state.Hide();
         collapseDelay?.Cancel();
         heartbeat.Stop();
+
+        StopDockWaveTimer(clear: true);
+        dockWaveTimer.Tick -= TickDockWave;
+
         // Restore synchronously before closing the last XAML window can end the process.
         if (taskbarSession is not null || startingTest) TaskbarRecovery.RestoreNow();
         animation.Stop();

@@ -1,5 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using GlassDock.Core.Materials;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -15,8 +17,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionEffectFactory? factory;
     private W.CompositionEffectBrush? effect;
     private W.CompositionBackdropBrush? source;
-    private W.CompositionRoundedRectangleGeometry? geometry;
+    private W.CompositionPathGeometry? geometry;
     private W.CompositionSpriteShape? shape;
+    private CanvasDevice? canvasDevice;
+    private CanvasGeometry? canvasGeometry;
     private W.CompositionColorBrush? fill;
     private W.ShapeVisual? visual;
     private W.CompositionVisualSurface? maskSurface;
@@ -36,6 +40,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private double lastScale = 1;
     private double lastOpacity = 1;
 
+    // Continuous dock-wave state. This deforms the TOP EDGE of the same
+    // dock silhouette; it is not a second pill/shape layered above it.
+    private bool waveEnabled;
+    private double waveCenterX;
+    private double waveHalfWidth = 68;
+    private double waveRise = 18;
+    private double waveStrength;
+
     public string RenderingMode { get; private set; } = "Desktop backdrop connecting";
     public event EventHandler? RenderingModeChanged;
 
@@ -43,7 +55,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     {
         base.OnTargetConnected(target, xamlRoot);
         compositor = new W.Compositor();
-        geometry = compositor.CreateRoundedRectangleGeometry();
+        canvasDevice = CanvasDevice.GetSharedDevice();
+        geometry = compositor.CreatePathGeometry();
         shape = compositor.CreateSpriteShape(geometry);
         fill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(255, 255, 255, 255));
         shape.FillBrush = fill;
@@ -97,10 +110,22 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     public void Apply(GlassMaterial value)
     {
         material = RefractionLayer.ForNativeBackend(value);
-        if (effect is null) return;
-        foreach (var (name, scalar) in GlassEffectGraph.Scalars(material)) effect.Properties.InsertScalar(name, scalar);
-        effect.Properties.InsertScalar("BaseBlur.BlurAmount", (float)material.BlurAmount);
-        effect.Properties.InsertColor("Tint.Color", GlassEffectGraph.Tint(material));
+
+        if (effect is not null)
+        {
+            foreach (var (name, scalar) in GlassEffectGraph.Scalars(material))
+                effect.Properties.InsertScalar(name, scalar);
+
+            effect.Properties.InsertScalar(
+                "BaseBlur.BlurAmount",
+                (float)material.BlurAmount);
+
+            effect.Properties.InsertColor(
+                "Tint.Color",
+                GlassEffectGraph.Tint(material));
+        }
+
+        UpdateMaskPath();
     }
 
     public void SetBounds(
@@ -157,25 +182,475 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         visual.Size = size;
         maskSurface.SourceSize = size;
 
-        geometry.Offset =
-            new Vector2(
-                (float)((windowWidth - width) / 2 * scale),
-                (float)((windowHeight - bottom - height) * scale));
+        UpdateMaskPath();
+    }
 
-        geometry.Size =
-            new Vector2(
-                (float)(width * scale),
-                (float)(height * scale));
+    /// <summary>
+    /// Deforms the dock's existing top edge into one smooth wave.
+    /// All values are in root/window DIPs.
+    /// </summary>
+    public void SetDockWave(
+        double centerX,
+        double halfWidth,
+        double rise,
+        double strength)
+    {
+        if (!double.IsFinite(centerX) ||
+            !double.IsFinite(halfWidth) ||
+            !double.IsFinite(rise) ||
+            !double.IsFinite(strength))
+        {
+            return;
+        }
+
+        waveEnabled = true;
+        waveCenterX = centerX;
+        waveHalfWidth = Math.Max(24, halfWidth);
+        waveRise = Math.Max(0, rise);
+        waveStrength = Math.Clamp(strength, 0, 1);
+
+        UpdateMaskPath();
+    }
+
+    public void ClearDockWave()
+    {
+        waveEnabled = false;
+        waveStrength = 0;
+        UpdateMaskPath();
+    }
+
+    private void UpdateMaskPath()
+    {
+        if (geometry is null ||
+            canvasDevice is null ||
+            visual is null ||
+            maskSurface is null ||
+            !hasBounds)
+        {
+            return;
+        }
+
+        var scale =
+            Math.Max(
+                0.01,
+                lastScale);
+
+        var left =
+            (float)(
+                (lastWindowWidth - lastWidth) /
+                2 *
+                scale);
+
+        var top =
+            (float)(
+                (lastWindowHeight -
+                 lastBottom -
+                 lastHeight) *
+                scale);
+
+        var right =
+            left +
+            (float)(
+                lastWidth *
+                scale);
+
+        var bottom =
+            top +
+            (float)(
+                lastHeight *
+                scale);
 
         var radius =
             (float)(
                 Math.Min(
                     material.CornerRadius,
-                    height / 2) *
+                    lastHeight / 2) *
                 scale);
 
-        geometry.CornerRadius =
-            new Vector2(radius);
+        radius =
+            Math.Max(
+                0,
+                Math.Min(
+                    radius,
+                    Math.Min(
+                        (right - left) / 2,
+                        (bottom - top) / 2)));
+
+        var strength =
+            waveEnabled
+                ? Math.Clamp(
+                    waveStrength,
+                    0,
+                    1)
+                : 0;
+
+        var eased =
+            strength *
+            strength *
+            (3 - 2 * strength);
+
+        var rise =
+            (float)(
+                waveRise *
+                eased *
+                scale);
+
+        var availableTop =
+            Math.Max(
+                0,
+                right -
+                left -
+                radius * 2);
+
+        var requestedHalfWidth =
+            (float)Math.Min(
+                waveHalfWidth *
+                scale,
+                Math.Max(
+                    24 * scale,
+                    availableTop * 0.46));
+
+        var topStart =
+            left +
+            radius;
+
+        var topEnd =
+            right -
+            radius;
+
+        var crestInset =
+            (float)(
+                5 *
+                scale);
+
+        var center =
+            (float)(
+                waveCenterX *
+                scale);
+
+        center =
+            Math.Clamp(
+                center,
+                topStart + crestInset,
+                topEnd - crestInset);
+
+        var leftRoom =
+            Math.Max(
+                0,
+                center -
+                topStart);
+
+        var rightRoom =
+            Math.Max(
+                0,
+                topEnd -
+                center);
+
+        var edgeMergeThreshold =
+            Math.Min(
+                (float)(42 * scale),
+                requestedHalfWidth * 0.55f);
+
+        var leftEdge =
+            rise > 0.01f &&
+            leftRoom <
+            edgeMergeThreshold;
+
+        var rightEdge =
+            rise > 0.01f &&
+            rightRoom <
+            edgeMergeThreshold;
+
+        if (leftEdge &&
+            rightEdge)
+        {
+            leftEdge = false;
+            rightEdge = false;
+        }
+
+        var leftSpan =
+            Math.Min(
+                requestedHalfWidth,
+                leftRoom);
+
+        var rightSpan =
+            Math.Min(
+                requestedHalfWidth,
+                rightRoom);
+
+        var waveStart =
+            center -
+            leftSpan;
+
+        var waveEnd =
+            center +
+            rightSpan;
+
+        const float kappa =
+            0.55228475f;
+
+        var cornerMergeY =
+            top +
+            radius *
+            0.72f;
+
+        using var builder =
+            new CanvasPathBuilder(
+                canvasDevice);
+
+        if (leftEdge)
+        {
+            builder.BeginFigure(
+                new Vector2(
+                    left,
+                    cornerMergeY));
+
+            var outerDistance =
+                Math.Max(
+                    (float)(18 * scale),
+                    center - left);
+
+            builder.AddCubicBezier(
+                new Vector2(
+                    left,
+                    top +
+                    radius * 0.08f),
+
+                new Vector2(
+                    center -
+                    outerDistance * 0.48f,
+                    top - rise),
+
+                new Vector2(
+                    center,
+                    top - rise));
+        }
+        else
+        {
+            builder.BeginFigure(
+                new Vector2(
+                    left + radius,
+                    top));
+
+            if (rise > 0.01f)
+            {
+                builder.AddLine(
+                    new Vector2(
+                        waveStart,
+                        top));
+
+                builder.AddCubicBezier(
+                    new Vector2(
+                        waveStart +
+                        leftSpan * 0.38f,
+                        top),
+
+                    new Vector2(
+                        center -
+                        leftSpan * 0.46f,
+                        top - rise),
+
+                    new Vector2(
+                        center,
+                        top - rise));
+            }
+        }
+
+        //
+        // CREST -> RIGHT SIDE
+        //
+        if (rise > 0.01f)
+        {
+            if (rightEdge)
+            {
+                var outerDistance =
+                    Math.Max(
+                        (float)(18 * scale),
+                        right - center);
+
+                builder.AddCubicBezier(
+                    new Vector2(
+                        center +
+                        outerDistance * 0.48f,
+                        top - rise),
+
+                    new Vector2(
+                        right,
+                        top +
+                        radius * 0.08f),
+
+                    new Vector2(
+                        right,
+                        cornerMergeY));
+            }
+            else
+            {
+                builder.AddCubicBezier(
+                    new Vector2(
+                        center +
+                        rightSpan * 0.46f,
+                        top - rise),
+
+                    new Vector2(
+                        waveEnd -
+                        rightSpan * 0.38f,
+                        top),
+
+                    new Vector2(
+                        waveEnd,
+                        top));
+
+                builder.AddLine(
+                    new Vector2(
+                        right - radius,
+                        top));
+
+                builder.AddCubicBezier(
+                    new Vector2(
+                        right -
+                        radius +
+                        radius * kappa,
+                        top),
+
+                    new Vector2(
+                        right,
+                        top +
+                        radius -
+                        radius * kappa),
+
+                    new Vector2(
+                        right,
+                        top + radius));
+            }
+        }
+        else
+        {
+            builder.AddLine(
+                new Vector2(
+                    right - radius,
+                    top));
+
+            builder.AddCubicBezier(
+                new Vector2(
+                    right -
+                    radius +
+                    radius * kappa,
+                    top),
+
+                new Vector2(
+                    right,
+                    top +
+                    radius -
+                    radius * kappa),
+
+                new Vector2(
+                    right,
+                    top + radius));
+        }
+
+        //
+        // RIGHT SIDE + BOTTOM-RIGHT
+        //
+        builder.AddLine(
+            new Vector2(
+                right,
+                bottom - radius));
+
+        builder.AddCubicBezier(
+            new Vector2(
+                right,
+                bottom -
+                radius +
+                radius * kappa),
+
+            new Vector2(
+                right -
+                radius +
+                radius * kappa,
+                bottom),
+
+            new Vector2(
+                right - radius,
+                bottom));
+
+        //
+        // BOTTOM + BOTTOM-LEFT
+        //
+        builder.AddLine(
+            new Vector2(
+                left + radius,
+                bottom));
+
+        builder.AddCubicBezier(
+            new Vector2(
+                left +
+                radius -
+                radius * kappa,
+                bottom),
+
+            new Vector2(
+                left,
+                bottom -
+                radius +
+                radius * kappa),
+
+            new Vector2(
+                left,
+                bottom - radius));
+
+        //
+        // LEFT SIDE + TOP-LEFT
+        //
+        if (leftEdge)
+        {
+            builder.AddLine(
+                new Vector2(
+                    left,
+                    cornerMergeY));
+        }
+        else
+        {
+            builder.AddLine(
+                new Vector2(
+                    left,
+                    top + radius));
+
+            builder.AddCubicBezier(
+                new Vector2(
+                    left,
+                    top +
+                    radius -
+                    radius * kappa),
+
+                new Vector2(
+                    left +
+                    radius -
+                    radius * kappa,
+                    top),
+
+                new Vector2(
+                    left + radius,
+                    top));
+        }
+
+        builder.EndFigure(
+            CanvasFigureLoop.Closed);
+
+        var nextGeometry =
+            CanvasGeometry.CreatePath(
+                builder);
+
+        geometry.Path =
+            new W.CompositionPath(
+                nextGeometry);
+
+        var previousGeometry =
+            canvasGeometry;
+
+        canvasGeometry =
+            nextGeometry;
+
+        previousGeometry?.Dispose();
     }
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
@@ -188,13 +663,26 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         shape?.Dispose();
         fill?.Dispose();
         geometry?.Dispose();
+        canvasGeometry?.Dispose();
         fallback?.Dispose();
         effect?.Dispose();
         factory?.Dispose();
         source?.Dispose();
         compositor?.Dispose();
-        output = null; mask = null; maskSurface = null; visual = null; shape = null; fill = null;
-        geometry = null; fallback = null; effect = null; factory = null; source = null; compositor = null;
+        output = null;
+        mask = null;
+        maskSurface = null;
+        visual = null;
+        shape = null;
+        fill = null;
+        geometry = null;
+        canvasGeometry = null;
+        canvasDevice = null;
+        fallback = null;
+        effect = null;
+        factory = null;
+        source = null;
+        compositor = null;
         base.OnTargetDisconnected(target);
     }
 }
