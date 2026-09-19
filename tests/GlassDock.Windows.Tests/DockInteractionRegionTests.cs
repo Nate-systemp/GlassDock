@@ -46,6 +46,15 @@ public sealed class DockInteractionRegionTests
                 Assert.NotEqual(0, GetWindowRgn(window, region));
                 Assert.True(Contains(320, 120));
                 Assert.False(Contains(150, 100));
+
+                // The peek rise uses one stable corridor instead of moving a
+                // five-pixel hit target under the pointer every animation tick.
+                manager.SetPeekInteraction(-2, true, 24);
+                Assert.Equal(0, GetWindowRgn(window, region));
+                Hit(320, 140, true);
+                Hit(320, 120, true);
+                Hit(320, 105, false);
+                Hit(240, 120, false);
             }
         }
         finally { DeleteObject(region); DestroyWindow(window); }

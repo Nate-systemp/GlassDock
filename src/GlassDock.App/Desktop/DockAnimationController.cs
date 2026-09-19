@@ -19,8 +19,13 @@ internal sealed class DockAnimationController
     private readonly Panel icons;
     private readonly FrameworkElement indicator;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer magnificationTimer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer placementTimer;
+    private double placementFrom, placementTarget, placementStarted, placementDuration;
+    public bool IsPlacementAnimating { get; private set; }
+    public event EventHandler? PlacementChanged;
 
     private Storyboard? active;
+    private Storyboard? indicatorFade;
     private TaskCompletionSource<bool>? completion;
 
     private bool magnificationRequested;
@@ -44,6 +49,75 @@ internal sealed class DockAnimationController
 
         magnificationTimer.Tick +=
             (_, _) => TickMagnification();
+        placementTimer = icons.DispatcherQueue.CreateTimer();
+        placementTimer.Interval = TimeSpan.FromMilliseconds(16);
+        placementTimer.Tick += (_, _) =>
+        {
+            var t = Math.Clamp((Environment.TickCount64 - placementStarted) / placementDuration, 0, 1);
+            if (t == 1) { placementTimer.Stop(); IsPlacementAnimating = false; }
+            ApplyBottom(placementFrom + (placementTarget - placementFrom) * t * t * (3 - 2 * t));
+        };
+    }
+
+    public void SetBottom(double bottom)
+    {
+        placementTimer.Stop(); IsPlacementAnimating = false;
+        ApplyBottom(bottom);
+    }
+
+    public void AnimateBottom(double bottom, double milliseconds)
+    {
+        placementFrom = surface.Margin.Bottom;
+        placementTarget = bottom;
+        placementStarted = Environment.TickCount64;
+        placementDuration = milliseconds;
+        IsPlacementAnimating = true;
+        placementTimer.Start();
+    }
+
+    private void ApplyBottom(double bottom)
+    {
+        surface.Margin = indicator.Margin = new Thickness(0, 0, 0, bottom);
+        PlacementChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Fades the collapsed indicator without interrupting dock animation.</summary>
+    public void AnimateIndicatorOpacity(double target, double milliseconds)
+    {
+        indicatorFade?.Stop();
+        indicatorFade = null;
+
+        var from = indicator.Opacity;
+        if (Math.Abs(from - target) < 0.001)
+        {
+            indicator.Opacity = target;
+            return;
+        }
+
+        var storyboard = new Storyboard();
+        var fade = new DoubleAnimation
+        {
+            From = from,
+            To = target,
+            Duration = TimeSpan.FromMilliseconds(Math.Max(1, milliseconds)),
+            EnableDependentAnimation = true,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Storyboard.SetTarget(fade, indicator);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        storyboard.Children.Add(fade);
+        indicatorFade = storyboard;
+        storyboard.Completed += (_, _) =>
+        {
+            if (ReferenceEquals(indicatorFade, storyboard)) indicatorFade = null;
+        };
+        storyboard.Begin();
+    }
+
+    public void StopIndicatorOpacityAnimation()
+    {
+        indicatorFade?.Stop();
+        indicatorFade = null;
     }
 
     public Task<bool> AnimateAsync(
@@ -496,7 +570,9 @@ internal sealed class DockAnimationController
 
     public void Stop()
     {
+        placementTimer.Stop(); IsPlacementAnimating = false;
         active?.Stop();
+        StopIndicatorOpacityAnimation();
         completion?.TrySetResult(false);
 
         ResetMagnification(

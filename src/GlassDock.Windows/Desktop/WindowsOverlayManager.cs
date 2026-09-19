@@ -16,6 +16,9 @@ public sealed class WindowsOverlayManager : IDisposable
     private const nuint InputTimer = 0x4744;
     private bool expandedInput;
     private bool transparentInput;
+    private NativeMethods.Point? previousPointer;
+    public event EventHandler? PointerMovedOutsideInput;
+    public event EventHandler? PointerMovedInsideInput;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
     public const double Width = 640;
     public const double Height = 144;
@@ -183,6 +186,49 @@ public sealed class WindowsOverlayManager : IDisposable
         // Windows owns the region after a successful SetWindowRgn.
     }
 
+    /// <summary>
+    /// Updates the small peek target. During the rise/fall animation an input
+    /// corridor keeps the pointer latched to the dock instead of chasing the
+    /// moving five-pixel pill and repeatedly entering/leaving it.
+    /// </summary>
+    public void SetPeekInteraction(double bottom, bool watchPointer, double? transitionBottom = null)
+    {
+        var left = (Width - 120) / 2;
+        var top = Height - bottom - 5;
+        if (watchPointer)
+        {
+            if (transitionBottom is { } targetBottom)
+            {
+                var targetTop = Height - targetBottom - 5;
+                var corridorTop = Math.Min(top, targetTop) - 8;
+                var corridorBottom = Math.Max(top + 6, targetTop + 6) + 8;
+                SetInteractionPolygon([(left - 8, corridorTop), (left + 128, corridorTop),
+                    (left + 128, corridorBottom), (left - 8, corridorBottom)]);
+                return;
+            }
+            SetInteractionPolygon([(left - 1, top - 1), (left + 121, top - 1),
+                (left + 121, top + 6), (left - 1, top + 6)]);
+            return;
+        }
+        expandedInput = false;
+        NativeMethods.KillTimer(hwnd, InputTimer);
+        SetInputTransparent(false);
+        previousPointer = null;
+        if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
+        inputRegion = 0;
+        lastInteractionPolygon = null;
+        var scale = Scale;
+        var region = NativeMethods.CreateRoundRectRgn((int)Math.Floor((left - 1) * scale),
+            (int)Math.Floor((top - 1) * scale), (int)Math.Ceiling((left + 121) * scale),
+            (int)Math.Ceiling((top + 6) * scale), (int)(5 * scale), (int)(5 * scale));
+        if (region == 0) throw new Win32Exception();
+        if (NativeMethods.SetWindowRgn(hwnd, region, true) == 0)
+        {
+            NativeMethods.DeleteObject(region);
+            throw new Win32Exception();
+        }
+    }
+
     /// <summary>Keep an input-only region; never clip expanded glass/shadow rendering.</summary>
     public void SetInteractionPolygon(IReadOnlyList<(double X, double Y)> outline)
     {
@@ -197,6 +243,7 @@ public sealed class WindowsOverlayManager : IDisposable
         if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
         if (!expandedInput)
         {
+            if (GetCursorPos(out var current)) previousPointer = current;
             NativeMethods.SetWindowRgn(hwnd, 0, true);
             expandedInput = true;
             // Only runs while expanded/transitioning. Idle uses its existing small native region.
@@ -215,7 +262,17 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private void UpdateInputTransparency()
     {
-        if (expandedInput && GetCursorPos(out var point)) SetInputTransparent(!ContainsScreenPoint(point));
+        if (!expandedInput || !GetCursorPos(out var point)) return;
+        var inside = ContainsScreenPoint(point);
+        SetInputTransparent(!inside);
+        var moved = previousPointer is { } previous && (previous.X != point.X || previous.Y != point.Y);
+        previousPointer = point;
+        // Geometry movement alone must not cause a raised pill to oscillate.
+        if (moved)
+        {
+            if (inside) PointerMovedInsideInput?.Invoke(this, EventArgs.Empty);
+            else PointerMovedOutsideInput?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void SetInputTransparent(bool transparent)

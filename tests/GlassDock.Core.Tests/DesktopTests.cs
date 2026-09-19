@@ -48,6 +48,20 @@ public sealed class DesktopTests
     }
 
     [Fact]
+    public void Peek_hover_leave_repeats_without_changing_expansion_state()
+    {
+        var state = new DockStateMachine();
+        state.Show();
+        for (var i = 0; i < 50; i++)
+        {
+            state.Enter();
+            Assert.Equal(DockState.Hovering, state.State);
+            state.LeavePeek();
+            Assert.Equal(DockState.Idle, state.State);
+        }
+    }
+
+    [Fact]
     public void Placement_uses_screen_coordinates_and_dpi_not_app_window()
     {
         var actual = DesktopPlacement.BottomCenter(new PixelRect(-1920, 0, 1920, 1080), 640, 144, 8, 1.25);

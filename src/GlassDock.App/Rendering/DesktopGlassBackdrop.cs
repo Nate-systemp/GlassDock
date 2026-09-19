@@ -339,11 +339,9 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 waveCenterX *
                 scale);
 
-        center =
-            Math.Clamp(
-                center,
-                topStart + crestInset,
-                topEnd - crestInset);
+        var centerMin = Math.Min(topStart + crestInset, topEnd - crestInset);
+        var centerMax = Math.Max(topStart + crestInset, topEnd - crestInset);
+        center = Math.Clamp(center, centerMin, centerMax);
 
         var leftRoom =
             Math.Max(

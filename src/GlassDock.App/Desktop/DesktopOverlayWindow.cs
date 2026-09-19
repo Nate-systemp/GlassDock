@@ -113,6 +113,8 @@ public sealed class DesktopOverlayWindow : Window
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer dockWaveTimer;
     private CancellationTokenSource? collapseDelay;
+    private CancellationTokenSource? peekLeaveDelay;
+    private CancellationTokenSource? pillHideDelay;
     private TaskbarDevelopmentSession? taskbarSession;
     private DevelopmentWindow? controls;
     private GlassHomeWindow? home;
@@ -130,8 +132,13 @@ public sealed class DesktopOverlayWindow : Window
 
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
+    private const int ExpandedCollapseGraceMilliseconds = 1000;
+    private const int PeekLeaveGraceMilliseconds = 450;
+    private const int PillHoldMilliseconds = 2000;
+    private const double PillHideDurationMilliseconds = 260;
 
     public double BottomMargin { get; private set; } = 24;
+    private const double PeekRestBottom = -2; // Keep only a tiny edge hit target while visually hidden.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
     public bool HotkeysAvailable => keyboard.IsRegistered;
@@ -179,6 +186,26 @@ public sealed class DesktopOverlayWindow : Window
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
+        animation.PlacementChanged += (_, _) =>
+        {
+            UpdateBackdropBounds();
+            if (state.State == DockState.Idle && !animation.IsPlacementAnimating)
+                indicator.Opacity = 0;
+            if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
+            else UpdateDockWaveOutline();
+        };
+        windowManager.PointerMovedOutsideInput += (_, _) =>
+        {
+            if (state.State == DockState.Hovering &&
+                !animation.IsPlacementAnimating &&
+                !menuOpen)
+                ScheduleLowerPeek();
+        };
+        windowManager.PointerMovedInsideInput += (_, _) =>
+        {
+            if (state.State == DockState.Hovering)
+                CancelLowerPeek();
+        };
 
         dockWaveTimer = DispatcherQueue.CreateTimer();
         dockWaveTimer.Interval = TimeSpan.FromMilliseconds(16);
@@ -201,11 +228,18 @@ keyboard.RecoveryRequested +=
         root.PointerEntered += Entered;
         root.PointerMoved += Moved;
         root.PointerExited += Exited;
+        root.Tapped += async (_, e) =>
+        {
+            if (state.State is not (DockState.Idle or DockState.Hovering)) return;
+            e.Handled = true;
+            await ExpandDockAsync();
+        };
         root.Loaded += async (_, _) =>
         {
             windowManager.Position(0);
-            windowManager.SetInteractionRegion(false);
             state.Show();
+            animation.SetBottom(PeekRestBottom);
+            indicator.Opacity = 0;
             ApplyMaterial(false);
             applicationService.Start();
             await StartTaskbarTestAsync(whileAppActive: true);
@@ -227,7 +261,9 @@ keyboard.RecoveryRequested +=
         };
         Closed += OnClosed;
         windowManager.Position(0);
-        windowManager.SetInteractionRegion(false);
+        surface.Margin = indicator.Margin = new Thickness(0, 0, 0, PeekRestBottom);
+        indicator.Opacity = 0;
+        windowManager.SetPeekInteraction(PeekRestBottom, false);
     }
 
     private static void MenuItem(MenuFlyout menu, string text, Action action)
@@ -351,9 +387,20 @@ private Button CreateApplicationButton(DockApplicationItem item)
         return button;
     }
 
-    private async void Entered(object sender, PointerRoutedEventArgs e)
+    private void Entered(object sender, PointerRoutedEventArgs e)
     {
         DockAnimationController.Trace($"PointerEntered state={state.State}");
+        collapseDelay?.Cancel();
+        CancelLowerPeek();
+        CancelPillHide();
+        if (state.State == DockState.Idle)
+        {
+            state.Enter();
+            indicator.Opacity = 1;
+            animation.AnimateBottom(BottomMargin, 180);
+            UpdatePeekInput();
+            return;
+        }
 
         // Capture the pointer before expansion so a stationary mouse already
         // influences the closest icon as soon as the dock finishes opening.
@@ -363,12 +410,53 @@ private Button CreateApplicationButton(DockApplicationItem item)
         var rootX =
             e.GetCurrentPoint(root).Position.X;
 
-        await ExpandDockAsync();
-
         if (state.State == DockState.Expanded)
         {
             animation.UpdateMagnification(pointerX);
             ShowDockWave(rootX);
+        }
+    }
+
+    private void UpdatePeekInput()
+    {
+        var placementAnimating = animation.IsPlacementAnimating;
+        windowManager.SetPeekInteraction(
+            placementAnimating ? PeekRestBottom : surface.Margin.Bottom,
+            state.State == DockState.Hovering || placementAnimating,
+            placementAnimating ? BottomMargin : null);
+    }
+
+    private void LowerPeek()
+    {
+        CancelLowerPeek();
+        state.LeavePeek();
+        animation.AnimateBottom(PeekRestBottom, 210);
+    }
+
+    private void CancelLowerPeek()
+    {
+        peekLeaveDelay?.Cancel();
+        peekLeaveDelay = null;
+    }
+
+    private async void ScheduleLowerPeek()
+    {
+        CancelLowerPeek();
+        var delay = new CancellationTokenSource();
+        peekLeaveDelay = delay;
+        try
+        {
+            await Task.Delay(PeekLeaveGraceMilliseconds, delay.Token);
+            if (delay.IsCancellationRequested || closing || menuOpen ||
+                state.State != DockState.Hovering || animation.IsPlacementAnimating)
+                return;
+            LowerPeek();
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(peekLeaveDelay, delay)) peekLeaveDelay = null;
+            delay.Dispose();
         }
     }
 
@@ -585,7 +673,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
         var top =
             root.ActualHeight -
-            BottomMargin -
+            surface.Margin.Bottom -
             dockHeight;
 
         var right =
@@ -1162,7 +1250,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         desktopBackdrop.ClearDockWave();
     }
 
-    private Task ToggleDockAsync() => state.State is DockState.Expanded or DockState.Expanding or DockState.Hovering
+    private Task ToggleDockAsync() => state.State is DockState.Expanded or DockState.Expanding
         ? CollapseDockAsync()
         : ExpandDockAsync();
 
@@ -1170,9 +1258,12 @@ private Button CreateApplicationButton(DockApplicationItem item)
     {
         if (closing || state.State == DockState.Hidden) return;
         collapseDelay?.Cancel();
+        CancelLowerPeek();
+        CancelPillHide();
         if (state.State is DockState.Expanded or DockState.Expanding) return;
         state.Enter();
         var revision = state.Expand();
+        animation.AnimateBottom(BottomMargin, 320);
         UpdateDockWaveOutline();
         ApplyMaterial(true);
         var targetWidth = CalculateTargetDockWidth();
@@ -1193,6 +1284,9 @@ private Button CreateApplicationButton(DockApplicationItem item)
     private void Exited(object sender, PointerRoutedEventArgs e)
     {
         DockAnimationController.Trace($"PointerExited state={state.State}");
+        // Raising the indicator can move it away from a stationary pointer.
+        // The native pointer-motion notification handles actual peek departure.
+        if (state.State is DockState.Idle or DockState.Hovering) return;
 
         animation.ResetMagnification();
         HideDockWave();
@@ -1201,7 +1295,10 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
     private async Task CollapseDockAsync()
     {
+        if (state.State == DockState.Hovering) { LowerPeek(); return; }
         previews.Hide();
+        CancelLowerPeek();
+        CancelPillHide();
         animation.ResetMagnification();
         HideDockWave();
 
@@ -1218,8 +1315,51 @@ private Button CreateApplicationButton(DockApplicationItem item)
             if (state.State == DockState.Idle)
             {
                 ApplyMaterial(false);
-                windowManager.SetInteractionRegion(false, BottomMargin);
+                // Keep the completed pill at its normal collapsed position
+                // before starting the separate two-second hide countdown.
+                animation.SetBottom(BottomMargin);
+                indicator.Opacity = 1;
+                UpdatePeekInput();
+                SchedulePillHide();
             }
+        }
+    }
+
+    private void CancelPillHide()
+    {
+        pillHideDelay?.Cancel();
+        pillHideDelay = null;
+        animation.StopIndicatorOpacityAnimation();
+    }
+
+    private async void SchedulePillHide()
+    {
+        pillHideDelay?.Cancel();
+        var delay = new CancellationTokenSource();
+        pillHideDelay = delay;
+        try
+        {
+            await Task.Delay(PillHoldMilliseconds, delay.Token);
+            if (delay.IsCancellationRequested || closing || menuOpen ||
+                state.State != DockState.Idle || previews.HoldsDock)
+                return;
+
+            var revision = state.Revision;
+            animation.AnimateBottom(PeekRestBottom, PillHideDurationMilliseconds);
+            animation.AnimateIndicatorOpacity(0, PillHideDurationMilliseconds);
+            await Task.Delay((int)PillHideDurationMilliseconds + 40, delay.Token);
+            if (delay.IsCancellationRequested || closing || state.State != DockState.Idle ||
+                revision != state.Revision)
+                return;
+
+            animation.SetBottom(PeekRestBottom);
+            UpdatePeekInput();
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(pillHideDelay, delay)) pillHideDelay = null;
+            delay.Dispose();
         }
     }
 
@@ -1230,7 +1370,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         collapseDelay = delay;
         try
         {
-            await Task.Delay(650, delay.Token);
+            await Task.Delay(ExpandedCollapseGraceMilliseconds, delay.Token);
             if (menuOpen || closing || previews.HoldsDock) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             await CollapseDockAsync();
@@ -1272,7 +1412,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
             root.ActualHeight,
             surface.ActualWidth,
             surface.ActualHeight,
-            BottomMargin,
+            surface.Margin.Bottom,
             root.XamlRoot?.RasterizationScale ?? 1,
             surface.Opacity);
 
@@ -1293,12 +1433,14 @@ private Button CreateApplicationButton(DockApplicationItem item)
     public void SetBottomMargin(double margin)
     {
         BottomMargin = Math.Clamp(double.IsFinite(margin) ? margin : 24, 16, 100);
-        surface.Margin = indicator.Margin = icons.Margin = new Thickness(0, 0, 0, BottomMargin);
+        icons.Margin = new Thickness(0, 0, 0, BottomMargin);
+        if (state.State == DockState.Expanded) animation.SetBottom(BottomMargin);
+        else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
         windowManager.Position(0);
-        if (state.State == DockState.Idle) windowManager.SetInteractionRegion(false, BottomMargin);
+        if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
         else UpdateDockWaveOutline();
         UpdateBackdropBounds();
-        SetStatus($"Indicator bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
+        SetStatus($"Expanded dock bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
         previews.Reposition();
     }
 
@@ -1399,6 +1541,8 @@ private Button CreateApplicationButton(DockApplicationItem item)
         taskbarRevision++;
         state.Hide();
         collapseDelay?.Cancel();
+        CancelLowerPeek();
+        CancelPillHide();
         heartbeat.Stop();
 
         StopDockWaveTimer(clear: true);
