@@ -10,6 +10,39 @@ namespace GlassDock.Windows.Tests;
 public sealed class DesktopWindowHighlightTests
 {
     [Fact]
+    public async Task Capture_frequency_measurement()
+    {
+        var completion = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            nint source = 0;
+            try
+            {
+                source = CreateWindowExW(0x08000080, "STATIC", "Capture frequency test", 0x80000006,
+                    120, 120, 320, 240, 0, 0, 0, 0);
+                ShowWindow(source, 4); UpdateWindow(source);
+                var model = new ApplicationWindow(new(null, Environment.ProcessPath), "Test", source,
+                    Environment.ProcessId, System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks, true, null);
+                using var cache = new WindowFrameCache();
+                var until = Environment.TickCount64 + 18000;
+                while (Environment.TickCount64 < until)
+                {
+                    cache.Track([model]);
+                    while (PeekMessageW(out var message, 0, 0, 0, 1)) { TranslateMessage(ref message); DispatchMessageW(ref message); }
+                    Thread.Sleep(50);
+                }
+                completion.SetResult(cache.SessionsStarted);
+            }
+            catch (Exception error) { completion.SetException(error); }
+            finally { if (source != 0) DestroyWindow(source); }
+        });
+        thread.SetApartmentState(ApartmentState.STA); thread.IsBackground = true; thread.Start();
+        var count = await completion.Task.WaitAsync(TimeSpan.FromSeconds(25));
+        Console.WriteLine($"WGC sessions in 18 seconds for one continuously visible active source: {count}");
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
     public async Task Minimized_mirror_matches_restored_bounds_on_each_connected_monitor()
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

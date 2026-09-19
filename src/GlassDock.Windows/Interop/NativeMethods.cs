@@ -237,6 +237,9 @@ internal static class NativeMethods
         int ellipseHeight
     );
 
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern nint CreatePolygonRgn([In] Point[] points, int count, int fillMode);
+
     [DllImport("gdi32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DeleteObject(nint handle);
 

@@ -21,6 +21,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionSpriteShape? shape;
     private CanvasDevice? canvasDevice;
     private CanvasGeometry? canvasGeometry;
+    private readonly record struct MaskState(double WindowWidth, double WindowHeight, double Width,
+        double Height, double Bottom, double Scale, double Radius, bool Wave, double Center,
+        double HalfWidth, double Rise, double Strength);
+    private MaskState? renderedMask;
     private W.CompositionColorBrush? fill;
     private W.ShapeVisual? visual;
     private W.CompositionVisualSurface? maskSurface;
@@ -229,6 +233,11 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         {
             return;
         }
+
+        var state = new MaskState(lastWindowWidth, lastWindowHeight, lastWidth, lastHeight,
+            lastBottom, lastScale, material.CornerRadius, waveEnabled, waveCenterX,
+            waveHalfWidth, waveRise, waveStrength);
+        if (renderedMask == state) return;
 
         var scale =
             Math.Max(
@@ -642,9 +651,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             CanvasGeometry.CreatePath(
                 builder);
 
-        geometry.Path =
-            new W.CompositionPath(
-                nextGeometry);
+        geometry.Path = new W.CompositionPath(nextGeometry);
+        renderedMask = state;
 
         var previousGeometry =
             canvasGeometry;
@@ -678,6 +686,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         shape = null;
         fill = null;
         geometry = null;
+        renderedMask = null;
         canvasGeometry = null;
         canvasDevice = null;
         fallback = null;

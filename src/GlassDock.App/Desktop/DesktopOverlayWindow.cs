@@ -505,7 +505,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
     private void UpdateDockWaveOutline()
     {
         if (state.State != DockState.Expanded &&
-            state.State != DockState.Expanding)
+            state.State != DockState.Expanding && state.State != DockState.Collapsing)
         {
             return;
         }
@@ -535,6 +535,37 @@ private Button CreateApplicationButton(DockApplicationItem item)
             CreateDockWaveGeometry(
                 centerX,
                 dockWaveCurrentStrength);
+
+        // Use the same animated silhouette for native input as for the glass.
+        // HTTRANSPARENT alone cannot forward input to another process/thread.
+        var outline = new List<(double X, double Y)>();
+        foreach (var figure in ((PathGeometry)dockWaveRim.Data).Figures)
+        {
+            var point = figure.StartPoint;
+            outline.Add((point.X, point.Y));
+            foreach (var segment in figure.Segments)
+            {
+                if (segment is LineSegment line)
+                {
+                    point = line.Point;
+                    outline.Add((point.X, point.Y));
+                }
+                else if (segment is BezierSegment curve)
+                {
+                    var start = point;
+                    for (var i = 1; i <= 24; i++)
+                    {
+                        var t = i / 24d;
+                        var u = 1 - t;
+                        outline.Add((
+                            u*u*u*start.X + 3*u*u*t*curve.Point1.X + 3*u*t*t*curve.Point2.X + t*t*t*curve.Point3.X,
+                            u*u*u*start.Y + 3*u*u*t*curve.Point1.Y + 3*u*t*t*curve.Point2.Y + t*t*t*curve.Point3.Y));
+                    }
+                    point = curve.Point3;
+                }
+            }
+        }
+        windowManager.SetInteractionPolygon(outline);
     }
 
     private Geometry CreateDockWaveGeometry(
@@ -1142,7 +1173,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         if (state.State is DockState.Expanded or DockState.Expanding) return;
         state.Enter();
         var revision = state.Expand();
-        windowManager.SetInteractionRegion(true);
+        UpdateDockWaveOutline();
         ApplyMaterial(true);
         var targetWidth = CalculateTargetDockWidth();
         if (await animation.AnimateAsync(true, targetWidth))
@@ -1264,7 +1295,8 @@ private Button CreateApplicationButton(DockApplicationItem item)
         BottomMargin = Math.Clamp(double.IsFinite(margin) ? margin : 24, 16, 100);
         surface.Margin = indicator.Margin = icons.Margin = new Thickness(0, 0, 0, BottomMargin);
         windowManager.Position(0);
-        windowManager.SetInteractionRegion(state.State != DockState.Idle, BottomMargin);
+        if (state.State == DockState.Idle) windowManager.SetInteractionRegion(false, BottomMargin);
+        else UpdateDockWaveOutline();
         UpdateBackdropBounds();
         SetStatus($"Indicator bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
         previews.Reposition();

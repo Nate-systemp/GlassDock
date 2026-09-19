@@ -11,6 +11,11 @@ public sealed class WindowsOverlayManager : IDisposable
     private readonly NativeMethods.SubclassProc callback;
     private NativeMethods.WinEventProc? foregroundCallback;
     private nint foregroundHook;
+    private NativeMethods.Point[]? lastInteractionPolygon;
+    private nint inputRegion;
+    private const nuint InputTimer = 0x4744;
+    private bool expandedInput;
+    private bool transparentInput;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
     public const double Width = 640;
     public const double Height = 144;
@@ -21,7 +26,8 @@ public sealed class WindowsOverlayManager : IDisposable
         // Only GlassDock's own HWND: tool window, no activation, no caption/resizing frame.
         var ex = NativeMethods.GetWindowLongPtr(hwnd, -20).ToInt64();
         var extendedStyle = inspection ? ((ex | 0x08040000L) & ~0x80L) : ((ex | 0x08000080L) & ~0x00040000L);
-        NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)extendedStyle);
+        NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)(extendedStyle | 0x00080000L)); // WS_EX_LAYERED
+        if (!NativeMethods.SetLayeredWindowAttributes(hwnd, 0, 255, 2)) throw new Win32Exception();
         var style = NativeMethods.GetWindowLongPtr(hwnd, -16).ToInt64();
         NativeMethods.SetWindowLongPtr(hwnd, -16, (nint)(style & ~0x00CF0000L));
         var noCorner = 1;
@@ -59,6 +65,14 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private nint WindowMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
+        if (message == 0x0084 && expandedInput) // WM_NCHITTEST, signed virtual-desktop coordinates
+        {
+            var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
+            var inside = ContainsScreenPoint(point);
+            SetInputTransparent(!inside);
+            return inside ? 1 : -1; // HTCLIENT / HTTRANSPARENT; layered style passes to other processes.
+        }
+        if (message == 0x0113 && wParam == InputTimer) { UpdateInputTransparency(); return 0; }
         if (message == 0x0014 && ClearBackground((nint)wParam)) return 1;
         if (message == 0x031E) ConfigureTransparency();
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
@@ -83,6 +97,9 @@ public sealed class WindowsOverlayManager : IDisposable
     }
     public void Dispose()
     {
+        NativeMethods.KillTimer(hwnd, InputTimer);
+        if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
+        inputRegion = 0;
         if (foregroundHook != 0) NativeMethods.UnhookWinEvent(foregroundHook);
         foregroundHook = 0;
         NativeMethods.RemoveWindowSubclass(hwnd, callback, 2);
@@ -143,6 +160,12 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public void SetInteractionRegion(bool expanded, double bottomMargin = 24)
     {
+        expandedInput = false;
+        NativeMethods.KillTimer(hwnd, InputTimer);
+        SetInputTransparent(false);
+        if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
+        inputRegion = 0;
+        lastInteractionPolygon = null;
         var scale = Scale;
         // The idle hit target surrounds the pill and reaches through its lower margin.
         var x = expanded ? 0 : 220;
@@ -159,4 +182,50 @@ public sealed class WindowsOverlayManager : IDisposable
         }
         // Windows owns the region after a successful SetWindowRgn.
     }
+
+    /// <summary>Keep an input-only region; never clip expanded glass/shadow rendering.</summary>
+    public void SetInteractionPolygon(IReadOnlyList<(double X, double Y)> outline)
+    {
+        if (outline.Count < 3) return;
+        var scale = Scale;
+        var points = outline.Select(p => new NativeMethods.Point
+        {
+            X = (int)Math.Round(p.X * scale), Y = (int)Math.Round(p.Y * scale)
+        }).ToArray();
+        if (lastInteractionPolygon is { } previous && points.SequenceEqual(previous)) return;
+        var region = NativeMethods.CreatePolygonRgn(points, points.Length, 2 /* WINDING */);
+        if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!expandedInput)
+        {
+            NativeMethods.SetWindowRgn(hwnd, 0, true);
+            expandedInput = true;
+            // Only runs while expanded/transitioning. Idle uses its existing small native region.
+            // Needed to reacquire hover after a layered window passes input to another process.
+            NativeMethods.SetTimer(hwnd, InputTimer, 50, 0);
+        }
+        if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
+        inputRegion = region;
+        lastInteractionPolygon = points;
+        UpdateInputTransparency();
+    }
+
+    private bool ContainsScreenPoint(NativeMethods.Point point) =>
+        inputRegion != 0 && NativeMethods.GetWindowRect(hwnd, out var bounds) &&
+        PtInRegion(inputRegion, point.X - bounds.Left, point.Y - bounds.Top);
+
+    private void UpdateInputTransparency()
+    {
+        if (expandedInput && GetCursorPos(out var point)) SetInputTransparent(!ContainsScreenPoint(point));
+    }
+
+    private void SetInputTransparent(bool transparent)
+    {
+        if (transparentInput == transparent) return;
+        var style = NativeMethods.GetWindowLongPtr(hwnd, -20).ToInt64();
+        NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)(transparent ? style | 0x20 : style & ~0x20L));
+        transparentInput = transparent;
+    }
+
+    [DllImport("gdi32.dll")] private static extern bool PtInRegion(nint region, int x, int y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativeMethods.Point point);
 }

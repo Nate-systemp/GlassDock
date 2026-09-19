@@ -72,6 +72,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         {
             await Task.Delay(350, delay.Token);
             if (disposed || !session.Show(revision) || !buttons.TryGetValue(item.Id, out var button)) return;
+            frameCache.Request(item.Application.Windows);
             ToolTipService.SetToolTip(button, null);
             EnsurePreview();
             preview!.Show(Anchor(button), dockTop());

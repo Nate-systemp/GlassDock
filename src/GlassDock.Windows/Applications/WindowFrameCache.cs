@@ -39,6 +39,7 @@ public sealed class WindowFrameCache : IDisposable
         public CaptureJob? Capture;
         public bool Queued;
         public long LastAttemptTicks;
+        public bool PrimingRequested;
 
         public Entry(ApplicationWindow window)
         {
@@ -61,6 +62,8 @@ public sealed class WindowFrameCache : IDisposable
     private IDirect3DDevice? device;
     private bool disposed;
     private int activeCaptures;
+    private long sessionsStarted;
+    public long SessionsStarted => Interlocked.Read(ref sessionsStarted);
 
     // Keeping this at one is deliberate. A WGC frame pool is full source
     // resolution, so limiting concurrent pools saves much more RAM/GPU memory
@@ -75,16 +78,8 @@ public sealed class WindowFrameCache : IDisposable
     private const int MaxRetainedFrames = 16;
     private const long RetainedByteBudget = 24L * 1024 * 1024;
 
-    // The active window is the one most likely to be minimized next.
-    // Inactive windows are refreshed much less often to avoid keeping WGC busy.
-    private static readonly TimeSpan ActiveRefreshAge =
-        TimeSpan.FromSeconds(8);
-
-    private static readonly TimeSpan InactiveRefreshAge =
-        TimeSpan.FromSeconds(45);
-
     private static readonly TimeSpan FailedRetryAge =
-        TimeSpan.FromSeconds(5);
+        TimeSpan.FromSeconds(30);
 
     public WindowFrameCache() =>
         diagnostics.Write(
@@ -96,7 +91,7 @@ public sealed class WindowFrameCache : IDisposable
             {
                 borderless = false,
                 reason =
-                    "Low-memory one-shot capture: at most one WGC pool is alive; retained frames are capped at 960x540.",
+                    "Prime once while visible; reuse valid frames; missing-frame retries only on preview demand. No periodic WGC refresh.",
                 maxConcurrentCaptures = MaxConcurrentCaptures,
                 maxRetainedFrames = MaxRetainedFrames,
                 retainedByteBudget = RetainedByteBudget,
@@ -137,7 +132,7 @@ public sealed class WindowFrameCache : IDisposable
     /// Updates the set of windows that may need a minimized fallback.
     ///
     /// This does NOT keep a capture session alive for every window. Visible
-    /// windows are queued for one-shot refreshes; minimized windows only retain
+    /// windows are primed once; minimized windows only retain
     /// their last already-captured frame.
     /// </summary>
     public void Track(
@@ -210,8 +205,12 @@ public sealed class WindowFrameCache : IDisposable
                         window;
                 }
 
-                QueueIfNeededNoLock(
-                    entry);
+                if (!entry.PrimingRequested && !NativeMethods.IsIconic((nint)window.Handle) &&
+                    WindowsApplicationService.IsEligible(window))
+                {
+                    entry.PrimingRequested = true;
+                    QueueIfNeededNoLock(entry);
+                }
             }
 
             TrimRetainedFramesNoLock();
@@ -247,6 +246,18 @@ public sealed class WindowFrameCache : IDisposable
         }
     }
 
+    /// <summary>Retry a missing frame on preview demand, only while the real window is visible.</summary>
+    public void Request(IEnumerable<ApplicationWindow> windows)
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            foreach (var window in windows)
+                if (entries.TryGetValue(Key(window), out var entry)) QueueIfNeededNoLock(entry);
+        }
+        PumpCaptures();
+    }
+
     private void QueueIfNeededNoLock(
         Entry entry)
     {
@@ -271,21 +282,11 @@ public sealed class WindowFrameCache : IDisposable
             return;
         }
 
-        var now =
-            DateTimeOffset.UtcNow;
-
         var latest =
             Volatile.Read(
                 ref entry.Latest);
 
-        var refreshAge =
-            window.IsActive
-                ? ActiveRefreshAge
-                : InactiveRefreshAge;
-
-        if (latest is not null &&
-            now - latest.CapturedAt <
-            refreshAge)
+        if (latest is not null)
         {
             return;
         }
@@ -419,6 +420,8 @@ public sealed class WindowFrameCache : IDisposable
         try
         {
             job.Start();
+            var total = Interlocked.Increment(ref sessionsStarted);
+            diagnostics.Write(job.Entry.Window, "wgc-session-started", true, null, new { total });
         }
         catch (
             Exception error)
@@ -615,9 +618,8 @@ public sealed class WindowFrameCache : IDisposable
 
             frames--;
 
-            // If the source is still visible, allow it to be filled again on
-            // a later Track call. Do not immediately queue here or trimming
-            // would simply refill the budget in the same pass.
+            // Eviction must not cause background recapture churn. Only an
+            // explicit preview request may recapture this still-visible source.
             victim.Queued = false;
         }
     }
@@ -709,7 +711,7 @@ public sealed class WindowFrameCache : IDisposable
                         device,
                         DirectXPixelFormat
                             .B8G8R8A8UIntNormalized,
-                        2,
+                        1, // One-shot capture consumes one frame; a second full-size GPU buffer is unnecessary.
                         item.Size);
 
             GraphicsCaptureSession? created =
