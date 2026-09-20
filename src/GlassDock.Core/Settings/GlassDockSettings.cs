@@ -10,6 +10,14 @@ public sealed record GlassDockSettings
     public const double DefaultBottomMargin = 24;
     public const int DefaultAutoHideDelayMilliseconds = 1000;
     public const int DefaultPeekDelayMilliseconds = 2000;
+    public const double DefaultIconSize = 28;
+    public const double DefaultMagnificationScale = 1.24;
+    public const double DefaultIconSpacing = 6;
+    public const double DefaultGlassBlurAmount = 20;
+    public const double DefaultDockOpacity = 0.78;
+    public const double DefaultBorderThickness = 1.05;
+    public const double DefaultBorderOpacity = 0.78;
+    public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
 
     public const double MinimumBottomMargin = 16;
     public const double MaximumBottomMargin = 100;
@@ -17,6 +25,20 @@ public sealed record GlassDockSettings
     public const int MaximumAutoHideDelayMilliseconds = 10_000;
     public const int MinimumPeekDelayMilliseconds = 0;
     public const int MaximumPeekDelayMilliseconds = 30_000;
+    public const double MinimumIconSize = 20;
+    public const double MaximumIconSize = 40;
+    public const double MinimumMagnificationScale = 1;
+    public const double MaximumMagnificationScale = 1.6;
+    public const double MinimumIconSpacing = 0;
+    public const double MaximumIconSpacing = 20;
+    public const double MinimumGlassBlurAmount = 0;
+    public const double MaximumGlassBlurAmount = 60;
+    public const double MinimumDockOpacity = 0.35;
+    public const double MaximumDockOpacity = 1;
+    public const double MinimumBorderThickness = 0;
+    public const double MaximumBorderThickness = 2;
+    public const double MinimumBorderOpacity = 0;
+    public const double MaximumBorderOpacity = 1;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public bool LaunchAtStartup { get; init; }
@@ -24,6 +46,14 @@ public sealed record GlassDockSettings
     public double BottomMargin { get; init; } = DefaultBottomMargin;
     public int AutoHideDelayMilliseconds { get; init; } = DefaultAutoHideDelayMilliseconds;
     public int PeekDelayMilliseconds { get; init; } = DefaultPeekDelayMilliseconds;
+    public double IconSize { get; init; } = DefaultIconSize;
+    public double MagnificationScale { get; init; } = DefaultMagnificationScale;
+    public double IconSpacing { get; init; } = DefaultIconSpacing;
+    public double GlassBlurAmount { get; init; } = DefaultGlassBlurAmount;
+    public double DockOpacity { get; init; } = DefaultDockOpacity;
+    public double BorderThickness { get; init; } = DefaultBorderThickness;
+    public double BorderOpacity { get; init; } = DefaultBorderOpacity;
+    public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
 
     /// <summary>
     /// Returns a safe current-schema snapshot. Unknown and missing schema
@@ -48,7 +78,46 @@ public sealed record GlassDockSettings
             PeekDelayMilliseconds = Math.Clamp(
                 settings.PeekDelayMilliseconds,
                 MinimumPeekDelayMilliseconds,
-                MaximumPeekDelayMilliseconds)
+                MaximumPeekDelayMilliseconds),
+            IconSize = Bound(
+                settings.IconSize,
+                MinimumIconSize,
+                MaximumIconSize,
+                DefaultIconSize),
+            MagnificationScale = Bound(
+                settings.MagnificationScale,
+                MinimumMagnificationScale,
+                MaximumMagnificationScale,
+                DefaultMagnificationScale),
+            IconSpacing = Bound(
+                settings.IconSpacing,
+                MinimumIconSpacing,
+                MaximumIconSpacing,
+                DefaultIconSpacing),
+            GlassBlurAmount = Bound(
+                settings.GlassBlurAmount,
+                MinimumGlassBlurAmount,
+                MaximumGlassBlurAmount,
+                DefaultGlassBlurAmount),
+            DockOpacity = Bound(
+                settings.DockOpacity,
+                MinimumDockOpacity,
+                MaximumDockOpacity,
+                DefaultDockOpacity),
+            BorderThickness = Bound(
+                settings.BorderThickness,
+                MinimumBorderThickness,
+                MaximumBorderThickness,
+                DefaultBorderThickness),
+            BorderOpacity = Bound(
+                settings.BorderOpacity,
+                MinimumBorderOpacity,
+                MaximumBorderOpacity,
+                DefaultBorderOpacity),
+            GlassMaterialMode = DockMaterialStylePresets.Normalize(settings.GlassMaterialMode)
         };
     }
+
+    private static double Bound(double value, double minimum, double maximum, double fallback) =>
+        double.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
 }

@@ -29,6 +29,16 @@ public sealed class GlassDockSettingsSession
         Current.AutoHideDelayMilliseconds,
         Current.PeekDelayMilliseconds);
 
+    public DockAppearanceSettings Appearance => new(
+        Current.GlassMaterialMode,
+        Current.IconSize,
+        Current.MagnificationScale,
+        Current.IconSpacing,
+        Current.GlassBlurAmount,
+        Current.DockOpacity,
+        Current.BorderThickness,
+        Current.BorderOpacity);
+
     public event EventHandler<GlassDockSettingsChangedEventArgs>? Changed;
 
     public GlassDockSettings CreateDockBehaviorUpdate(
@@ -47,6 +57,69 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultBottomMargin,
             GlassDockSettings.DefaultAutoHideDelayMilliseconds,
             GlassDockSettings.DefaultPeekDelayMilliseconds);
+
+    public GlassDockSettings CreateDockSettingsUpdate(
+        double bottomMargin,
+        int autoHideDelayMilliseconds,
+        int peekDelayMilliseconds,
+        GlassMaterialMode glassMaterialMode,
+        double iconSize,
+        double magnificationScale,
+        double iconSpacing,
+        double glassBlurAmount,
+        double dockOpacity,
+        double borderThickness,
+        double borderOpacity) =>
+        GlassDockSettings.Normalize(Current with
+        {
+            BottomMargin = bottomMargin,
+            AutoHideDelayMilliseconds = autoHideDelayMilliseconds,
+            PeekDelayMilliseconds = peekDelayMilliseconds,
+            GlassMaterialMode = glassMaterialMode,
+            IconSize = iconSize,
+            MagnificationScale = magnificationScale,
+            IconSpacing = iconSpacing,
+            GlassBlurAmount = glassBlurAmount,
+            DockOpacity = dockOpacity,
+            BorderThickness = borderThickness,
+            BorderOpacity = borderOpacity
+        });
+
+    public GlassDockSettings CreateAppearanceUpdate(
+        GlassMaterialMode glassMaterialMode,
+        double iconSize,
+        double magnificationScale,
+        double iconSpacing,
+        double glassBlurAmount,
+        double dockOpacity,
+        double borderThickness,
+        double borderOpacity) =>
+        CreateDockSettingsUpdate(
+            Current.BottomMargin,
+            Current.AutoHideDelayMilliseconds,
+            Current.PeekDelayMilliseconds,
+            glassMaterialMode,
+            iconSize,
+            magnificationScale,
+            iconSpacing,
+            glassBlurAmount,
+            dockOpacity,
+            borderThickness,
+            borderOpacity);
+
+    public GlassDockSettings CreateDefaultEditableSettings() =>
+        CreateDockSettingsUpdate(
+            GlassDockSettings.DefaultBottomMargin,
+            GlassDockSettings.DefaultAutoHideDelayMilliseconds,
+            GlassDockSettings.DefaultPeekDelayMilliseconds,
+            GlassDockSettings.DefaultGlassMaterialMode,
+            GlassDockSettings.DefaultIconSize,
+            GlassDockSettings.DefaultMagnificationScale,
+            GlassDockSettings.DefaultIconSpacing,
+            GlassDockSettings.DefaultGlassBlurAmount,
+            GlassDockSettings.DefaultDockOpacity,
+            GlassDockSettings.DefaultBorderThickness,
+            GlassDockSettings.DefaultBorderOpacity);
 
     public bool Replace(GlassDockSettings settings)
     {

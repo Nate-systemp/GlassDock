@@ -1,4 +1,5 @@
 using GlassDock.Core.Settings;
+using GlassDock.Core.Materials;
 using Xunit;
 
 namespace GlassDock.Core.Tests;
@@ -16,6 +17,14 @@ public sealed class GlassDockSettingsTests
         Assert.Equal(24, settings.BottomMargin);
         Assert.Equal(1000, settings.AutoHideDelayMilliseconds);
         Assert.Equal(2000, settings.PeekDelayMilliseconds);
+        Assert.Equal(28, settings.IconSize);
+        Assert.Equal(1.24, settings.MagnificationScale);
+        Assert.Equal(6, settings.IconSpacing);
+        Assert.Equal(20, settings.GlassBlurAmount);
+        Assert.Equal(0.78, settings.DockOpacity);
+        Assert.Equal(1.05, settings.BorderThickness);
+        Assert.Equal(0.78, settings.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Frosted, settings.GlassMaterialMode);
     }
 
     [Fact]
@@ -26,26 +35,75 @@ public sealed class GlassDockSettingsTests
             SchemaVersion = 0,
             BottomMargin = -500,
             AutoHideDelayMilliseconds = -1,
-            PeekDelayMilliseconds = -1
+            PeekDelayMilliseconds = -1,
+            IconSize = -1,
+            MagnificationScale = -1,
+            IconSpacing = -1,
+            GlassBlurAmount = -1,
+            DockOpacity = -1,
+            BorderThickness = -1,
+            BorderOpacity = -1,
+            GlassMaterialMode = (GlassMaterialMode)(-1)
         });
         var high = GlassDockSettings.Normalize(new()
         {
             SchemaVersion = int.MaxValue,
             BottomMargin = 100_000,
             AutoHideDelayMilliseconds = int.MaxValue,
-            PeekDelayMilliseconds = int.MaxValue
+            PeekDelayMilliseconds = int.MaxValue,
+            IconSize = 1000,
+            MagnificationScale = 1000,
+            IconSpacing = 1000,
+            GlassBlurAmount = 1000,
+            DockOpacity = 1000,
+            BorderThickness = 1000,
+            BorderOpacity = 1000,
+            GlassMaterialMode = (GlassMaterialMode)99
         });
-        var nonFinite = GlassDockSettings.Normalize(new() { BottomMargin = double.NaN });
+        var nonFinite = GlassDockSettings.Normalize(new()
+        {
+            BottomMargin = double.NaN,
+            IconSize = double.NaN,
+            MagnificationScale = double.PositiveInfinity,
+            IconSpacing = double.NegativeInfinity,
+            GlassBlurAmount = double.NaN,
+            DockOpacity = double.NaN,
+            BorderThickness = double.NaN,
+            BorderOpacity = double.NaN
+        });
 
         Assert.Equal(GlassDockSettings.CurrentSchemaVersion, low.SchemaVersion);
         Assert.Equal(GlassDockSettings.MinimumBottomMargin, low.BottomMargin);
         Assert.Equal(GlassDockSettings.MinimumAutoHideDelayMilliseconds, low.AutoHideDelayMilliseconds);
         Assert.Equal(GlassDockSettings.MinimumPeekDelayMilliseconds, low.PeekDelayMilliseconds);
+        Assert.Equal(GlassDockSettings.MinimumIconSize, low.IconSize);
+        Assert.Equal(GlassDockSettings.MinimumMagnificationScale, low.MagnificationScale);
+        Assert.Equal(GlassDockSettings.MinimumIconSpacing, low.IconSpacing);
+        Assert.Equal(GlassDockSettings.MinimumGlassBlurAmount, low.GlassBlurAmount);
+        Assert.Equal(GlassDockSettings.MinimumDockOpacity, low.DockOpacity);
+        Assert.Equal(GlassDockSettings.MinimumBorderThickness, low.BorderThickness);
+        Assert.Equal(GlassDockSettings.MinimumBorderOpacity, low.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Frosted, low.GlassMaterialMode);
         Assert.Equal(GlassDockSettings.CurrentSchemaVersion, high.SchemaVersion);
         Assert.Equal(GlassDockSettings.MaximumBottomMargin, high.BottomMargin);
         Assert.Equal(GlassDockSettings.MaximumAutoHideDelayMilliseconds, high.AutoHideDelayMilliseconds);
         Assert.Equal(GlassDockSettings.MaximumPeekDelayMilliseconds, high.PeekDelayMilliseconds);
+        Assert.Equal(GlassDockSettings.MaximumIconSize, high.IconSize);
+        Assert.Equal(GlassDockSettings.MaximumMagnificationScale, high.MagnificationScale);
+        Assert.Equal(GlassDockSettings.MaximumIconSpacing, high.IconSpacing);
+        Assert.Equal(GlassDockSettings.MaximumGlassBlurAmount, high.GlassBlurAmount);
+        Assert.Equal(GlassDockSettings.MaximumDockOpacity, high.DockOpacity);
+        Assert.Equal(GlassDockSettings.MaximumBorderThickness, high.BorderThickness);
+        Assert.Equal(GlassDockSettings.MaximumBorderOpacity, high.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Frosted, high.GlassMaterialMode);
         Assert.Equal(GlassDockSettings.DefaultBottomMargin, nonFinite.BottomMargin);
+        Assert.Equal(GlassDockSettings.DefaultIconSize, nonFinite.IconSize);
+        Assert.Equal(GlassDockSettings.DefaultMagnificationScale, nonFinite.MagnificationScale);
+        Assert.Equal(GlassDockSettings.DefaultIconSpacing, nonFinite.IconSpacing);
+        Assert.Equal(GlassDockSettings.DefaultGlassBlurAmount, nonFinite.GlassBlurAmount);
+        Assert.Equal(GlassDockSettings.DefaultDockOpacity, nonFinite.DockOpacity);
+        Assert.Equal(GlassDockSettings.DefaultBorderThickness, nonFinite.BorderThickness);
+        Assert.Equal(GlassDockSettings.DefaultBorderOpacity, nonFinite.BorderOpacity);
     }
 
     [Fact]
@@ -101,12 +159,96 @@ public sealed class GlassDockSettingsTests
             PeekDelayMilliseconds = 12_000
         });
 
-        var reset = session.CreateDefaultDockBehavior();
+        var reset = session.CreateDefaultEditableSettings();
 
         Assert.Equal(GlassDockSettings.DefaultBottomMargin, reset.BottomMargin);
         Assert.Equal(GlassDockSettings.DefaultAutoHideDelayMilliseconds, reset.AutoHideDelayMilliseconds);
         Assert.Equal(GlassDockSettings.DefaultPeekDelayMilliseconds, reset.PeekDelayMilliseconds);
+        Assert.Equal(GlassDockSettings.DefaultIconSize, reset.IconSize);
+        Assert.Equal(GlassDockSettings.DefaultMagnificationScale, reset.MagnificationScale);
+        Assert.Equal(GlassDockSettings.DefaultIconSpacing, reset.IconSpacing);
+        Assert.Equal(GlassDockSettings.DefaultGlassBlurAmount, reset.GlassBlurAmount);
+        Assert.Equal(GlassDockSettings.DefaultDockOpacity, reset.DockOpacity);
+        Assert.Equal(GlassDockSettings.DefaultBorderThickness, reset.BorderThickness);
+        Assert.Equal(GlassDockSettings.DefaultBorderOpacity, reset.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Frosted, reset.GlassMaterialMode);
         Assert.True(reset.LaunchAtStartup);
         Assert.False(reset.SuppressWindowsTaskbar);
+    }
+
+    [Fact]
+    public void Appearance_update_propagates_and_preserves_other_settings()
+    {
+        var session = new GlassDockSettingsSession(new()
+        {
+            LaunchAtStartup = true,
+            SuppressWindowsTaskbar = false,
+            BottomMargin = 44,
+            AutoHideDelayMilliseconds = 3100,
+            PeekDelayMilliseconds = 4200
+        });
+        GlassDockSettings? observed = null;
+        session.Changed += (_, args) => observed = args.Settings;
+
+        var edited = session.CreateAppearanceUpdate(GlassMaterialMode.Acrylic, 36, 1.5, 14, 48, 0.62, 1.6, 0.4);
+        Assert.True(session.Replace(edited));
+
+        Assert.Equal(new DockAppearanceSettings(GlassMaterialMode.Acrylic, 36, 1.5, 14, 48, 0.62, 1.6, 0.4), session.Appearance);
+        Assert.Equal(session.Current, observed);
+        Assert.True(session.Current.LaunchAtStartup);
+        Assert.False(session.Current.SuppressWindowsTaskbar);
+        Assert.Equal(44, session.Current.BottomMargin);
+        Assert.Equal(3100, session.Current.AutoHideDelayMilliseconds);
+        Assert.Equal(4200, session.Current.PeekDelayMilliseconds);
+    }
+
+    [Fact]
+    public void Appearance_drives_layout_magnification_and_material_values()
+    {
+        var appearance = new DockAppearanceSettings(GlassMaterialMode.Clear, 32, 1.5, 10, 42, 0.64, 1.8, 0.35);
+
+        Assert.Equal(44, appearance.ButtonWidth);
+        Assert.Equal(48, appearance.ButtonHeight);
+        Assert.Equal(242, appearance.TargetDockWidth(4));
+        Assert.Equal(1.5, appearance.ScaleAtDistance(0), 6);
+        Assert.True(appearance.ScaleAtDistance(52) < 1.5);
+        Assert.Equal(1.8, appearance.BorderThickness);
+        Assert.Equal(0.35, appearance.BorderOpacity);
+
+        var expanded = appearance.ApplyTo(new GlassMaterial { BlurAmount = 3, Opacity = 0.78 }, expanded: true);
+        var collapsed = appearance.ApplyTo(new GlassMaterial { BlurAmount = 3, Opacity = 0.78 }, expanded: false);
+        Assert.Equal(42, expanded.BlurAmount);
+        Assert.Equal(0.64, expanded.Opacity);
+        Assert.Equal(42, collapsed.BlurAmount);
+        Assert.Equal(0.78, collapsed.Opacity);
+    }
+
+    [Fact]
+    public void Material_mode_presets_keep_frosted_and_define_acrylic_and_clear()
+    {
+        var frosted = DockMaterialStylePresets.Create(GlassMaterialMode.Frosted);
+        var acrylic = DockMaterialStylePresets.Create(GlassMaterialMode.Acrylic);
+        var clear = DockMaterialStylePresets.Create(GlassMaterialMode.Clear);
+
+        Assert.Equal(20, frosted.BlurAmount);
+        Assert.Equal(0.78, frosted.Opacity);
+        Assert.Equal(1.15, frosted.Saturation);
+        Assert.Equal(0xDCEAFFu, frosted.Tint);
+        Assert.Equal(1.05, frosted.BorderThickness);
+        Assert.Equal(0.78, frosted.BorderOpacity);
+
+        Assert.Equal(10, acrylic.BlurAmount);
+        Assert.Equal(0.58, acrylic.Opacity);
+        Assert.Equal(1.22, acrylic.Saturation);
+        Assert.Equal(0xD8E9FFu, acrylic.Tint);
+        Assert.Equal(0.8, acrylic.BorderThickness);
+        Assert.Equal(0.48, acrylic.BorderOpacity);
+
+        Assert.Equal(4, clear.BlurAmount);
+        Assert.Equal(0.42, clear.Opacity);
+        Assert.Equal(1.06, clear.Saturation);
+        Assert.Equal(0xE8F3FFu, clear.Tint);
+        Assert.Equal(0.5, clear.BorderThickness);
+        Assert.Equal(0.25, clear.BorderOpacity);
     }
 }

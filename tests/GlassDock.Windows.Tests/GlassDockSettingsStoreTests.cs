@@ -30,7 +30,15 @@ public sealed class GlassDockSettingsStoreTests
             SuppressWindowsTaskbar = false,
             BottomMargin = 42,
             AutoHideDelayMilliseconds = 2500,
-            PeekDelayMilliseconds = 4500
+            PeekDelayMilliseconds = 4500,
+            IconSize = 34,
+            MagnificationScale = 1.42,
+            IconSpacing = 11,
+            GlassBlurAmount = 38,
+            DockOpacity = 0.66,
+            BorderThickness = 1.4,
+            BorderOpacity = 0.52,
+            GlassMaterialMode = GlassMaterialMode.Acrylic
         };
 
         await store.SaveAsync(expected);
@@ -67,7 +75,8 @@ public sealed class GlassDockSettingsStoreTests
               "SchemaVersion": 999,
               "BottomMargin": -100,
               "AutoHideDelayMilliseconds": 999999,
-              "PeekDelayMilliseconds": -50
+              "PeekDelayMilliseconds": -50,
+              "GlassMaterialMode": 99
             }
             """);
 
@@ -77,6 +86,7 @@ public sealed class GlassDockSettingsStoreTests
         Assert.Equal(GlassDockSettings.MinimumBottomMargin, settings.BottomMargin);
         Assert.Equal(GlassDockSettings.MaximumAutoHideDelayMilliseconds, settings.AutoHideDelayMilliseconds);
         Assert.Equal(GlassDockSettings.MinimumPeekDelayMilliseconds, settings.PeekDelayMilliseconds);
+        Assert.Equal(GlassMaterialMode.Frosted, settings.GlassMaterialMode);
     }
 
     [Fact]
@@ -96,6 +106,37 @@ public sealed class GlassDockSettingsStoreTests
 
         Assert.True(settings.LaunchAtStartup);
         Assert.Equal(GlassDockSettings.DefaultBottomMargin, settings.BottomMargin);
+    }
+
+    [Fact]
+    public async Task Older_json_without_appearance_fields_loads_current_defaults()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, """
+            {
+              "SchemaVersion": 1,
+              "LaunchAtStartup": true,
+              "SuppressWindowsTaskbar": false,
+              "BottomMargin": 40,
+              "AutoHideDelayMilliseconds": 2500,
+              "PeekDelayMilliseconds": 5000
+            }
+            """);
+
+        var settings = await store.LoadAsync();
+
+        Assert.True(settings.LaunchAtStartup);
+        Assert.False(settings.SuppressWindowsTaskbar);
+        Assert.Equal(40, settings.BottomMargin);
+        Assert.Equal(GlassDockSettings.DefaultIconSize, settings.IconSize);
+        Assert.Equal(GlassDockSettings.DefaultMagnificationScale, settings.MagnificationScale);
+        Assert.Equal(GlassDockSettings.DefaultIconSpacing, settings.IconSpacing);
+        Assert.Equal(GlassDockSettings.DefaultGlassBlurAmount, settings.GlassBlurAmount);
+        Assert.Equal(GlassDockSettings.DefaultDockOpacity, settings.DockOpacity);
+        Assert.Equal(GlassDockSettings.DefaultBorderThickness, settings.BorderThickness);
+        Assert.Equal(GlassDockSettings.DefaultBorderOpacity, settings.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Frosted, settings.GlassMaterialMode);
     }
 
     [Fact]
@@ -129,7 +170,15 @@ public sealed class GlassDockSettingsStoreTests
         var session = new GlassDockSettingsSession(new()
         {
             LaunchAtStartup = true,
-            SuppressWindowsTaskbar = false
+            SuppressWindowsTaskbar = false,
+            IconSize = 36,
+            MagnificationScale = 1.5,
+            IconSpacing = 12,
+            GlassBlurAmount = 44,
+            DockOpacity = 0.58,
+            BorderThickness = 1.7,
+            BorderOpacity = 0.43,
+            GlassMaterialMode = GlassMaterialMode.Clear
         });
 
         var edited = session.CreateDockBehaviorUpdate(36, 2800, 5200);
@@ -141,6 +190,14 @@ public sealed class GlassDockSettingsStoreTests
         Assert.Equal(36, loaded.BottomMargin);
         Assert.Equal(2800, loaded.AutoHideDelayMilliseconds);
         Assert.Equal(5200, loaded.PeekDelayMilliseconds);
+        Assert.Equal(36, loaded.IconSize);
+        Assert.Equal(1.5, loaded.MagnificationScale);
+        Assert.Equal(12, loaded.IconSpacing);
+        Assert.Equal(44, loaded.GlassBlurAmount);
+        Assert.Equal(0.58, loaded.DockOpacity);
+        Assert.Equal(1.7, loaded.BorderThickness);
+        Assert.Equal(0.43, loaded.BorderOpacity);
+        Assert.Equal(GlassMaterialMode.Clear, loaded.GlassMaterialMode);
     }
 
     private sealed class TemporarySettingsDirectory : IDisposable

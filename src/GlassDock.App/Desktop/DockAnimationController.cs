@@ -1,5 +1,6 @@
 using System.Numerics;
 using GlassDock.App.Controls;
+using GlassDock.Core.Settings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -10,7 +11,7 @@ namespace GlassDock.App.Desktop;
 
 internal sealed class DockAnimationController
 {
-    private const double MaxMagnificationScale = 1.24;
+    private double maximumMagnificationScale = GlassDockSettings.DefaultMagnificationScale;
     private const double MagnificationSigma = 52;
     private const double MagnificationEpsilon = 0.0015;
     private const double MagnificationSmoothing = 0.34;
@@ -130,9 +131,25 @@ internal sealed class DockAnimationController
         else StartMagnificationTimer();
     }
 
+    public void SetMaximumMagnificationScale(double value)
+    {
+        maximumMagnificationScale = double.IsFinite(value)
+            ? Math.Clamp(
+                value,
+                GlassDockSettings.MinimumMagnificationScale,
+                GlassDockSettings.MaximumMagnificationScale)
+            : GlassDockSettings.DefaultMagnificationScale;
+
+        if (maximumMagnificationScale == 1)
+            ResetMagnification(immediate: true);
+        else if (magnificationRequested)
+            StartMagnificationTimer();
+    }
+
     public Task<bool> AnimateAsync(
         bool expanded,
-        double targetWidth = 560)
+        double targetWidth = 560,
+        double targetHeight = 68)
     {
         var started =
             System.Diagnostics.Stopwatch.StartNew();
@@ -186,7 +203,7 @@ internal sealed class DockAnimationController
                 surface,
                 "Height",
                 height,
-                (320, 68));
+                (320, targetHeight));
 
             Add(
                 surface,
@@ -447,13 +464,13 @@ internal sealed class DockAnimationController
 
         var scale =
             1 +
-            (MaxMagnificationScale - 1) *
+            (maximumMagnificationScale - 1) *
             influence;
 
         return scale < 1.003
             ? 1
             : Math.Min(
-                MaxMagnificationScale,
+                maximumMagnificationScale,
                 scale);
     }
 

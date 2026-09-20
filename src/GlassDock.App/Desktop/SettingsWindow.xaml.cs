@@ -3,6 +3,7 @@ using GlassDock.Core.Desktop;
 using GlassDock.Windows.Settings;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Desktop;
@@ -14,6 +15,7 @@ public sealed partial class SettingsWindow : Window
     private readonly ApplicationShutdownState shutdown;
     private bool saving;
     private bool closed;
+    private bool populating;
 
     public SettingsWindow(
         GlassDockSettingsSession settingsSession,
@@ -26,7 +28,7 @@ public sealed partial class SettingsWindow : Window
 
         InitializeComponent();
         Title = "GlassDock Settings";
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(690, 610));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(690, 760));
         Populate(settingsSession.Current);
         SetStatus("Settings loaded.", success: true);
         Closed += (_, _) => closed = true;
@@ -34,14 +36,44 @@ public sealed partial class SettingsWindow : Window
 
     private void Populate(GlassDockSettings settings)
     {
+        populating = true;
+        GlassMaterialModeBox.SelectedIndex = (int)settings.GlassMaterialMode;
         BottomMarginBox.Value = settings.BottomMargin;
         AutoHideDelayBox.Value = settings.AutoHideDelayMilliseconds / 1000d;
         PeekDelayBox.Value = settings.PeekDelayMilliseconds / 1000d;
+        IconSizeBox.Value = settings.IconSize;
+        MagnificationScaleBox.Value = settings.MagnificationScale;
+        IconSpacingBox.Value = settings.IconSpacing;
+        GlassBlurAmountBox.Value = settings.GlassBlurAmount;
+        DockOpacityBox.Value = settings.DockOpacity * 100;
+        BorderThicknessBox.Value = settings.BorderThickness;
+        BorderOpacityBox.Value = settings.BorderOpacity * 100;
+        populating = false;
     }
+
+    private void MaterialModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (populating)
+            return;
+
+        var material = DockMaterialStylePresets.Create(SelectedMaterialMode);
+        GlassBlurAmountBox.Value = material.BlurAmount;
+        DockOpacityBox.Value = material.Opacity * 100;
+        BorderThicknessBox.Value = material.BorderThickness;
+        BorderOpacityBox.Value = material.BorderOpacity * 100;
+    }
+
+    private GlassMaterialMode SelectedMaterialMode =>
+        GlassMaterialModeBox.SelectedIndex switch
+        {
+            (int)GlassMaterialMode.Acrylic => GlassMaterialMode.Acrylic,
+            (int)GlassMaterialMode.Clear => GlassMaterialMode.Clear,
+            _ => GlassMaterialMode.Frosted
+        };
 
     private void ResetClick(object sender, RoutedEventArgs e)
     {
-        var defaults = settingsSession.CreateDefaultDockBehavior();
+        var defaults = settingsSession.CreateDefaultEditableSettings();
         Populate(defaults);
         SetStatus("Defaults are ready. Select Apply to save them.", success: true);
     }
@@ -58,14 +90,22 @@ public sealed partial class SettingsWindow : Window
         try
         {
             var current = settingsSession.Current;
-            var edited = settingsSession.CreateDockBehaviorUpdate(
+            var edited = settingsSession.CreateDockSettingsUpdate(
                 BottomMarginBox.Value,
                 ToMilliseconds(
                     AutoHideDelayBox.Value,
                     current.AutoHideDelayMilliseconds),
                 ToMilliseconds(
                     PeekDelayBox.Value,
-                    current.PeekDelayMilliseconds));
+                    current.PeekDelayMilliseconds),
+                SelectedMaterialMode,
+                IconSizeBox.Value,
+                MagnificationScaleBox.Value,
+                IconSpacingBox.Value,
+                GlassBlurAmountBox.Value,
+                DockOpacityBox.Value / 100,
+                BorderThicknessBox.Value,
+                BorderOpacityBox.Value / 100);
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closed || shutdown.IsRequested)

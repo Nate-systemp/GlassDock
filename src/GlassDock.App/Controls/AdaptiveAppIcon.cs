@@ -25,7 +25,7 @@ internal sealed class AdaptiveAppIcon : Grid
         BorderThickness = new Thickness(0.5), IsHitTestVisible = false
     };
     private readonly Canvas artwork = new() { IsHitTestVisible = false };
-    private readonly double maximumHoverScale;
+    private double maximumHoverScale;
     private int pixelWidth;
     private int pixelHeight;
     private int sourceWidth, sourceHeight, left, top;
@@ -35,11 +35,9 @@ internal sealed class AdaptiveAppIcon : Grid
 
     public AdaptiveAppIcon(double size, double maximumHoverScale)
     {
-        Width = Height = size;
-        this.maximumHoverScale = maximumHoverScale;
+        Configure(size, maximumHoverScale);
         HorizontalAlignment = HorizontalAlignment.Center;
         VerticalAlignment = VerticalAlignment.Center;
-        tile.CornerRadius = new CornerRadius(size * 0.25);
         Children.Add(tile);
         // Siblings: the rounded tile never clips or masks the image's alpha edges.
         Children.Add(artwork);
@@ -55,6 +53,15 @@ internal sealed class AdaptiveAppIcon : Grid
             if (observedRoot is not null) observedRoot.Changed -= OnRootChanged;
             observedRoot = null;
         };
+    }
+
+    public void Configure(double size, double hoverScale)
+    {
+        size = double.IsFinite(size) && size > 0 ? size : 28;
+        maximumHoverScale = double.IsFinite(hoverScale) && hoverScale >= 1 ? hoverScale : 1.24;
+        Width = Height = size;
+        tile.CornerRadius = new CornerRadius(size * 0.25);
+        Fit();
     }
 
     public void SetIcon(ApplicationIcon? icon)

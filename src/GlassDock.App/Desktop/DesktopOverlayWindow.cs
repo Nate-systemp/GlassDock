@@ -147,6 +147,8 @@ public sealed class DesktopOverlayWindow : Window
     private const double PillHideDurationMilliseconds = 210;
 
     public double BottomMargin { get; private set; }
+    private DockAppearanceSettings Appearance => settingsSession.Appearance;
+    private double ExpandedDockHeight => Math.Max(68, Appearance.ButtonHeight + 24);
     private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
@@ -205,13 +207,14 @@ public sealed class DesktopOverlayWindow : Window
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
-        previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - 68);
+        previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - ExpandedDockHeight);
         previews.HoldChanged += (_, _) => OnInteractionHoldChanged();
         previews.ActionFailed += (_, message) => SetStatus(message);
         AppWindow.Changed += (_, _) => previews.Reposition();
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
+        ApplyAppearance(Appearance);
         animation.PlacementChanged += (_, _) =>
         {
             UpdateBackdropBounds();
@@ -351,28 +354,12 @@ keyboard.RecoveryRequested +=
             UpdateBackdropBounds();
         }
     }
-private double CalculateTargetDockWidth()
-{
-    var count = VisibleDockApplications.Count;
+    private double CalculateTargetDockWidth() =>
+        Appearance.TargetDockWidth(VisibleDockApplications.Count);
 
-    if (count == 0)
-        return 100;
-
-    const double buttonWidth = 40;
-    const double spacing = 6;
-    const double horizontalPadding = 36;
-
-    var target =
-        count * buttonWidth +
-        (count - 1) * spacing +
-        horizontalPadding;
-
-    return Math.Clamp(target, 100, 560);
-}
-
-private Button CreateApplicationButton(DockApplicationItem item)
-{
-    var image = new AdaptiveAppIcon(size: 28, maximumHoverScale: 1.24);
+    private Button CreateApplicationButton(DockApplicationItem item)
+    {
+    var image = new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale);
 
     var running = new Border
     {
@@ -385,19 +372,13 @@ private Button CreateApplicationButton(DockApplicationItem item)
         Margin = new Thickness(0, 0, 0, 1)
     };
 
-    var content = new Grid
-    {
-        Width = 40,
-        Height = 44
-    };
+    var content = new Grid();
 
     content.Children.Add(image);
     content.Children.Add(running);
 
     var button = new Button
     {
-        Width = 40,
-        Height = 44,
         Padding = new Thickness(0),
         Margin = new Thickness(0),
         VerticalAlignment = VerticalAlignment.Center,
@@ -408,6 +389,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         BorderThickness = new Thickness(0),
         Content = content
     };
+        ApplyIconLayout(button, content, image, Appearance);
         button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(32, 255, 255, 255));
         button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(56, 255, 255, 255));
         button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Colors.Transparent);
@@ -1355,7 +1337,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
         UpdateDockWaveOutline();
         ApplyMaterial(true);
         var targetWidth = CalculateTargetDockWidth();
-        if (await animation.AnimateAsync(true, targetWidth))
+        if (await animation.AnimateAsync(true, targetWidth, ExpandedDockHeight))
         {
             state.Complete(revision);
             icons.IsHitTestVisible = state.State == DockState.Expanded;
@@ -1363,7 +1345,7 @@ private Button CreateApplicationButton(DockApplicationItem item)
             if (state.State == DockState.Expanded)
             {
                 dockWaveGlow.Opacity = 0.22;
-                dockWaveRim.Opacity = 0.78;
+                dockWaveRim.Opacity = Appearance.BorderOpacity;
                 UpdateDockWaveOutline();
                 if (!previews.ContextMenuOpen) ResumeAfterHold();
             }
@@ -1457,7 +1439,8 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
     private void ApplyMaterial(bool expanded)
     {
-        var material = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted) with
+        var material = Appearance.ApplyTo(
+            DockMaterialStylePresets.Create(Appearance.GlassMaterialMode) with
         {
             // Keep the dock's current frosted character, but round the
             // expanded shell so it visually belongs with Glass Home.
@@ -1473,8 +1456,9 @@ private Button CreateApplicationButton(DockApplicationItem item)
             // so disable GlassSurface's static rounded-rectangle rim.
             EdgeHighlight = expanded ? 0 : 0,
             BorderOpacity = expanded ? 0 : 0.18,
-            BorderThickness = 1
-        };
+            BorderThickness = expanded ? Appearance.BorderThickness : 1
+        },
+            expanded);
 
         surface.Apply(material);
         desktopBackdrop.Apply(material);
@@ -1508,8 +1492,63 @@ private Button CreateApplicationButton(DockApplicationItem item)
 
     private void SettingsChanged(
         object? sender,
-        GlassDockSettingsChangedEventArgs eventArgs) =>
+        GlassDockSettingsChangedEventArgs eventArgs)
+    {
         ApplyBottomMargin(eventArgs.Settings.BottomMargin);
+        ApplyAppearance(new DockAppearanceSettings(
+            eventArgs.Settings.GlassMaterialMode,
+            eventArgs.Settings.IconSize,
+            eventArgs.Settings.MagnificationScale,
+            eventArgs.Settings.IconSpacing,
+            eventArgs.Settings.GlassBlurAmount,
+            eventArgs.Settings.DockOpacity,
+            eventArgs.Settings.BorderThickness,
+            eventArgs.Settings.BorderOpacity));
+    }
+
+    private void ApplyAppearance(DockAppearanceSettings appearance)
+    {
+        icons.Spacing = appearance.IconSpacing;
+        icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
+        animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
+        dockWaveRim.StrokeThickness = appearance.BorderThickness;
+        if (state.State == DockState.Expanded)
+            dockWaveRim.Opacity = appearance.BorderOpacity;
+
+        foreach (var button in applicationButtons.Values)
+        {
+            if (button.Content is not Grid content ||
+                content.Children.FirstOrDefault() is not AdaptiveAppIcon icon)
+                continue;
+
+            ApplyIconLayout(button, content, icon, appearance);
+        }
+
+        if (state.State is DockState.Expanded)
+        {
+            surface.Width = CalculateTargetDockWidth();
+            surface.Height = ExpandedDockHeight;
+            ApplyMaterial(expanded: true);
+        }
+        else
+        {
+            ApplyMaterial(expanded: false);
+        }
+
+        UpdateBackdropBounds();
+        previews.Reposition();
+    }
+
+    private static void ApplyIconLayout(
+        Button button,
+        Grid content,
+        AdaptiveAppIcon icon,
+        DockAppearanceSettings appearance)
+    {
+        button.Width = content.Width = appearance.ButtonWidth;
+        button.Height = content.Height = appearance.ButtonHeight;
+        icon.Configure(appearance.IconSize, appearance.MagnificationScale);
+    }
 
     public void SetBottomMargin(double margin)
     {
