@@ -31,6 +31,23 @@ public sealed class WindowsKeyboardService : IKeyboardService
 
     private bool launcherChordActive;
     private bool spaceHeld;
+    private bool suppressDockToggle;
+    private bool suppressCurrentWindowsPress;
+    private uint toggleRevision;
+
+    // Record suppression at key-down as well as dispatch time. A menu may be
+    // dismissed between key-down, key-up and the posted toggle message.
+    public bool SuppressDockToggle
+    {
+        get => suppressDockToggle;
+        set
+        {
+            if (suppressDockToggle == value) return;
+            suppressDockToggle = value;
+            toggleRevision++;
+            if (value) suppressCurrentWindowsPress = true;
+        }
+    }
 
     public bool IsRegistered { get; private set; }
 
@@ -195,6 +212,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
         //
         if (isWindowsKey && down)
         {
+            if (!winHeld) suppressCurrentWindowsPress = suppressDockToggle;
             //
             // New Win press:
             // recover from any stale launcher state.
@@ -402,10 +420,10 @@ public sealed class WindowsKeyboardService : IKeyboardService
                         Marshal.SizeOf<NativeMethods.Input>())
                     == 3)
                 {
-                    NativeMethods.PostMessageW(
+                    if (!suppressCurrentWindowsPress && !suppressDockToggle) NativeMethods.PostMessageW(
                         hwnd,
                         ExpandMessage,
-                        0,
+                        toggleRevision,
                         0);
 
                     return 1;
@@ -459,7 +477,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
         //
         if (message == ExpandMessage)
         {
-            HomeRequested?.Invoke(
+            if (!suppressDockToggle && wParam == toggleRevision) HomeRequested?.Invoke(
                 this,
                 EventArgs.Empty);
 
@@ -486,7 +504,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
             //
             // Ctrl + Alt + Space
             //
-            if (wParam == 0x4701)
+            if (wParam == 0x4701 && !suppressDockToggle)
             {
                 HomeRequested?.Invoke(
                     this,

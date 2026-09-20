@@ -23,6 +23,7 @@ public sealed class WindowsKeyGestureTests
     [InlineData(0x4C)] // L
     [InlineData(0x44)] // D
     [InlineData(0x09)] // Tab
+    [InlineData(0x20)] // Space must not also trigger the bare-Win toggle.
     [InlineData(0xA2)] // Ctrl
     public void Windows_shortcuts_never_request_dock(int key)
     {
@@ -33,6 +34,24 @@ public sealed class WindowsKeyGestureTests
         Assert.False(gesture.Process(0x5B, false));
         Assert.False(gesture.Process(0x5B, true));
         Assert.True(gesture.Process(0x5B, false));
+    }
+
+    [Fact]
+    public void Dual_windows_keys_stay_disqualified_until_both_are_released()
+    {
+        foreach (var first in new[] { 0x5B, 0x5C })
+        foreach (var releaseFirst in new[] { 0x5B, 0x5C })
+        {
+            var gesture = new WindowsKeyGesture();
+            gesture.Process(first, true);
+            gesture.Process(first == 0x5B ? 0x5C : 0x5B, true);
+            Assert.False(gesture.Process(releaseFirst, false));
+            Assert.False(gesture.Process(releaseFirst, true));
+            Assert.False(gesture.Process(releaseFirst, false));
+            Assert.False(gesture.Process(releaseFirst == 0x5B ? 0x5C : 0x5B, false));
+            gesture.Process(first, true);
+            Assert.True(gesture.Process(first, false));
+        }
     }
 
     [Fact]

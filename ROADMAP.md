@@ -32,14 +32,14 @@ Implemented: three presets, live controls, five stress-test backgrounds, native 
 The user has separately authorized a Phase 2–3 desktop-foundation milestone, including carefully gated recovery/taskbar experiments. It must preserve the laboratory and does not authorize the full launcher or other future functionality.
 
 ## Safety gate
-The user's desktop-foundation request authorized early, bounded development experiments for taskbar visibility and recovery. Those experiments do not complete Phases 6, 10 or 11 or enable production shell replacement. Persistent suppression and bare Windows-key interception remain deferred.
+The user's desktop-foundation request authorized early, bounded development experiments for taskbar visibility and recovery. Those experiments do not complete Phases 6, 10 or 11 or enable production shell replacement. Later user-authorized follow-ups added app-lifetime watchdog suppression and bare-Windows-key interception; neither is a production shell-safety certification.
 
 ## Phase 2–3 acceptance and stop
-Implemented: primary-monitor floating pill, expanded glass dock, placeholder icon interactions, shared native material graph, explicit states, configurable margin, development hotkeys, independent watchdog and recovery command. Taskbar suppression is opt-in for at most 60 seconds and refuses multiple taskbars. Default launch leaves the taskbar intact.
+Implemented: primary-monitor floating pill, expanded glass dock, placeholder icon interactions, shared native material graph, explicit states, configurable margin, development hotkeys, independent watchdog and recovery command. Default launch requests an app-lifetime watchdog lease; the separate development test is bounded to 60 seconds. Suppression refuses multiple taskbars.
 
 Local checks cover launch, material rendering, expansion/collapse, laboratory regression and recovery after normal exit, parent failure, helper failure and lease expiry. See docs/PHASE_2_3_VALIDATION.md for evidence and limits.
 
-Stop here. Full Glass Home, discovery, real launching, multi-monitor management, status, licensing, updater and automatic startup require separate authorization.
+Later authorized follow-ups already implemented running-app discovery, real launching, and Glass Home application/Settings search. Stop before further launcher features, multi-monitor dock movement, licensing, updater or automatic startup.
 
 ## Separately authorized Glass Home search follow-up (2026-09-15)
 The current user request authorizes functional search in the already-working Compact/Expanded Home: installed applications and Windows Settings only, cached discovery, icons, ranked matching, keyboard selection, and launching. This narrow authorization supersedes the earlier discovery stop for these features only. Preserve the existing Home interaction, dock, previews, hotkeys, recovery and laboratory. Stop before pinned launcher content, recent files, power menu, Task View, and web search. Implementation and validation limits are recorded in docs/GLASS_HOME_SEARCH.md; this does not declare the entire launcher or shell roadmap complete.

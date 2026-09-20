@@ -32,4 +32,6 @@ public interface IApplicationService : IDisposable
     bool ActivateWindow(ApplicationWindow window);
     bool CloseWindow(ApplicationWindow window);
     bool SetPinned(DockApplication application, bool pinned);
+    bool RunAsAdministrator(DockApplication application);
+    bool OpenFileLocation(DockApplication application);
 }

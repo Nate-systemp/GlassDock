@@ -3,6 +3,9 @@ namespace GlassDock.Core.Applications;
 public readonly record struct PreviewRect(double X, double Y, double Width, double Height);
 public sealed record WindowPreviewLayout(double Width, double Height, int Capacity, IReadOnlyList<PreviewRect> Cards)
 {
+    public static PreviewRect CloseButtonBounds(PreviewRect card, double size) =>
+        new(card.X + card.Width - size - 9, card.Y + 8, size, size);
+
     public static WindowPreviewLayout Create(int count, double availableWidth, double availableHeight, bool expanded)
     {
         var cardWidth = Math.Max(40, Math.Min(208, availableWidth - 50));

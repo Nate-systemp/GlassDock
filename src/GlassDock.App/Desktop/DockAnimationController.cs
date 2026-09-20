@@ -29,6 +29,7 @@ internal sealed class DockAnimationController
     private TaskCompletionSource<bool>? completion;
 
     private bool magnificationRequested;
+    private bool interactionHeld;
     private bool magnificationTimerRunning;
     private double magnificationPointerX;
 
@@ -116,8 +117,17 @@ internal sealed class DockAnimationController
 
     public void StopIndicatorOpacityAnimation()
     {
+        var opacity = indicator.Opacity;
         indicatorFade?.Stop();
         indicatorFade = null;
+        indicator.Opacity = opacity;
+    }
+
+    public void HoldMagnification(bool held)
+    {
+        interactionHeld = held;
+        if (held) StopMagnificationTimer();
+        else StartMagnificationTimer();
     }
 
     public Task<bool> AnimateAsync(
@@ -493,7 +503,7 @@ internal sealed class DockAnimationController
 
     private void StartMagnificationTimer()
     {
-        if (magnificationTimerRunning)
+        if (magnificationTimerRunning || interactionHeld)
             return;
 
         magnificationTimerRunning = true;
@@ -566,6 +576,42 @@ internal sealed class DockAnimationController
 
         active!.Children.Add(
             animation);
+    }
+
+    /// <summary>
+    /// Stops an in-flight placement/shape transition while retaining the
+    /// values currently rendered on screen. This is used only when a context
+    /// menu takes ownership of the dock interaction; unlike Stop(), it does
+    /// not reset icon magnification or otherwise rebuild the visual state.
+    /// </summary>
+    public bool FreezeCurrentTransitions()
+    {
+        var hadTransition = IsPlacementAnimating || active is not null || indicatorFade is not null;
+        var bottom = surface.Margin.Bottom;
+        var width = surface.ActualWidth;
+        var height = surface.ActualHeight;
+        var surfaceOpacity = surface.Opacity;
+        var iconsOpacity = icons.Opacity;
+        var indicatorWidth = indicator.ActualWidth;
+        var indicatorOpacity = indicator.Opacity;
+
+        placementTimer.Stop();
+        IsPlacementAnimating = false;
+        active?.Stop();
+        active = null;
+        completion?.TrySetResult(false);
+        completion = null;
+        indicatorFade?.Stop();
+        indicatorFade = null;
+
+        surface.Width = width;
+        surface.Height = height;
+        surface.Opacity = surfaceOpacity;
+        icons.Opacity = iconsOpacity;
+        indicator.Width = indicatorWidth;
+        indicator.Opacity = indicatorOpacity;
+        ApplyBottom(bottom);
+        return hadTransition;
     }
 
     public void Stop()

@@ -1,0 +1,147 @@
+<Window
+    x:Class="GlassDock.App.Desktop.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="#10141C" RequestedTheme="Dark">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Padding="36,30,36,28" Spacing="22">
+                <StackPanel Spacing="6">
+                    <TextBlock
+                        Text="GlassDock Settings"
+                        FontSize="30"
+                        FontWeight="SemiBold"/>
+                    <TextBlock
+                        Text="Adjust how the dock rests and responds when the pointer leaves."
+                        FontSize="14"
+                        Foreground="#AEB7C6"
+                        TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Border
+                    Padding="24,22"
+                    CornerRadius="18"
+                    Background="#C91A202B"
+                    BorderBrush="#344052"
+                    BorderThickness="1">
+                    <StackPanel Spacing="22">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Dock behavior" FontSize="19" FontWeight="SemiBold"/>
+                            <TextBlock
+                                Text="Changes apply to the running dock after you select Apply."
+                                Foreground="#99A5B7"
+                                FontSize="12"/>
+                        </StackPanel>
+
+                        <Grid ColumnSpacing="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="150"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Bottom spacing" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock
+                                    Text="How far the expanded dock sits above the screen edge."
+                                    Foreground="#A7B0BF"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <NumberBox
+                                x:Name="BottomMarginBox"
+                                Grid.Column="1"
+                                Header="DIP"
+                                Minimum="16"
+                                Maximum="100"
+                                SmallChange="1"
+                                LargeChange="8"
+                                SpinButtonPlacementMode="Compact"
+                                AutomationProperties.Name="Bottom spacing in device-independent pixels"/>
+                        </Grid>
+
+                        <Rectangle Height="1" Fill="#293342"/>
+
+                        <Grid ColumnSpacing="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="150"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Auto-hide delay" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock
+                                    Text="Wait time before the expanded dock starts collapsing."
+                                    Foreground="#A7B0BF"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <NumberBox
+                                x:Name="AutoHideDelayBox"
+                                Grid.Column="1"
+                                Header="Seconds"
+                                Minimum="0"
+                                Maximum="10"
+                                SmallChange="0.1"
+                                LargeChange="1"
+                                SpinButtonPlacementMode="Compact"
+                                AutomationProperties.Name="Auto-hide delay in seconds"/>
+                        </Grid>
+
+                        <Rectangle Height="1" Fill="#293342"/>
+
+                        <Grid ColumnSpacing="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="150"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Peek delay" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock
+                                    Text="How long the raised indicator waits before lowering near the edge."
+                                    Foreground="#A7B0BF"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <NumberBox
+                                x:Name="PeekDelayBox"
+                                Grid.Column="1"
+                                Header="Seconds"
+                                Minimum="0"
+                                Maximum="30"
+                                SmallChange="0.1"
+                                LargeChange="1"
+                                SpinButtonPlacementMode="Compact"
+                                AutomationProperties.Name="Peek delay in seconds"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="StatusText"
+                        VerticalAlignment="Center"
+                        Foreground="#9EABBC"
+                        FontSize="12"
+                        TextWrapping="Wrap"/>
+                    <Button
+                        Grid.Column="1"
+                        Content="Reset to Defaults"
+                        Click="ResetClick"
+                        Padding="16,9"/>
+                    <Button
+                        x:Name="ApplyButton"
+                        Grid.Column="2"
+                        Content="Apply"
+                        Click="ApplyClick"
+                        Padding="22,9"/>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

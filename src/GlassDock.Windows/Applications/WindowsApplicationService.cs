@@ -205,6 +205,15 @@ public sealed class WindowsApplicationService : IApplicationService
         return saved;
     }
 
+    public bool RunAsAdministrator(DockApplication application)
+    {
+        var launched = launcher.RunAsAdministrator(application);
+        if (launched) RequestRefresh();
+        return launched;
+    }
+
+    public bool OpenFileLocation(DockApplication application) => launcher.OpenFileLocation(application);
+
     internal static bool IsEligible(ApplicationWindow existing)
     {
         var window = (nint)existing.Handle;

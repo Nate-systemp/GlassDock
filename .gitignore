@@ -15,7 +15,6 @@ artifacts/
 .env
 .env.*
 secrets.json
-@"
 
 # Build / distribution files
 publish/
@@ -23,4 +22,3 @@ Installer/
 installer/
 TestExtract/
 GlassDock-Windows-x64.zip
-"@ | Add-Content .gitignore

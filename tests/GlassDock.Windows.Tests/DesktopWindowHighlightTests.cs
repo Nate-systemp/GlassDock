@@ -243,7 +243,7 @@ public sealed class DesktopWindowHighlightTests
     }
 
     [Fact]
-    public async Task Overlay_is_hollow_nonactivating_and_leaves_targets_unchanged()
+    public async Task Disabled_highlight_creates_no_window_and_leaves_targets_unchanged()
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -262,35 +262,29 @@ public sealed class DesktopWindowHighlightTests
                 GetWindowRect(first, out var originalFirst);
                 GetWindowRect(second, out var originalSecond);
                 var order = TargetOrder(first, second);
+                var threadWindows = CurrentThreadWindows();
                 using var highlight = new DesktopWindowHighlight();
                 highlight.Show(first);
-                var overlay = (nint)typeof(DesktopWindowHighlight).GetField("overlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(highlight)!;
-                Assert.NotEqual(0, overlay);
-                Assert.True(IsWindowVisible(overlay));
-                Assert.Equal(0x080800A0L, GetWindowLongPtrW(overlay, -20).ToInt64() & 0x080800A0L);
-                Assert.NotEqual(0, GetWindowLongPtrW(overlay, -20).ToInt64() & 8); // Only overlay is topmost.
-                var region = CreateRectRgn(0, 0, 0, 0);
-                try
-                {
-                    Assert.NotEqual(0, GetWindowRgn(overlay, region));
-                    GetWindowRect(overlay, out var rectangle);
-                    Assert.False(PtInRegion(region, (rectangle.Right - rectangle.Left) / 2, (rectangle.Bottom - rectangle.Top) / 2));
-                    Assert.True(PtInRegion(region, 1, (rectangle.Bottom - rectangle.Top) / 2));
-                }
-                finally { DeleteObject(region); }
+                Assert.Equal(threadWindows, CurrentThreadWindows());
                 highlight.Show(second);
                 Assert.Equal(foreground, GetForegroundWindow());
                 Assert.Equal(order, TargetOrder(first, second));
                 GetWindowRect(first, out var afterFirst); GetWindowRect(second, out var afterSecond);
                 Assert.Equal(originalFirst, afterFirst); Assert.Equal(originalSecond, afterSecond);
-                highlight.Hide(); Assert.False(IsWindowVisible(overlay));
-                ShowWindow(second, 7); // Minimize test window without activating it.
-                highlight.Show(second); Assert.False(IsWindowVisible(overlay));
-                highlight.Show(first); Assert.True(IsWindowVisible(overlay));
-                DestroyWindow(first); first = 0;
-                SendMessageW(overlay, 0x0113, 1, 0); // Deliver the overlay's tracking timer.
-                Assert.False(IsWindowVisible(overlay));
-                highlight.Dispose(); Assert.False(IsWindow(overlay));
+                highlight.Hide();
+                ShowWindow(second, 7); // Minimize only the disposable test window.
+                highlight.Show(second);
+                Assert.True(IsIconic(second));
+                highlight.Show(first);
+                highlight.Show(0);
+                highlight.Dispose();
+                highlight.Dispose();
+                highlight.Show(first);
+                highlight.Hide();
+                Assert.Equal(threadWindows, CurrentThreadWindows());
+                GetWindowRect(first, out afterFirst);
+                Assert.Equal(originalFirst, afterFirst);
+                Assert.True(IsIconic(second));
                 Assert.Equal(foreground, GetForegroundWindow());
                 completion.SetResult();
             }
@@ -305,6 +299,16 @@ public sealed class DesktopWindowHighlightTests
         thread.Start();
         await completion.Task.WaitAsync(TimeSpan.FromSeconds(10));
     }
+
+    private static nint[] CurrentThreadWindows()
+    {
+        var windows = new List<nint>();
+        EnumThreadWindows(GetCurrentThreadId(), (window, _) => { windows.Add(window); return true; }, 0);
+        return windows.Order().ToArray();
+    }
+
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool EnumThreadWindows(uint thread, EnumProc callback, nint data);
 
     private static nint[] TargetOrder(nint first, nint second)
     {

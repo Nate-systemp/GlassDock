@@ -68,7 +68,7 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private nint WindowMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
-        if (message == 0x0084 && expandedInput) // WM_NCHITTEST, signed virtual-desktop coordinates
+        if (message == 0x0084 && inputRegion != 0) // WM_NCHITTEST, signed virtual-desktop coordinates
         {
             var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
             var inside = ContainsScreenPoint(point);
@@ -187,48 +187,50 @@ public sealed class WindowsOverlayManager : IDisposable
     }
 
     /// <summary>
-    /// Updates the small peek target. During the rise/fall animation an input
-    /// corridor keeps the pointer latched to the dock instead of chasing the
-    /// moving five-pixel pill and repeatedly entering/leaving it.
+    /// Samples the current cursor against the native interaction shape. Menu
+    /// modality can suppress the normal XAML PointerExited event, so callers
+    /// use this when a context menu closes.
     /// </summary>
-    public void SetPeekInteraction(double bottom, bool watchPointer, double? transitionBottom = null)
+    public bool IsPointerInsideInput()
     {
-        var left = (Width - 120) / 2;
-        var top = Height - bottom - 5;
-        if (watchPointer)
+        if (!GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
+            return false;
+
+        if (inputRegion != 0)
+            return ContainsScreenPoint(point);
+
+        var region = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        if (region == 0)
+            return false;
+        try
         {
-            if (transitionBottom is { } targetBottom)
-            {
-                var targetTop = Height - targetBottom - 5;
-                var corridorTop = Math.Min(top, targetTop) - 8;
-                var corridorBottom = Math.Max(top + 6, targetTop + 6) + 8;
-                SetInteractionPolygon([(left - 8, corridorTop), (left + 128, corridorTop),
-                    (left + 128, corridorBottom), (left - 8, corridorBottom)]);
-                return;
-            }
-            SetInteractionPolygon([(left - 1, top - 1), (left + 121, top - 1),
-                (left + 121, top + 6), (left - 1, top + 6)]);
-            return;
+            var hasRegion = NativeMethods.GetWindowRgn(hwnd, region) > 0;
+            return hasRegion && PtInRegion(region, point.X - bounds.Left, point.Y - bounds.Top);
         }
-        expandedInput = false;
-        NativeMethods.KillTimer(hwnd, InputTimer);
-        SetInputTransparent(false);
-        previousPointer = null;
-        if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
-        inputRegion = 0;
-        lastInteractionPolygon = null;
-        var scale = Scale;
-        var region = NativeMethods.CreateRoundRectRgn((int)Math.Floor((left - 1) * scale),
-            (int)Math.Floor((top - 1) * scale), (int)Math.Ceiling((left + 121) * scale),
-            (int)Math.Ceiling((top + 6) * scale), (int)(5 * scale), (int)(5 * scale));
-        if (region == 0) throw new Win32Exception();
-        if (NativeMethods.SetWindowRgn(hwnd, region, true) == 0)
+        finally
         {
             NativeMethods.DeleteObject(region);
-            throw new Win32Exception();
         }
     }
 
+    /// <summary>Input follows the visible pill; eight DIP extend only below it.</summary>
+    public void SetPeekInteraction(double bottom)
+    {
+        var left = (Width - 120) / 2;
+        var top = Height - bottom - 5;
+        SetInteractionPolygon([(left, top), (left + 120, top),
+            (left + 120, top + 13), (left, top + 13)]);
+    }
+
+    public bool TryGetPointerPosition(out double x, out double y)
+    {
+        x = y = 0;
+        if (!GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
+            return false;
+        x = (point.X - bounds.Left) / Scale;
+        y = (point.Y - bounds.Top) / Scale;
+        return true;
+    }
     /// <summary>Keep an input-only region; never clip expanded glass/shadow rendering.</summary>
     public void SetInteractionPolygon(IReadOnlyList<(double X, double Y)> outline)
     {
@@ -246,7 +248,7 @@ public sealed class WindowsOverlayManager : IDisposable
             if (GetCursorPos(out var current)) previousPointer = current;
             NativeMethods.SetWindowRgn(hwnd, 0, true);
             expandedInput = true;
-            // Only runs while expanded/transitioning. Idle uses its existing small native region.
+            // Reuse the existing 20 Hz input sampler in peek too; a transparent host must reacquire input.
             // Needed to reacquire hover after a layered window passes input to another process.
             NativeMethods.SetTimer(hwnd, InputTimer, 50, 0);
         }
@@ -258,11 +260,12 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private bool ContainsScreenPoint(NativeMethods.Point point) =>
         inputRegion != 0 && NativeMethods.GetWindowRect(hwnd, out var bounds) &&
+        point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom &&
         PtInRegion(inputRegion, point.X - bounds.Left, point.Y - bounds.Top);
 
     private void UpdateInputTransparency()
     {
-        if (!expandedInput || !GetCursorPos(out var point)) return;
+        if (inputRegion == 0 || !GetCursorPos(out var point)) return;
         var inside = ContainsScreenPoint(point);
         SetInputTransparent(!inside);
         var moved = previousPointer is { } previous && (previous.X != point.X || previous.Y != point.Y);

@@ -26,12 +26,9 @@ public sealed class WindowsKeyGesture
             {
                 // Treat Win as "bare" when no meaningful shortcut key
                 // is currently held. Escape is intentionally ignored.
-                var otherKeysHeld = held.Any(k =>
-                    k != LeftWindows &&
-                    k != RightWindows &&
-                    k != Escape);
-
-                chord = otherKeysHeld;
+                // A second Windows key belongs to the same gesture. Keep any
+                // chord disqualification until both Windows keys are released.
+                chord |= held.Any(k => k != key && k != Escape);
             }
             else if (key != Escape &&
                      (held.Contains(LeftWindows) ||

@@ -250,6 +250,9 @@ internal static class NativeMethods
         [MarshalAs(UnmanagedType.Bool)] bool redraw
     );
 
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int GetWindowRgn(nint hwnd, nint region);
+
     [DllImport("dwmapi.dll")]
     internal static extern int DwmSetWindowAttribute(
         nint hwnd,

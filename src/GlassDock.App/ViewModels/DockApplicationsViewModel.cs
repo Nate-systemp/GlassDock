@@ -37,6 +37,8 @@ public sealed class DockApplicationsViewModel : IDisposable
     public bool ActivateWindow(ApplicationWindow window) => service.ActivateWindow(window);
     public bool CloseWindow(ApplicationWindow window) => service.CloseWindow(window);
     public bool SetPinned(DockApplicationItem item, bool pinned) => service.SetPinned(item.Application, pinned);
+    public bool RunAsAdministrator(DockApplicationItem item) => service.RunAsAdministrator(item.Application);
+    public bool OpenFileLocation(DockApplicationItem item) => service.OpenFileLocation(item.Application);
     public void Dispose()
     {
         disposed = true;

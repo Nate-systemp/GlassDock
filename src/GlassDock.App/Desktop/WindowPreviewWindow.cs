@@ -1086,18 +1086,14 @@ closeButton.LostFocus += (_, _) =>
                 rect.Height;
 
             var closeVisible = visible && CanFocus &&
-                (ContainsPointer(card.Button) || card.CloseButton.FocusState != FocusState.Unfocused);
+                (ContainsPointer(card.Button) || ContainsPointer(card.CloseButton) || card.CloseButton.FocusState != FocusState.Unfocused);
             card.CloseButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
             card.CloseButton.Opacity = closeVisible ? 1 : 0;
             card.CloseButton.IsHitTestVisible = closeVisible;
             card.CloseButton.IsTabStop = CanFocus;
-            Canvas.SetLeft(
-    card.CloseButton,
-    rect.X + 9);
-
-Canvas.SetTop(
-    card.CloseButton,
-    rect.Y + 8);
+            var closeBounds = WindowPreviewLayout.CloseButtonBounds(rect, card.CloseButton.Width);
+            Canvas.SetLeft(card.CloseButton, closeBounds.X);
+            Canvas.SetTop(card.CloseButton, closeBounds.Y);
             Canvas.SetZIndex(card.CloseButton, 25);
 
             ((SolidColorBrush)

@@ -19,9 +19,12 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly Dictionary<string, Button> buttons = [];
     private CancellationTokenSource? pending;
     private object? pointerOwner;
+    private DockApplicationItem? pendingShowAll;
+    private readonly HashSet<object> contextMenus = [];
+    private readonly Dictionary<string, (MenuFlyout Menu, long[] Handles, bool Pinned)> menuSnapshots = [];
     private bool disposed;
-    private int openMenus;
-    public bool HoldsDock => openMenus > 0 || session.State != WindowPreviewState.Hidden;
+    public bool ContextMenuOpen => contextMenus.Count > 0;
+    public bool HoldsDock => ContextMenuOpen || session.State != WindowPreviewState.Hidden;
     public event EventHandler? HoldChanged;
     public event EventHandler<string>? ActionFailed;
 
@@ -45,22 +48,36 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         var menu = new MenuFlyout();
         menu.Opening += (_, _) =>
         {
-            Hide(); openMenus++; HoldChanged?.Invoke(this, EventArgs.Empty);
+            pendingShowAll = null;
+            BeginContextMenu(menu);
+            Hide();
             BuildMenu(menu, item);
+            menuSnapshots[item.Id] = (menu, item.Application.Windows.Select(w => w.Handle).ToArray(), item.IsPinned);
         };
-        menu.Closed += (_, _) => { openMenus = Math.Max(0, openMenus - 1); HoldChanged?.Invoke(this, EventArgs.Empty); };
+        menu.Closed += (_, _) =>
+        {
+            menu.Items.Clear();
+            menuSnapshots.Remove(item.Id);
+            EndContextMenu(menu);
+        };
         button.ContextFlyout = menu;
     }
 
     public void Detach(string id)
     {
-        if (buttons.Remove(id, out var button) && ReferenceEquals(pointerOwner, button)) pointerOwner = null;
+        if (buttons.Remove(id, out var button))
+        {
+            if (ReferenceEquals(pointerOwner, button)) pointerOwner = null;
+            if (button.ContextFlyout is MenuFlyout menu) { menu.Hide(); EndContextMenu(menu); }
+            button.ContextFlyout = null;
+        }
+        menuSnapshots.Remove(id);
         if (session.ApplicationId == id) Hide();
     }
 
-    private async void Enter(DockApplicationItem item)
+    private async void Enter(DockApplicationItem item, bool immediate = false)
     {
-        if (disposed || openMenus > 0) return;
+        if (disposed || ContextMenuOpen) return;
         pending?.Cancel();
         if (session.ApplicationId == item.Id && session.State is not (WindowPreviewState.Hidden or WindowPreviewState.Waiting)) return;
         Hide();
@@ -70,8 +87,8 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         var delay = new CancellationTokenSource(); pending = delay;
         try
         {
-            await Task.Delay(350, delay.Token);
-            if (disposed || !session.Show(revision) || !buttons.TryGetValue(item.Id, out var button)) return;
+            if (!immediate) await Task.Delay(350, delay.Token);
+            if (disposed || ContextMenuOpen || delay.IsCancellationRequested || !session.Show(revision) || !buttons.TryGetValue(item.Id, out var button)) return;
             frameCache.Request(item.Application.Windows);
             ToolTipService.SetToolTip(button, null);
             EnsurePreview();
@@ -121,6 +138,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private async void Leave()
     {
+        if (disposed || ContextMenuOpen) return;
         WindowPreviewWindow.Trace("LEAVE scheduled");
         pending?.Cancel();
         var delay = new CancellationTokenSource(); pending = delay;
@@ -134,6 +152,13 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private void OnSnapshot(object? sender, EventArgs args)
     {
         TrackFrames();
+        foreach (var (appId, snapshot) in menuSnapshots.ToArray())
+        {
+            var current = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == appId);
+            if (current is null || current.IsPinned != snapshot.Pinned ||
+                !current.Application.Windows.Select(w => w.Handle).ToHashSet().SetEquals(snapshot.Handles))
+                snapshot.Menu.Hide();
+        }
         if (session.ApplicationId is not { } id) return;
         var item = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id);
         if (item is null || !item.IsRunning) { Hide(); return; }
@@ -163,40 +188,55 @@ internal sealed class WindowPreviewCoordinator : IDisposable
             entry.Click += (_, _) => { if (!action()) ActionFailed?.Invoke(this, $"Could not complete '{title}' for {item.Name}."); };
             menu.Items.Add(entry);
         }
-        Add("Open", () => applications.Activate(item));
+        Add(item.IsRunning ? "Activate" : "Open", () => applications.Activate(item));
         var canLaunch = WindowsApplicationLauncher.Target(item.Application) is not null;
         if (item.IsRunning && canLaunch) Add("New window", () => applications.Launch(item));
-        if (item.Application.Windows.Count == 1)
+
+        if (item.IsRunning)
         {
-            var window = item.Application.Windows[0];
-            Add("Close window", () => applications.CloseWindow(window));
-        }
-        if (item.Application.Windows.Count > 1)
-        {
-            var windows = new MenuFlyoutSubItem { Text = "Windows" };
-            var close = new MenuFlyoutSubItem { Text = "Close window" };
-            foreach (var window in item.Application.Windows)
+            Add("Show All Windows", () => { pendingShowAll = item; return true; });
+            if (item.Application.Windows.Count > 1)
             {
-                var title = string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title;
-                var entry = new MenuFlyoutItem { Text = title };
-                entry.Click += (_, _) =>
+                var windows = new MenuFlyoutSubItem { Text = "Windows" };
+                foreach (var window in item.Application.Windows)
                 {
-                    if (!applications.ActivateWindow(window)) ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
-                };
-                windows.Items.Add(entry);
-                var closeEntry = new MenuFlyoutItem { Text = title };
-                closeEntry.Click += (_, _) =>
+                    var title = string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title;
+                    var entry = new MenuFlyoutItem { Text = title };
+                    entry.Click += (_, _) =>
+                    {
+                        if (!applications.ActivateWindow(window)) ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
+                    };
+                    windows.Items.Add(entry);
+                }
+                menu.Items.Add(windows);
+                Add("Close All Windows", () =>
                 {
-                    if (!applications.CloseWindow(window)) ActionFailed?.Invoke(this, "That window is no longer available to close.");
-                };
-                close.Items.Add(closeEntry);
+                    var windowsToClose = item.Application.Windows.ToArray();
+                    var success = windowsToClose.Length > 0;
+                    foreach (var window in windowsToClose) success &= applications.CloseWindow(window);
+                    return success;
+                });
             }
-            menu.Items.Add(windows); menu.Items.Add(close);
+            else
+            {
+                var window = item.Application.Windows[0];
+                Add("Close Window", () => applications.CloseWindow(window));
+            }
         }
+
         if (item.IsPinned || canLaunch)
         {
             menu.Items.Add(new MenuFlyoutSeparator());
-            Add(item.IsPinned ? "Unpin from GlassDock" : "Pin · Keep in dock", () => applications.SetPinned(item, !item.IsPinned));
+            Add(item.IsPinned ? "Unpin from Dock" : "Pin to Dock", () => applications.SetPinned(item, !item.IsPinned));
+        }
+
+        var canElevate = WindowsApplicationLauncher.CanRunAsAdministrator(item.Application);
+        var canLocate = WindowsApplicationLauncher.CanOpenFileLocation(item.Application);
+        if (canElevate || canLocate)
+        {
+            menu.Items.Add(new MenuFlyoutSeparator());
+            if (canElevate) Add("Run as Administrator", () => applications.RunAsAdministrator(item));
+            if (canLocate) Add("Open File Location", () => applications.OpenFileLocation(item));
         }
     }
 
@@ -213,10 +253,39 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         if (held != HoldsDock) HoldChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public void BeginContextMenu(object source)
+    {
+        if (disposed || !contextMenus.Add(source)) return;
+        pending?.Cancel();
+        HoldChanged?.Invoke(this, EventArgs.Empty);
+        Hide();
+    }
+
+    public void EndContextMenu(object source)
+    {
+        // Defer release one dispatch turn so replacing A with B does not
+        // briefly resume/reset hover visuals between the two menu events.
+        dockRoot.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (disposed || source is MenuFlyout { IsOpen: true } || !contextMenus.Remove(source)) return;
+            HoldChanged?.Invoke(this, EventArgs.Empty);
+            if (!ContextMenuOpen && pendingShowAll is { } requested)
+            {
+                pendingShowAll = null;
+                var current = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == requested.Id && item.IsRunning);
+                if (current is not null) Enter(current, immediate: true);
+            }
+        });
+    }
+
     public void Dispose()
     {
         disposed = true;
         pointerOwner = null;
+        pendingShowAll = null;
+        foreach (var menu in contextMenus.OfType<MenuFlyout>().ToArray()) menu.Hide();
+        contextMenus.Clear();
+        menuSnapshots.Clear();
         applications.SnapshotApplied -= OnSnapshot;
         pending?.Cancel();
         preview?.Close(); preview = null;

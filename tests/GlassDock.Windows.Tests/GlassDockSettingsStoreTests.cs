@@ -1,0 +1,174 @@
+using System.Text.Json;
+using GlassDock.Core.Settings;
+using GlassDock.Windows.Settings;
+using Xunit;
+
+namespace GlassDock.Windows.Tests;
+
+public sealed class GlassDockSettingsStoreTests
+{
+    [Fact]
+    public async Task Missing_file_returns_defaults_without_writing_to_LocalAppData()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+
+        var settings = await store.LoadAsync();
+
+        Assert.Equal(new GlassDockSettings(), settings);
+        Assert.False(File.Exists(store.SettingsFilePath));
+    }
+
+    [Fact]
+    public async Task Save_creates_directory_and_round_trips_human_readable_json()
+    {
+        using var location = new TemporarySettingsDirectory(createDirectory: false);
+        var store = location.CreateStore();
+        var expected = new GlassDockSettings
+        {
+            LaunchAtStartup = true,
+            SuppressWindowsTaskbar = false,
+            BottomMargin = 42,
+            AutoHideDelayMilliseconds = 2500,
+            PeekDelayMilliseconds = 4500
+        };
+
+        await store.SaveAsync(expected);
+        var actual = await store.LoadAsync();
+        var json = await File.ReadAllTextAsync(store.SettingsFilePath);
+
+        Assert.Equal(expected, actual);
+        Assert.Contains(Environment.NewLine, json);
+        Assert.Contains("\"SchemaVersion\": 1", json);
+        Assert.Single(Directory.EnumerateFiles(location.DirectoryPath));
+    }
+
+    [Fact]
+    public async Task Invalid_json_falls_back_without_modifying_the_corrupt_file()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        const string corrupt = "{ definitely-not-json";
+        await File.WriteAllTextAsync(store.SettingsFilePath, corrupt);
+
+        var settings = await store.LoadAsync();
+
+        Assert.Equal(new GlassDockSettings(), settings);
+        Assert.Equal(corrupt, await File.ReadAllTextAsync(store.SettingsFilePath));
+    }
+
+    [Fact]
+    public async Task Loaded_values_are_normalized()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, """
+            {
+              "SchemaVersion": 999,
+              "BottomMargin": -100,
+              "AutoHideDelayMilliseconds": 999999,
+              "PeekDelayMilliseconds": -50
+            }
+            """);
+
+        var settings = await store.LoadAsync();
+
+        Assert.Equal(GlassDockSettings.CurrentSchemaVersion, settings.SchemaVersion);
+        Assert.Equal(GlassDockSettings.MinimumBottomMargin, settings.BottomMargin);
+        Assert.Equal(GlassDockSettings.MaximumAutoHideDelayMilliseconds, settings.AutoHideDelayMilliseconds);
+        Assert.Equal(GlassDockSettings.MinimumPeekDelayMilliseconds, settings.PeekDelayMilliseconds);
+    }
+
+    [Fact]
+    public async Task Unknown_json_properties_are_ignored()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, """
+            {
+              "SchemaVersion": 1,
+              "LaunchAtStartup": true,
+              "FutureSetting": { "Nested": "value" }
+            }
+            """);
+
+        var settings = await store.LoadAsync();
+
+        Assert.True(settings.LaunchAtStartup);
+        Assert.Equal(GlassDockSettings.DefaultBottomMargin, settings.BottomMargin);
+    }
+
+    [Fact]
+    public async Task Repeated_saves_replace_the_complete_file_without_temporary_files()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await store.SaveAsync(new() { BottomMargin = 32, LaunchAtStartup = true });
+        await store.SaveAsync(new()
+        {
+            BottomMargin = 64,
+            LaunchAtStartup = false,
+            PeekDelayMilliseconds = 7000
+        });
+
+        var settings = await store.LoadAsync();
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(store.SettingsFilePath));
+
+        Assert.Equal(64, settings.BottomMargin);
+        Assert.False(settings.LaunchAtStartup);
+        Assert.Equal(7000, settings.PeekDelayMilliseconds);
+        Assert.Equal(GlassDockSettings.CurrentSchemaVersion, json.RootElement.GetProperty("SchemaVersion").GetInt32());
+        Assert.Single(Directory.EnumerateFiles(location.DirectoryPath));
+    }
+
+    [Fact]
+    public async Task Saving_safe_dock_edits_preserves_unexposed_preferences()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        var session = new GlassDockSettingsSession(new()
+        {
+            LaunchAtStartup = true,
+            SuppressWindowsTaskbar = false
+        });
+
+        var edited = session.CreateDockBehaviorUpdate(36, 2800, 5200);
+        await store.SaveAsync(edited);
+        var loaded = await store.LoadAsync();
+
+        Assert.True(loaded.LaunchAtStartup);
+        Assert.False(loaded.SuppressWindowsTaskbar);
+        Assert.Equal(36, loaded.BottomMargin);
+        Assert.Equal(2800, loaded.AutoHideDelayMilliseconds);
+        Assert.Equal(5200, loaded.PeekDelayMilliseconds);
+    }
+
+    private sealed class TemporarySettingsDirectory : IDisposable
+    {
+        public TemporarySettingsDirectory(bool createDirectory = true)
+        {
+            DirectoryPath = Path.Combine(
+                Path.GetTempPath(),
+                "GlassDock.Tests",
+                Guid.NewGuid().ToString("N"));
+            if (createDirectory)
+                Directory.CreateDirectory(DirectoryPath);
+        }
+
+        public string DirectoryPath { get; }
+
+        public GlassDockSettingsStore CreateStore() =>
+            new(Path.Combine(DirectoryPath, "settings.json"));
+
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(DirectoryPath))
+                    Directory.Delete(DirectoryPath, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+}

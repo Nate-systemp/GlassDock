@@ -5,6 +5,22 @@ namespace GlassDock.Core.Tests;
 
 public sealed class WindowPreviewTests
 {
+    [Fact]
+    public void CloseControlStaysInsideTopRightOfEveryCard()
+    {
+        foreach (var width in new[] { 90d, 600d, 1896d })
+        foreach (var expanded in new[] { false, true })
+        foreach (var card in WindowPreviewLayout.Create(8, width, 700, expanded).Cards)
+        {
+            var close = WindowPreviewLayout.CloseButtonBounds(card, 14);
+            Assert.Equal(9, card.X + card.Width - close.X - close.Width, 8);
+            Assert.Equal(8, close.Y - card.Y, 8);
+            Assert.True(close.X >= card.X && close.Y >= card.Y);
+            Assert.True(close.X + close.Width <= card.X + card.Width);
+            Assert.True(close.Y + close.Height <= card.Y + card.Height);
+        }
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]

@@ -48,6 +48,49 @@ public sealed class DesktopTests
     }
 
     [Fact]
+    public void Context_hold_invalidates_transition_and_resumes_from_current_state()
+    {
+        var state = new DockStateMachine();
+        state.Show();
+        state.Enter();
+        var revision = state.Expand();
+
+        Assert.True(state.HoldTransition());
+        Assert.NotEqual(revision, state.Revision);
+        state.Complete(revision);
+        Assert.Equal(DockState.Expanding, state.State);
+        state.ResumeHeldTransition(pointerInside: true);
+        Assert.Equal(DockState.Hovering, state.State);
+
+        state.Expand();
+        Assert.True(state.HoldTransition());
+        state.ResumeHeldTransition(pointerInside: false);
+        Assert.Equal(DockState.Expanded, state.State);
+    }
+
+    [Fact]
+    public void Repeated_menu_holds_during_collapse_reject_old_completions_and_exit()
+    {
+        var state = new DockStateMachine();
+        state.Show();
+        for (var i = 0; i < 100; i++)
+        {
+            state.Enter();
+            state.Complete(state.Expand());
+            var stale = state.Collapse();
+            Assert.True(state.HoldTransition());
+            state.Complete(stale);
+            Assert.Equal(DockState.Collapsing, state.State);
+            state.ResumeHeldTransition(pointerInside: false);
+            state.Complete(state.Collapse());
+            Assert.Equal(DockState.Idle, state.State);
+        }
+        state.Hide();
+        state.ResumeHeldTransition(pointerInside: true);
+        Assert.Equal(DockState.Hidden, state.State);
+    }
+
+    [Fact]
     public void Peek_hover_leave_repeats_without_changing_expansion_state()
     {
         var state = new DockStateMachine();

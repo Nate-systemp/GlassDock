@@ -76,6 +76,8 @@ This phase samples pixels inside the application only. Desktop-behind-window tra
 See docs/PHASE_1_FINDINGS.md for observations and primary references.
 
 ## Phase 2–3 desktop overlay
+The geometry/animation paragraphs below record the original foundation, not current interaction constants. Current code uses running/pinned app icons, an input-only wave/peek polygon with no visual clipping region, a 50 ms native pointer-reacquisition timer, and delayed collapse followed by a two-second raised-pill hold. See docs/DOCK_INTERACTION_REVIEW.md and docs/STEP_1_STABILIZATION.md for follow-up state.
+
 DesktopOverlayWindow owns a fixed 640×144 DIP topmost, borderless, non-activating HWND. WindowsOverlayManager positions it using primary MonitorInfo.Monitor bounds, not work area or laboratory dimensions; DIP sizes use GetDpiForWindow. The visible pill is 120×5 DIP, centered with a default 24 DIP bottom gap. An idle native window region supplies a 200×44 DIP hit target; expanded interaction uses the whole bounded overlay. Pixels outside that region do not intercept input.
 
 One GlassSurface changes from pill to 560×84 DIP dock in 200 ms. Seven UI-only placeholders fade in, and item hover scales to 1.08 over 110 ms. A 280 ms exit delay and revision-based state machine prevent stale animation completions. Reduced-motion mode removes the timed transitions. No idle pointer polling exists.
@@ -84,4 +86,9 @@ GlassEffectGraph is shared by both rendering adapters. The lab uses Microsoft.UI
 
 The OS compositor needs its own current-thread dispatcher queue. Own-window DWM alpha setup and background erasure live in WindowsOverlayManager; no other application windows are styled. Composition resources are released on disconnect, and the dispatcher queue is retained for App's lifetime.
 
-IKeyboardService currently exposes only RegisterHotKey-based Ctrl+Alt+Space and Ctrl+Alt+F12 events. Bare Windows interception remains deferred; no low-level hook or keyboard filtering is implemented. The Home event opens a small development placeholder, not a launcher.
+WindowsKeyboardService registers Ctrl+Alt+Space (dock toggle) and Ctrl+Alt+F12 (recovery), and uses a low-level keyboard hook for bare-Win dock toggle and Win+Space Glass Home. Dual-Windows-key gestures are not bare gestures. Context-menu holds suppress dock toggles. Glass Home provides installed-application and Settings search.
+
+### Settings foundation and first UI
+Core owns GlassDockSettings normalization and the app-lifetime GlassDockSettingsSession. Windows owns asynchronous JSON persistence under LocalAppData. App loads once at startup, passes the session to DesktopOverlayWindow, and retains one SettingsWindow while it is open. Applying safe dock behavior first saves a normalized snapshot, then replaces the in-memory snapshot; the dock applies bottom spacing immediately and reads hide/peek delays when scheduling new work. LaunchAtStartup and SuppressWindowsTaskbar are preserved but intentionally not wired.
+
+App also owns one ApplicationShutdownState. Exit first cancels app-lifetime work and prevents retained-window recreation, hides the overlay, closes previews and every auxiliary window, restores and disposes the taskbar lease, releases native services, then closes the main window and ends WinUI application lifetime. The same one-shot path handles a direct main-window close, so repeated shutdown requests cannot duplicate cleanup.
