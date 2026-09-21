@@ -22,3 +22,14 @@ Installer/
 installer/
 TestExtract/
 GlassDock-Windows-x64.zip
+
+# MSI sources are versioned; generated payloads and installers are not.
+!installer/
+installer/*
+!installer/wix/
+installer/wix/*
+!installer/wix/*.wixproj
+!installer/wix/*.wxs
+!installer/wix/packages.lock.json
+dist/
+!installer/wix/README.md

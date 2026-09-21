@@ -7,6 +7,21 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class GlassDockSettingsStoreTests
 {
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{\"IconSize\":\"obsolete\"}")]
+    [InlineData("{\"GlassMaterialMode\":\"unsupported-old-value\"}")]
+    public async Task Incompatible_settings_fall_back_without_rewriting_user_data(string json)
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, json);
+
+        Assert.Equal(new GlassDockSettings(), await store.LoadAsync());
+        Assert.Equal(json, await File.ReadAllTextAsync(store.SettingsFilePath));
+    }
+
     [Fact]
     public async Task Missing_file_returns_defaults_without_writing_to_LocalAppData()
     {

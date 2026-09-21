@@ -1,0 +1,34 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Id="GlassDock" Name="GlassDock" Manufacturer="Natesystemp"
+           Version="$(InstallerVersion)" UpgradeCode="5fb9248e-3141-422b-927d-5a9a57810d4c" Scope="perMachine">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of GlassDock is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <!-- Run in the interactive installer client after the install has committed,
+         not in the Windows Installer service. ShellExecute honors app elevation. -->
+    <Property Id="WixShellExecTarget" Value="[#GlassDockExe]" />
+    <CustomAction Id="LaunchGlassDock" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixShellExec" Execute="immediate" Impersonate="yes" Return="check" />
+    <InstallUISequence>
+      <Custom Action="LaunchGlassDock" After="ExecuteAction"
+              Condition="NOT REMOVE" />
+    </InstallUISequence>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="GlassDockStartMenu" Name="GlassDock" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GlassDock">
+        <Files Include="$(sys.SOURCEFILEDIR)..\..\publish\GlassDock\**">
+          <Exclude Files="$(sys.SOURCEFILEDIR)..\..\publish\GlassDock\GlassDock.App.exe" />
+        </Files>
+        <Component Id="MainExecutable" Guid="*">
+          <File Id="GlassDockExe" Source="$(sys.SOURCEFILEDIR)..\..\publish\GlassDock\GlassDock.App.exe" KeyPath="yes">
+            <Shortcut Id="GlassDockShortcut" Directory="GlassDockStartMenu" Name="GlassDock"
+                      Advertise="no" WorkingDirectory="INSTALLFOLDER" />
+          </File>
+          <RemoveFolder Id="RemoveStartMenuFolder" Directory="GlassDockStartMenu" On="uninstall" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+  </Package>
+</Wix>

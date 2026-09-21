@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- ICE requires privileges unavailable to the regular build account. -->
+    <SuppressValidation>true</SuppressValidation>
+    <OutputName>GlassDock-Setup-x64</OutputName>
+    <InstallerVersion Condition="'$(InstallerVersion)' == ''">0.1.3</InstallerVersion>
+    <DefineConstants>InstallerVersion=$(InstallerVersion)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
+</Project>
