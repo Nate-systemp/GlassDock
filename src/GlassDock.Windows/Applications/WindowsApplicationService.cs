@@ -19,6 +19,7 @@ public sealed class WindowsApplicationService : IApplicationService
     private Thread? worker;
     private volatile bool stopping;
     private IReadOnlyList<PinnedApplication> currentPins = Array.Empty<PinnedApplication>();
+    private int pinRevision;
     public event EventHandler<ApplicationSnapshot>? SnapshotChanged;
 
     public WindowsApplicationService() => callback = (_, eventId, window, objectId, childId, _, _) =>
@@ -54,19 +55,24 @@ public sealed class WindowsApplicationService : IApplicationService
         IReadOnlyList<PinnedApplication> pins = [];
         string? pinWarning = null;
         var lastPins = DateTime.MinValue;
+        var lastPinRevision = -1;
         try
         {
             while (!stopping)
             {
                 try
                 {
-                    // Pin order has no supported notification API; reconcile it at a modest rate.
-                    if (DateTime.UtcNow - lastPins > TimeSpan.FromSeconds(3))
+                    // Pin order has no supported notification API. Reconcile periodically,
+                    // and immediately after GlassDock changes pin/order preferences.
+                    var revision = Volatile.Read(ref pinRevision);
+                    if (revision != lastPinRevision ||
+                        DateTime.UtcNow - lastPins > TimeSpan.FromSeconds(3))
                     {
                         try
                         {
                             pins = pinStore.Apply(ShellApplicationMetadata.ReadPinned(icons), icons);
                             Volatile.Write(ref currentPins, pins);
+                            lastPinRevision = revision;
                             pinWarning = null;
                         }
                         catch (Exception error) when (error is COMException or InvalidCastException or IOException or UnauthorizedAccessException)
@@ -201,8 +207,21 @@ public sealed class WindowsApplicationService : IApplicationService
     public bool SetPinned(DockApplication application, bool pinned)
     {
         var saved = pinStore.Set(application, pinned);
+        if (saved)
+            Interlocked.Increment(ref pinRevision);
         RequestRefresh();
         return saved;
+    }
+
+    public bool ReorderPinned(IReadOnlyList<string> orderedIds)
+    {
+        var pins = Volatile.Read(ref currentPins);
+        if (!pinStore.Reorder(pins, orderedIds))
+            return false;
+
+        Interlocked.Increment(ref pinRevision);
+        RequestRefresh();
+        return true;
     }
 
     public bool RunAsAdministrator(DockApplication application)

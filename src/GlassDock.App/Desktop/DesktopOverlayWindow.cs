@@ -103,7 +103,7 @@ public sealed class DesktopOverlayWindow : Window
         Opacity = 0
     };
     private readonly DockStateMachine state = new();
-    private readonly IApplicationService applicationService = new WindowsApplicationService();
+    private readonly WindowsApplicationService applicationService = new();
     private readonly DockApplicationsViewModel applications;
     private readonly WindowPreviewCoordinator previews;
     private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
@@ -142,6 +142,19 @@ public sealed class DesktopOverlayWindow : Window
     private double dockWaveCurrentX;
     private double dockWaveTargetStrength;
     private double dockWaveCurrentStrength;
+
+    // Pinned-app drag reorder state. Reordering is visual while the pointer is
+    // down, then committed atomically to DockPinStore on release.
+    private DockApplicationItem? reorderCandidate;
+    private Button? reorderButton;
+    private double reorderStartX;
+    private bool reorderDragging;
+    private bool reorderCommitting;
+    private int reorderSourceIndex = -1;
+    private int reorderTargetIndex = -1;
+    private List<Button> reorderPinnedButtons = [];
+    private double[] reorderSlotCenters = [];
+    private readonly Dictionary<string, DateTime> suppressClickUntil = new(StringComparer.Ordinal);
 
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
@@ -352,7 +365,7 @@ keyboard.RecoveryRequested +=
         // Keep the right-click anchor and neighboring icon positions stable.
         // The coordinator dismisses menus whose app/window membership changed;
         // the latest collection is applied when the final menu hold releases.
-        if (previews.ContextMenuOpen) return;
+        if (previews.ContextMenuOpen || reorderDragging || reorderCommitting) return;
         var present = VisibleDockApplications.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var id in applicationButtons.Keys.Where(id => !present.Contains(id)).ToArray())
         {
@@ -436,12 +449,494 @@ keyboard.RecoveryRequested +=
         }
         Update();
         item.PropertyChanged += (_, _) => Update();
+        // ButtonBase handles pointer events internally for Click and can mark them
+        // handled before ordinary += handlers see them. Register with
+        // handledEventsToo=true so drag-reorder still receives the pointer stream.
+        button.AddHandler(
+            UIElement.PointerPressedEvent,
+            new PointerEventHandler((_, e) => BeginReorderCandidate(button, item, e)),
+            true);
+
+        button.AddHandler(
+            UIElement.PointerMovedEvent,
+            new PointerEventHandler((_, e) => UpdateReorder(button, item, e)),
+            true);
+
+        button.AddHandler(
+            UIElement.PointerReleasedEvent,
+            new PointerEventHandler((_, e) => FinishReorder(button, item, e)),
+            true);
+
+        button.AddHandler(
+            UIElement.PointerCaptureLostEvent,
+            new PointerEventHandler((_, _) =>
+            {
+                // ButtonBase may release capture as part of its own pointer-up
+                // handling before our PointerReleased handler gets to commit.
+                // Defer cancellation one dispatcher turn; a successful drop
+                // clears reorderButton first, making this callback a no-op.
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (ReferenceEquals(reorderButton, button))
+                        CancelReorder();
+                });
+            }),
+            true);
+
         button.Click += (_, _) =>
         {
-            if (!applications.Activate(item)) SetStatus($"Windows could not launch or focus {item.Name}.");
+            if (suppressClickUntil.Remove(item.Id, out var until) &&
+                DateTime.UtcNow <= until)
+            {
+                return;
+            }
+
+            if (!applications.Activate(item))
+                SetStatus($"Windows could not launch or focus {item.Name}.");
         };
+
         previews.Attach(button, item);
         return button;
+    }
+
+    private void BeginReorderCandidate(
+        Button button,
+        DockApplicationItem item,
+        PointerRoutedEventArgs e)
+    {
+        if (!item.IsPinned ||
+            state.State != DockState.Expanded ||
+            previews.ContextMenuOpen ||
+            reorderButton is not null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(icons);
+        if (!point.Properties.IsLeftButtonPressed)
+            return;
+
+        reorderCandidate = item;
+        reorderButton = button;
+        reorderStartX = point.Position.X;
+        reorderDragging = false;
+        reorderSourceIndex = -1;
+        reorderTargetIndex = -1;
+        reorderPinnedButtons.Clear();
+        reorderSlotCenters = [];
+
+        button.CapturePointer(e.Pointer);
+    }
+
+    private void UpdateReorder(
+        Button button,
+        DockApplicationItem item,
+        PointerRoutedEventArgs e)
+    {
+        if (!ReferenceEquals(reorderButton, button) ||
+            !ReferenceEquals(reorderCandidate, item))
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(icons);
+        if (!point.Properties.IsLeftButtonPressed)
+            return;
+
+        var deltaX = point.Position.X - reorderStartX;
+
+        if (!reorderDragging)
+        {
+            if (Math.Abs(deltaX) < 6)
+                return;
+
+            var pinnedItems = VisibleDockApplications
+                .Where(candidate => candidate.IsPinned)
+                .ToArray();
+
+            reorderSourceIndex = Array.FindIndex(
+                pinnedItems,
+                candidate => candidate.Id == item.Id);
+
+            if (reorderSourceIndex < 0)
+            {
+                CancelReorder();
+                return;
+            }
+
+            reorderPinnedButtons = pinnedItems
+                .Select(candidate => applicationButtons.GetValueOrDefault(candidate.Id))
+                .Where(candidate => candidate is not null)
+                .Cast<Button>()
+                .ToList();
+
+            if (reorderPinnedButtons.Count != pinnedItems.Length)
+            {
+                CancelReorder();
+                return;
+            }
+
+            reorderSlotCenters = reorderPinnedButtons
+                .Select(candidate =>
+                {
+                    var origin = candidate
+                        .TransformToVisual(icons)
+                        .TransformPoint(new global::Windows.Foundation.Point(0, 0));
+
+                    return origin.X + candidate.ActualWidth / 2;
+                })
+                .ToArray();
+
+            reorderTargetIndex = reorderSourceIndex;
+            reorderDragging = true;
+
+            collapseDelay?.Cancel();
+            CancelPillHide();
+            previews.Hide();
+            animation.ResetMagnification();
+            HideDockWave();
+
+            button.Opacity = 0.82;
+            Canvas.SetZIndex(button, 100);
+        }
+
+        if (reorderSlotCenters.Length == 0)
+            return;
+
+        var nearestIndex = 0;
+        var nearestDistance = double.MaxValue;
+
+        for (var index = 0; index < reorderSlotCenters.Length; index++)
+        {
+            var distance = Math.Abs(point.Position.X - reorderSlotCenters[index]);
+            if (distance >= nearestDistance)
+                continue;
+
+            nearestDistance = distance;
+            nearestIndex = index;
+        }
+
+        reorderTargetIndex = Math.Clamp(
+            nearestIndex,
+            0,
+            reorderPinnedButtons.Count - 1);
+
+        ApplyReorderVisuals(deltaX);
+        e.Handled = true;
+    }
+
+    private void ApplyReorderVisuals(double draggedDeltaX)
+    {
+        if (!reorderDragging ||
+            reorderButton is null ||
+            reorderPinnedButtons.Count == 0)
+        {
+            return;
+        }
+
+        var slot = Appearance.ButtonWidth + Appearance.IconSpacing;
+
+        for (var index = 0; index < reorderPinnedButtons.Count; index++)
+        {
+            var candidate = reorderPinnedButtons[index];
+
+            if (ReferenceEquals(candidate, reorderButton))
+            {
+                candidate.RenderTransform = new TranslateTransform
+                {
+                    X = draggedDeltaX,
+                    Y = -6
+                };
+                continue;
+            }
+
+            double shift = 0;
+
+            if (reorderTargetIndex > reorderSourceIndex &&
+                index > reorderSourceIndex &&
+                index <= reorderTargetIndex)
+            {
+                shift = -slot;
+            }
+            else if (reorderTargetIndex < reorderSourceIndex &&
+                     index >= reorderTargetIndex &&
+                     index < reorderSourceIndex)
+            {
+                shift = slot;
+            }
+
+            candidate.RenderTransform = new TranslateTransform { X = shift };
+        }
+    }
+
+    private void FinishReorder(
+        Button button,
+        DockApplicationItem item,
+        PointerRoutedEventArgs e)
+    {
+        if (!ReferenceEquals(reorderButton, button) ||
+            !ReferenceEquals(reorderCandidate, item))
+        {
+            return;
+        }
+
+        // Do not release pointer capture yet. PointerCaptureLost can fire
+        // synchronously and would cancel/clear the reorder state before we commit it.
+        if (!reorderDragging)
+        {
+            ClearReorderState();
+            button.ReleasePointerCapture(e.Pointer);
+            return;
+        }
+
+        // PointerMoved can be coalesced/skipped near release, especially while
+        // ButtonBase owns capture. Resolve the drop slot one final time from
+        // the actual pointer-up position.
+        var releasePoint = e.GetCurrentPoint(icons).Position.X;
+        if (reorderSlotCenters.Length > 0)
+        {
+            var nearestIndex = 0;
+            var nearestDistance = double.MaxValue;
+
+            for (var index = 0; index < reorderSlotCenters.Length; index++)
+            {
+                var distance = Math.Abs(releasePoint - reorderSlotCenters[index]);
+                if (distance >= nearestDistance)
+                    continue;
+
+                nearestDistance = distance;
+                nearestIndex = index;
+            }
+
+            reorderTargetIndex = Math.Clamp(
+                nearestIndex,
+                0,
+                reorderSlotCenters.Length - 1);
+        }
+
+        var orderedIds = VisibleDockApplications
+            .Where(candidate => candidate.IsPinned)
+            .Select(candidate => candidate.Id)
+            .ToList();
+
+        if (reorderSourceIndex >= 0 &&
+            reorderSourceIndex < orderedIds.Count &&
+            reorderTargetIndex >= 0 &&
+            reorderTargetIndex < orderedIds.Count &&
+            reorderSourceIndex != reorderTargetIndex)
+        {
+            var draggedId = orderedIds[reorderSourceIndex];
+            orderedIds.RemoveAt(reorderSourceIndex);
+            orderedIds.Insert(reorderTargetIndex, draggedId);
+
+            if (applicationService.ReorderPinned(orderedIds))
+            {
+                // Keep the observable collection in the same order immediately.
+                // That prevents the asynchronous application snapshot from
+                // performing a second visible reorder a moment after the drop.
+                reorderCommitting = true;
+                try
+                {
+                    ApplyPinnedCollectionOrder(orderedIds);
+                    ApplyPinnedVisualOrderSmooth(orderedIds);
+                }
+                finally
+                {
+                    reorderCommitting = false;
+                }
+
+                SetStatus("Pinned app order saved.");
+            }
+            else
+            {
+                SetStatus("GlassDock could not save the pinned app order.");
+                SynchronizeItems();
+            }
+        }
+
+        suppressClickUntil[item.Id] = DateTime.UtcNow.AddMilliseconds(350);
+        ResetReorderVisuals();
+        ClearReorderState();
+
+        // Release only after the reorder state is cleared so the capture-lost
+        // callback cannot undo the completed drop.
+        button.ReleasePointerCapture(e.Pointer);
+
+        pointerInsideDock = windowManager.IsPointerInsideInput();
+        RefreshHoverVisuals();
+        e.Handled = true;
+    }
+
+    private void ApplyPinnedCollectionOrder(IReadOnlyList<string> orderedIds)
+    {
+        for (var targetIndex = 0; targetIndex < orderedIds.Count; targetIndex++)
+        {
+            var item = VisibleDockApplications
+                .FirstOrDefault(candidate => candidate.Id == orderedIds[targetIndex]);
+
+            if (item is null)
+                continue;
+
+            var currentIndex = VisibleDockApplications.IndexOf(item);
+            if (currentIndex >= 0 && currentIndex != targetIndex)
+                VisibleDockApplications.Move(currentIndex, targetIndex);
+        }
+    }
+
+    private void ApplyPinnedVisualOrderSmooth(IReadOnlyList<string> orderedIds)
+    {
+        var orderedButtons = orderedIds
+            .Select(id => applicationButtons.GetValueOrDefault(id))
+            .Where(button => button is not null)
+            .Cast<Button>()
+            .ToArray();
+
+        // Capture where every icon is actually being drawn right now, including
+        // the dragged icon and the temporary insertion-gap translations.
+        var oldPositions = orderedButtons.ToDictionary(
+            button => button,
+            button => button
+                .TransformToVisual(icons)
+                .TransformPoint(new global::Windows.Foundation.Point(0, 0)));
+
+        // Remove the drag transforms before changing the StackPanel's real order.
+        foreach (var candidate in orderedButtons)
+        {
+            candidate.RenderTransform = null;
+            candidate.Opacity = 1;
+            Canvas.SetZIndex(candidate, 0);
+        }
+
+        for (var index = 0; index < orderedIds.Count; index++)
+        {
+            if (!applicationButtons.TryGetValue(orderedIds[index], out var candidate))
+                continue;
+
+            var currentIndex = icons.Children.IndexOf(candidate);
+            if (currentIndex == index)
+                continue;
+
+            if (currentIndex >= 0)
+                icons.Children.RemoveAt(currentIndex);
+
+            icons.Children.Insert(index, candidate);
+        }
+
+        icons.UpdateLayout();
+
+        // FLIP animation: after layout changes, temporarily translate each icon
+        // back to its pre-drop visual position, then settle it into the new slot.
+        foreach (var candidate in orderedButtons)
+        {
+            var newPosition = candidate
+                .TransformToVisual(icons)
+                .TransformPoint(new global::Windows.Foundation.Point(0, 0));
+
+            var oldPosition = oldPositions[candidate];
+            var deltaX = oldPosition.X - newPosition.X;
+            var deltaY = oldPosition.Y - newPosition.Y;
+
+            if (Math.Abs(deltaX) < 0.5 && Math.Abs(deltaY) < 0.5)
+                continue;
+
+            var transform = new TranslateTransform
+            {
+                X = deltaX,
+                Y = deltaY
+            };
+
+            candidate.RenderTransform = transform;
+
+            var storyboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+            var easing = new Microsoft.UI.Xaml.Media.Animation.CubicEase
+            {
+                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut
+            };
+
+            var xAnimation = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+            {
+                From = deltaX,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = easing,
+                EnableDependentAnimation = true
+            };
+
+            var yAnimation = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+            {
+                From = deltaY,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = easing,
+                EnableDependentAnimation = true
+            };
+
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(
+                xAnimation,
+                transform);
+
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(
+                xAnimation,
+                nameof(TranslateTransform.X));
+
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(
+                yAnimation,
+                transform);
+
+            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(
+                yAnimation,
+                nameof(TranslateTransform.Y));
+
+            storyboard.Children.Add(xAnimation);
+            storyboard.Children.Add(yAnimation);
+
+            storyboard.Completed += (_, _) =>
+            {
+                if (ReferenceEquals(candidate.RenderTransform, transform))
+                    candidate.RenderTransform = null;
+            };
+
+            storyboard.Begin();
+        }
+    }
+
+    private void CancelReorder()
+    {
+        if (reorderButton is null)
+            return;
+
+        ResetReorderVisuals();
+        ClearReorderState();
+    }
+
+    private void ResetReorderVisuals()
+    {
+        foreach (var button in reorderPinnedButtons)
+        {
+            button.RenderTransform = null;
+            button.Opacity = 1;
+            Canvas.SetZIndex(button, 0);
+        }
+
+        if (reorderButton is not null &&
+            !reorderPinnedButtons.Contains(reorderButton))
+        {
+            reorderButton.RenderTransform = null;
+            reorderButton.Opacity = 1;
+            Canvas.SetZIndex(reorderButton, 0);
+        }
+    }
+
+    private void ClearReorderState()
+    {
+        reorderCandidate = null;
+        reorderButton = null;
+        reorderStartX = 0;
+        reorderDragging = false;
+        reorderSourceIndex = -1;
+        reorderTargetIndex = -1;
+        reorderPinnedButtons.Clear();
+        reorderSlotCenters = [];
     }
 
     private void Entered(object sender, PointerRoutedEventArgs e)
