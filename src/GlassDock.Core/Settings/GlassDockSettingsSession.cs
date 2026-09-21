@@ -29,6 +29,8 @@ public sealed class GlassDockSettingsSession
         Current.AutoHideDelayMilliseconds,
         Current.PeekDelayMilliseconds);
 
+    public DockDisplayMode DisplayMode => Current.DockDisplayMode;
+
     public DockAppearanceSettings Appearance => new(
         Current.GlassMaterialMode,
         Current.IconSize,
@@ -69,7 +71,8 @@ public sealed class GlassDockSettingsSession
         double glassBlurAmount,
         double dockOpacity,
         double borderThickness,
-        double borderOpacity) =>
+        double borderOpacity,
+        DockDisplayMode? dockDisplayMode = null) =>
         GlassDockSettings.Normalize(Current with
         {
             BottomMargin = bottomMargin,
@@ -82,7 +85,8 @@ public sealed class GlassDockSettingsSession
             GlassBlurAmount = glassBlurAmount,
             DockOpacity = dockOpacity,
             BorderThickness = borderThickness,
-            BorderOpacity = borderOpacity
+            BorderOpacity = borderOpacity,
+            DockDisplayMode = dockDisplayMode ?? Current.DockDisplayMode
         });
 
     public GlassDockSettings CreateAppearanceUpdate(
@@ -119,7 +123,14 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultGlassBlurAmount,
             GlassDockSettings.DefaultDockOpacity,
             GlassDockSettings.DefaultBorderThickness,
-            GlassDockSettings.DefaultBorderOpacity);
+            GlassDockSettings.DefaultBorderOpacity,
+            GlassDockSettings.DefaultDockDisplayMode);
+
+    public GlassDockSettings CreateDisplayModeUpdate(DockDisplayMode displayMode) =>
+        GlassDockSettings.Normalize(Current with
+        {
+            DockDisplayMode = displayMode
+        });
 
     public bool Replace(GlassDockSettings settings)
     {

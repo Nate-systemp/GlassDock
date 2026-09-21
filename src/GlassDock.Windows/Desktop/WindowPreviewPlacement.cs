@@ -169,8 +169,7 @@ public sealed class WindowPreviewPlacement : IDisposable
             ref info
         );
 
-        var scale =
-            NativeMethods.GetDpiForWindow(dock) / 96d;
+        var scale = GetMonitorScale(monitor, dock);
 
         return (
             new(
@@ -187,6 +186,28 @@ public sealed class WindowPreviewPlacement : IDisposable
                 rect.Bottom - rect.Top
             )
         );
+    }
+
+    private static double GetMonitorScale(nint monitor, nint fallbackWindow)
+    {
+        try
+        {
+            if (monitor != 0 &&
+                NativeMethods.GetDpiForMonitor(monitor, 0, out var dpiX, out _) >= 0 &&
+                dpiX > 0)
+            {
+                return dpiX / 96d;
+            }
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+
+        var dpi = NativeMethods.GetDpiForWindow(fallbackWindow);
+        return dpi > 0 ? dpi / 96d : 1;
     }
 
     public void Position(

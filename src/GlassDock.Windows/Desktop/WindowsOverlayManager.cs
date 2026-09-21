@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using GlassDock.Core.Desktop;
+using GlassDock.Core.Settings;
 using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
@@ -17,6 +18,10 @@ public sealed class WindowsOverlayManager : IDisposable
     private bool expandedInput;
     private bool transparentInput;
     private NativeMethods.Point? previousPointer;
+    private nint currentMonitor;
+    private NativeMethods.Rect currentMonitorBounds;
+    private double currentMonitorScale;
+    private bool hasCurrentMonitorMetrics;
     public event EventHandler? PointerMovedOutsideInput;
     public event EventHandler? PointerMovedInsideInput;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
@@ -77,6 +82,17 @@ public sealed class WindowsOverlayManager : IDisposable
         }
         if (message == 0x0113 && wParam == InputTimer) { UpdateInputTransparency(); return 0; }
         if (message == 0x0014 && ClearBackground((nint)wParam)) return 1;
+
+        // WM_DISPLAYCHANGE / WM_SETTINGCHANGE / WM_DPICHANGED.
+        // Keep our own placement/input geometry in sync when resolution,
+        // monitor layout, or per-monitor scaling changes without changing HMONITOR.
+        if (message is 0x007E or 0x001A or 0x02E0)
+        {
+            hasCurrentMonitorMetrics = false;
+            lastInteractionPolygon = null;
+            previousPointer = null;
+        }
+
         if (message == 0x031E) ConfigureTransparency();
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }
@@ -109,12 +125,13 @@ public sealed class WindowsOverlayManager : IDisposable
         GC.KeepAlive(foregroundCallback);
     }
 
-    public PixelRect Position(double margin)
+    public PixelRect Position(double margin, DockDisplayMode displayMode = DockDisplayMode.Primary)
     {
-        var monitor = NativeMethods.MonitorFromPoint(
-            new NativeMethods.Point(),
-            1
-        );
+        var monitor = ResolveMonitor(displayMode);
+        if (monitor == 0)
+            monitor = NativeMethods.MonitorFromPoint(new NativeMethods.Point(), 1);
+
+        var monitorChanged = currentMonitor != 0 && currentMonitor != monitor;
 
         var info = new NativeMethods.MonitorInfo
         {
@@ -128,16 +145,15 @@ public sealed class WindowsOverlayManager : IDisposable
             info.Monitor.Left,
             info.Monitor.Top,
             info.Monitor.Right - info.Monitor.Left,
-            info.Monitor.Bottom - info.Monitor.Top
-        );
+            info.Monitor.Bottom - info.Monitor.Top);
 
+        var scale = GetMonitorScale(monitor);
         var rect = DesktopPlacement.BottomCenter(
             screen,
             Width,
             Height,
             margin,
-            Scale
-        );
+            scale);
 
         if (!NativeMethods.SetWindowPos(
             hwnd,
@@ -151,14 +167,107 @@ public sealed class WindowsOverlayManager : IDisposable
             0x0040   // SWP_SHOWWINDOW
         ))
         {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error()
-            );
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        currentMonitor = monitor;
+        currentMonitorBounds = info.Monitor;
+        currentMonitorScale = scale;
+        hasCurrentMonitorMetrics = true;
+
+        if (monitorChanged)
+        {
+            // The interaction polygon is stored in physical pixels. Force it to be
+            // rebuilt after a cross-monitor move so different DPI/scaling values do
+            // not leave the dock with a stale hit-test region.
+            lastInteractionPolygon = null;
+            previousPointer = null;
         }
 
         EnsureTopmost();
-
         return rect;
+    }
+
+    public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode)
+    {
+        var target = ResolveMonitor(displayMode);
+        if (target == 0)
+            return false;
+
+        var info = new NativeMethods.MonitorInfo
+        {
+            Size = Marshal.SizeOf<NativeMethods.MonitorInfo>()
+        };
+
+        if (!NativeMethods.GetMonitorInfo(target, ref info))
+            return false;
+
+        var targetScale = GetMonitorScale(target);
+        var bounds = info.Monitor;
+
+        var metricsChanged =
+            !hasCurrentMonitorMetrics ||
+            target != currentMonitor ||
+            Math.Abs(targetScale - currentMonitorScale) > 0.001 ||
+            bounds.Left != currentMonitorBounds.Left ||
+            bounds.Top != currentMonitorBounds.Top ||
+            bounds.Right != currentMonitorBounds.Right ||
+            bounds.Bottom != currentMonitorBounds.Bottom;
+
+        if (!metricsChanged)
+            return false;
+
+        Position(margin, displayMode);
+        return true;
+    }
+
+    private nint ResolveMonitor(DockDisplayMode displayMode)
+    {
+        const uint DefaultToNearest = 2;
+
+        if (displayMode == DockDisplayMode.Pointer &&
+            NativeMethods.GetCursorPos(out var pointer))
+        {
+            return NativeMethods.MonitorFromPoint(pointer, DefaultToNearest);
+        }
+
+        if (displayMode == DockDisplayMode.Foreground)
+        {
+            var foreground = NativeMethods.GetForegroundWindow();
+            if (foreground != 0 && foreground != hwnd)
+            {
+                var monitor = NativeMethods.MonitorFromWindow(foreground, DefaultToNearest);
+                if (monitor != 0)
+                    return monitor;
+            }
+
+            if (NativeMethods.GetCursorPos(out var fallbackPointer))
+                return NativeMethods.MonitorFromPoint(fallbackPointer, DefaultToNearest);
+        }
+
+        return NativeMethods.MonitorFromPoint(new NativeMethods.Point(), 1);
+    }
+
+    private double GetMonitorScale(nint monitor)
+    {
+        try
+        {
+            if (monitor != 0 &&
+                NativeMethods.GetDpiForMonitor(monitor, 0, out var dpiX, out _) >= 0 &&
+                dpiX > 0)
+            {
+                return dpiX / 96d;
+            }
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+
+        var dpi = NativeMethods.GetDpiForWindow(hwnd);
+        return dpi > 0 ? dpi / 96d : 1;
     }
 
     public void SetInteractionRegion(bool expanded, double bottomMargin = 24)
@@ -193,7 +302,7 @@ public sealed class WindowsOverlayManager : IDisposable
     /// </summary>
     public bool IsPointerInsideInput()
     {
-        if (!GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
+        if (!NativeMethods.GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
             return false;
 
         if (inputRegion != 0)
@@ -225,7 +334,7 @@ public sealed class WindowsOverlayManager : IDisposable
     public bool TryGetPointerPosition(out double x, out double y)
     {
         x = y = 0;
-        if (!GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
+        if (!NativeMethods.GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
             return false;
         x = (point.X - bounds.Left) / Scale;
         y = (point.Y - bounds.Top) / Scale;
@@ -245,7 +354,7 @@ public sealed class WindowsOverlayManager : IDisposable
         if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
         if (!expandedInput)
         {
-            if (GetCursorPos(out var current)) previousPointer = current;
+            if (NativeMethods.GetCursorPos(out var current)) previousPointer = current;
             NativeMethods.SetWindowRgn(hwnd, 0, true);
             expandedInput = true;
             // Reuse the existing 20 Hz input sampler in peek too; a transparent host must reacquire input.
@@ -265,7 +374,7 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private void UpdateInputTransparency()
     {
-        if (inputRegion == 0 || !GetCursorPos(out var point)) return;
+        if (inputRegion == 0 || !NativeMethods.GetCursorPos(out var point)) return;
         var inside = ContainsScreenPoint(point);
         SetInputTransparent(!inside);
         var moved = previousPointer is { } previous && (previous.X != point.X || previous.Y != point.Y);
@@ -287,5 +396,4 @@ public sealed class WindowsOverlayManager : IDisposable
     }
 
     [DllImport("gdi32.dll")] private static extern bool PtInRegion(nint region, int x, int y);
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativeMethods.Point point);
 }

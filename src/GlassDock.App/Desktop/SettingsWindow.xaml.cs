@@ -28,7 +28,7 @@ public sealed partial class SettingsWindow : Window
 
         InitializeComponent();
         Title = "GlassDock Settings";
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(690, 760));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(720, 820));
         Populate(settingsSession.Current);
         SetStatus("Settings loaded.", success: true);
         Closed += (_, _) => closed = true;
@@ -38,6 +38,7 @@ public sealed partial class SettingsWindow : Window
     {
         populating = true;
         GlassMaterialModeBox.SelectedIndex = (int)settings.GlassMaterialMode;
+        DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
         BottomMarginBox.Value = settings.BottomMargin;
         AutoHideDelayBox.Value = settings.AutoHideDelayMilliseconds / 1000d;
         PeekDelayBox.Value = settings.PeekDelayMilliseconds / 1000d;
@@ -69,6 +70,14 @@ public sealed partial class SettingsWindow : Window
             (int)GlassMaterialMode.Acrylic => GlassMaterialMode.Acrylic,
             (int)GlassMaterialMode.Clear => GlassMaterialMode.Clear,
             _ => GlassMaterialMode.Frosted
+        };
+
+    private DockDisplayMode SelectedDisplayMode =>
+        DockDisplayModeBox.SelectedIndex switch
+        {
+            (int)DockDisplayMode.Pointer => DockDisplayMode.Pointer,
+            (int)DockDisplayMode.Foreground => DockDisplayMode.Foreground,
+            _ => DockDisplayMode.Primary
         };
 
     private void ResetClick(object sender, RoutedEventArgs e)
@@ -105,7 +114,8 @@ public sealed partial class SettingsWindow : Window
                 GlassBlurAmountBox.Value,
                 DockOpacityBox.Value / 100,
                 BorderThicknessBox.Value,
-                BorderOpacityBox.Value / 100);
+                BorderOpacityBox.Value / 100,
+                SelectedDisplayMode);
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closed || shutdown.IsRequested)

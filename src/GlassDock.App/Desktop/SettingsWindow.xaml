@@ -56,6 +56,32 @@
                         <Grid ColumnSpacing="28">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="190"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="Display" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock
+                                    Text="Choose which monitor hosts the dock."
+                                    Foreground="#A7B0BF"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ComboBox
+                                x:Name="DockDisplayModeBox"
+                                Grid.Column="1"
+                                Header="Monitor behavior"
+                                AutomationProperties.Name="Dock monitor behavior">
+                                <ComboBoxItem Content="Primary display"/>
+                                <ComboBoxItem Content="Follow pointer"/>
+                                <ComboBoxItem Content="Follow active window"/>
+                            </ComboBox>
+                        </Grid>
+
+                        <Rectangle Height="1" Fill="#293342"/>
+
+                        <Grid ColumnSpacing="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="150"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="4" VerticalAlignment="Center">

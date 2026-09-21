@@ -118,6 +118,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly Action shutdownCompleted;
     private readonly RetainedWindowSlot<SettingsWindow> settingsWindow = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer displayTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer dockWaveTimer;
     private CancellationTokenSource? collapseDelay;
 
@@ -234,6 +235,30 @@ public sealed class DesktopOverlayWindow : Window
             if (state.State == DockState.Idle) RaisePeek();
             if (state.State == DockState.Expanded) RefreshHoverVisuals();
         };
+        displayTimer = DispatcherQueue.CreateTimer();
+        displayTimer.Interval = TimeSpan.FromMilliseconds(200);
+        displayTimer.Tick += (_, _) =>
+        {
+            // Monitor tracking must keep running even while the dock is expanded.
+            // Otherwise a long auto-hide delay makes Follow pointer / Follow active
+            // window appear broken until the dock collapses.
+            if (closing || previews.HoldsDock)
+                return;
+
+            if (!windowManager.RepositionIfMonitorChanged(0, settingsSession.DisplayMode))
+                return;
+
+            UpdateBackdropBounds();
+
+            if (state.State is DockState.Idle or DockState.Hovering)
+                UpdatePeekInput();
+            else
+                UpdateDockWaveOutline();
+
+            pointerInsideDock = windowManager.IsPointerInsideInput();
+            previews.Reposition();
+        };
+
         dockWaveTimer = DispatcherQueue.CreateTimer();
         dockWaveTimer.Interval = TimeSpan.FromMilliseconds(16);
         dockWaveTimer.Tick += TickDockWave;
@@ -284,7 +309,7 @@ keyboard.RecoveryRequested +=
             if (taskbarSession is { IsActive: true } session) await session.HeartbeatAsync();
         };
         Closed += OnClosed;
-        windowManager.Position(0);
+        windowManager.Position(0, settingsSession.DisplayMode);
         surface.Margin = indicator.Margin = new Thickness(0, 0, 0, PeekRestBottom);
         indicator.Opacity = 1;
         windowManager.SetPeekInteraction(PeekRestBottom);
@@ -305,7 +330,8 @@ keyboard.RecoveryRequested +=
         desktopStartupQueued = false;
         if (desktopStarted || closing) return;
         desktopStarted = true;
-        windowManager.Position(0);
+        windowManager.Position(0, settingsSession.DisplayMode);
+        displayTimer.Start();
         state.Show();
         animation.SetBottom(PeekRestBottom);
         indicator.Opacity = 1;
@@ -1495,6 +1521,7 @@ keyboard.RecoveryRequested +=
         GlassDockSettingsChangedEventArgs eventArgs)
     {
         ApplyBottomMargin(eventArgs.Settings.BottomMargin);
+        ApplyDisplayMode(eventArgs.Settings.DockDisplayMode);
         ApplyAppearance(new DockAppearanceSettings(
             eventArgs.Settings.GlassMaterialMode,
             eventArgs.Settings.IconSize,
@@ -1567,12 +1594,34 @@ keyboard.RecoveryRequested +=
         icons.Margin = new Thickness(0, 0, 0, BottomMargin);
         if (state.State == DockState.Expanded) animation.SetBottom(BottomMargin);
         else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
-        windowManager.Position(0);
+        windowManager.Position(0, settingsSession.DisplayMode);
         if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
         else UpdateDockWaveOutline();
         UpdateBackdropBounds();
-        SetStatus($"Expanded dock bottom margin: {BottomMargin:0} DIP. Primary-monitor desktop bounds.");
+        SetStatus($"Expanded dock bottom margin: {BottomMargin:0} DIP.");
         previews.Reposition();
+    }
+
+    private void ApplyDisplayMode(DockDisplayMode displayMode)
+    {
+        windowManager.Position(0, displayMode);
+
+        if (state.State is DockState.Idle or DockState.Hovering)
+            UpdatePeekInput();
+        else
+            UpdateDockWaveOutline();
+
+        pointerInsideDock = windowManager.IsPointerInsideInput();
+        UpdateBackdropBounds();
+        previews.Reposition();
+
+        var label = displayMode switch
+        {
+            DockDisplayMode.Pointer => "following the pointer",
+            DockDisplayMode.Foreground => "following the active window",
+            _ => "on the primary display"
+        };
+        SetStatus($"Dock display mode: {label}.");
     }
 
     public void ShowSettings()
@@ -1658,7 +1707,7 @@ keyboard.RecoveryRequested +=
             {
                 // Changing auto-hide updates the work area; the shell can move windows
                 // during that change. Re-anchor to full monitor bounds afterwards.
-                windowManager.Position(0);
+                windowManager.Position(0, settingsSession.DisplayMode);
                 heartbeat.Start();
                 SetStatus(whileAppActive
                     ? "Taskbar suppressed while dock is active · Ctrl+Alt+F12 restores immediately."
@@ -1725,6 +1774,7 @@ keyboard.RecoveryRequested +=
 
         CancelPillHide();
         heartbeat.Stop();
+        displayTimer.Stop();
 
         StopDockWaveTimer(clear: true);
         dockWaveTimer.Tick -= TickDockWave;

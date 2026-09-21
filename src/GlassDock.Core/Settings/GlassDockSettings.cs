@@ -1,5 +1,12 @@
 namespace GlassDock.Core.Settings;
 
+public enum DockDisplayMode
+{
+    Primary = 0,
+    Pointer = 1,
+    Foreground = 2
+}
+
 /// <summary>
 /// Persistent GlassDock preferences. Runtime components do not consume these
 /// values until their individual settings are explicitly wired.
@@ -18,6 +25,7 @@ public sealed record GlassDockSettings
     public const double DefaultBorderThickness = 1.05;
     public const double DefaultBorderOpacity = 0.78;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
+    public const DockDisplayMode DefaultDockDisplayMode = DockDisplayMode.Primary;
 
     public const double MinimumBottomMargin = 16;
     public const double MaximumBottomMargin = 100;
@@ -54,6 +62,7 @@ public sealed record GlassDockSettings
     public double BorderThickness { get; init; } = DefaultBorderThickness;
     public double BorderOpacity { get; init; } = DefaultBorderOpacity;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
+    public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
 
     /// <summary>
     /// Returns a safe current-schema snapshot. Unknown and missing schema
@@ -114,7 +123,10 @@ public sealed record GlassDockSettings
                 MinimumBorderOpacity,
                 MaximumBorderOpacity,
                 DefaultBorderOpacity),
-            GlassMaterialMode = DockMaterialStylePresets.Normalize(settings.GlassMaterialMode)
+            GlassMaterialMode = DockMaterialStylePresets.Normalize(settings.GlassMaterialMode),
+            DockDisplayMode = Enum.IsDefined(settings.DockDisplayMode)
+                ? settings.DockDisplayMode
+                : DefaultDockDisplayMode
         };
     }
 
