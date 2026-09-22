@@ -24,6 +24,31 @@
     <ProjectReference Include="../GlassDock.Watchdog/GlassDock.Watchdog.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <Target Name="CopyBuiltRecoveryHelper" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <!-- ProjectReference builds the helper, but does not copy an executable reference.
+         Resolve its real output path so VS/CLI launches cannot use an old Recovery payload. -->
+    <MSBuild Projects="../GlassDock.Watchdog/GlassDock.Watchdog.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained">
+      <Output TaskParameter="TargetOutputs" ItemName="BuiltRecoveryTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <BuiltRecoveryDirectory>%(BuiltRecoveryTarget.RootDir)%(BuiltRecoveryTarget.Directory)</BuiltRecoveryDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <BuiltRecoveryFiles Include="$(BuiltRecoveryDirectory)/*" />
+      <BuiltRecoveryRuntimeFiles Include="$(BuiltRecoveryDirectory)/runtimes/**/*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(BuiltRecoveryDirectory)/GlassDock.Watchdog.exe')"
+           Text="The current watchdog build is missing; refusing to leave a stale Recovery helper." />
+    <Copy SourceFiles="@(BuiltRecoveryFiles)"
+          DestinationFiles="@(BuiltRecoveryFiles->'$(TargetDir)Recovery/%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(BuiltRecoveryRuntimeFiles)"
+          DestinationFiles="@(BuiltRecoveryRuntimeFiles->'$(TargetDir)Recovery/runtimes/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CopyRecoveryHelper" AfterTargets="Publish">
     <ItemGroup>
       <RecoveryFiles Include="../GlassDock.Watchdog/bin/$(Configuration)/net10.0-windows10.0.26100.0/$(RuntimeIdentifier)/**/*" />
@@ -43,4 +68,4 @@
       SkipUnchangedFiles="true"
       Condition="Exists('$(TargetDir)GlassDock.App.pri')" />
   </Target>
-</Project>   
+</Project>

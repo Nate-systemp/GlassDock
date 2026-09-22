@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Collections.ObjectModel;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
@@ -269,13 +269,7 @@ public sealed class DesktopOverlayWindow : Window
         previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - ExpandedDockHeight);
         previews.HoldChanged += (_, _) => OnInteractionHoldChanged();
         previews.ActionFailed += (_, message) => SetStatus(message);
-        AppWindow.Changed += (_, _) =>
-        {
-            // Visual Studio/debugger activation and some shell z-order changes can
-            // disturb a freshly shown overlay. Reassert the documented dock contract.
-            presenter.IsAlwaysOnTop = true;
-            previews.Reposition();
-        };
+        AppWindow.Changed += (_, _) => previews.Reposition();
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
@@ -338,14 +332,7 @@ public sealed class DesktopOverlayWindow : Window
 
 keyboard.HomeRequested +=
     async (_, _) =>
-    {
-        // Bare Win always belongs to GlassDock. If Glass Home currently owns
-        // foreground focus, close it first, then perform the normal dock toggle.
-        if (home is { IsVisible: true })
-            home.HideHome();
-
         await ToggleDockAsync();
-    };
 
 keyboard.LauncherRequested +=
     (_, _) =>
@@ -408,7 +395,6 @@ keyboard.RecoveryRequested +=
         desktopStartupQueued = false;
         if (desktopStarted || closing) return;
         desktopStarted = true;
-        ((OverlappedPresenter)AppWindow.Presenter).IsAlwaysOnTop = true;
         windowManager.Position(0, settingsSession.DisplayMode);
         displayTimer.Start();
         state.Show();
@@ -2716,21 +2702,9 @@ keyboard.RecoveryRequested +=
         {
             var window = new GlassHomeWindow();
             home = window;
-            window.HomeVisibilityChanged += (_, _) =>
-            {
-                if (ReferenceEquals(home, window))
-                    keyboard.CaptureBareWindowsKey = window.IsVisible;
-            };
-            window.Closed += (_, _) =>
-            {
-                keyboard.CaptureBareWindowsKey = false;
-                if (ReferenceEquals(home, window))
-                    home = null;
-            };
+            window.Closed += (_, _) => { if (ReferenceEquals(home, window)) home = null; };
         }
-
         home.Toggle();
-        keyboard.CaptureBareWindowsKey = home.IsVisible;
     }
     public void ShowLab()
     {
@@ -2758,10 +2732,7 @@ keyboard.RecoveryRequested +=
     private async Task StartTaskbarTestCoreAsync(bool whileAppActive)
     {
         if (startingTest || taskbarSession is { IsActive: true }) return;
-
-        // The watchdog owns taskbar safety and has its own independent recovery path.
-        // Do not prevent taskbar protection from starting just because the optional
-        // keyboard recovery hotkey could not be registered.
+        if (!keyboard.IsRegistered) { SetStatus("Taskbar test refused: development/recovery hotkeys are unavailable."); return; }
         startingTest = true;
         var revision = ++taskbarRevision;
         try

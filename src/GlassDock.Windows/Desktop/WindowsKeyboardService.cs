@@ -1,4 +1,4 @@
-using GlassDock.Core.Desktop;
+﻿using GlassDock.Core.Desktop;
 using GlassDock.Windows.Interop;
 using System.Runtime.InteropServices;
 
@@ -33,7 +33,32 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private bool spaceHeld;
     private bool suppressDockToggle;
     private bool suppressCurrentWindowsPress;
+    private bool captureBareWindowsKey;
+    private bool capturedWindowsDown;
+    private int capturedWindowsKey;
     private uint toggleRevision;
+
+    /// <summary>
+    /// When Glass Home owns the foreground window, consume the physical Windows-key
+    /// down event so Explorer cannot open Start before GlassDock decides whether the
+    /// gesture is bare Win or a real Win+key chord. Real chords are re-forwarded.
+    /// </summary>
+    public bool CaptureBareWindowsKey
+    {
+        get => captureBareWindowsKey;
+        set
+        {
+            captureBareWindowsKey = value;
+            if (!value && capturedWindowsDown)
+            {
+                // The original Win-down was consumed. If Home disappears before the
+                // matching key-up, dropping this capture is safe; the eventual Win-up
+                // is only a release with no system-visible press.
+                capturedWindowsDown = false;
+                capturedWindowsKey = 0;
+            }
+        }
+    }
 
     // Record suppression at key-down as well as dispatch time. A menu may be
     // dismissed between key-down, key-up and the posted toggle message.
@@ -226,6 +251,18 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 keyCode,
                 true);
 
+            // Glass Home is a foreground, focusable HWND. Letting the physical
+            // Win-down reach Explorer here can make Start win the race before the
+            // bare-Win release is suppressed. Capture the down while Home is open;
+            // if another key follows, OTHER KEYS below forwards a tagged Win-down
+            // first so normal Win+ shortcuts still work.
+            if (captureBareWindowsKey)
+            {
+                capturedWindowsDown = true;
+                capturedWindowsKey = keyCode;
+                return 1;
+            }
+
             return NativeMethods.CallNextHookEx(
                 keyboardHook,
                 code,
@@ -327,6 +364,33 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 gesture.Process(
                     keyCode,
                     false);
+
+            // If the matching Win-down was captured while Glass Home was visible,
+            // Explorer never saw a Windows-key press. Consume the release as well.
+            // Bare Win belongs to GlassDock; Win+Space belongs to Glass Home.
+            if (capturedWindowsDown &&
+                capturedWindowsKey == keyCode)
+            {
+                capturedWindowsDown = false;
+                capturedWindowsKey = 0;
+
+                if (wasLauncherShortcut)
+                    return 1;
+
+                if (bareWindows)
+                {
+                    if (!suppressCurrentWindowsPress && !suppressDockToggle)
+                    {
+                        NativeMethods.PostMessageW(
+                            hwnd,
+                            ExpandMessage,
+                            toggleRevision,
+                            0);
+                    }
+
+                    return 1;
+                }
+            }
 
             //
             // ----------------------------------------------
@@ -445,6 +509,34 @@ public sealed class WindowsKeyboardService : IKeyboardService
         // Keep WindowsKeyGesture synchronized so regular
         // shortcuts such as Win+E, Win+R, Win+D remain chords.
         //
+        // If Glass Home captured Win-down, a non-Space key turns the gesture into
+        // a real Windows shortcut. Re-inject only that Win-down (tagged so this
+        // hook ignores it), then allow the real chord key through normally.
+        if (down &&
+            capturedWindowsDown &&
+            winHeld)
+        {
+            NativeMethods.Input[] inputs =
+            [
+                new()
+                {
+                    Type = 1,
+                    Key = (ushort)capturedWindowsKey,
+                    ExtraInfo = InjectionTag
+                }
+            ];
+
+            if (NativeMethods.SendInput(
+                    1,
+                    inputs,
+                    Marshal.SizeOf<NativeMethods.Input>())
+                == 1)
+            {
+                capturedWindowsDown = false;
+                capturedWindowsKey = 0;
+            }
+        }
+
         gesture.Process(
             keyCode,
             down);

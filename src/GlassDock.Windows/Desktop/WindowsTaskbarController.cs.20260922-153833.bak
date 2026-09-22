@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using GlassDock.Core.Desktop;
 using GlassDock.Windows.Interop;
@@ -92,12 +92,9 @@ public sealed class WindowsTaskbarController : ITaskbarController
             if (!NativeMethods.IsWindow(hwnd))
                 throw new InvalidOperationException("A taskbar window disappeared during initialization.");
 
-            // An interrupted/older lease can leave Explorer's taskbar disabled while
-            // no watchdog process owns it. Normalize that recoverable partial state
-            // instead of refusing to start a new lease. TaskbarAutoHide.Suspend below
-            // restores any stale journal before recording the new session state.
             if (!NativeMethods.IsWindowEnabled(hwnd))
-                NativeMethods.EnableWindow(hwnd, true);
+                throw new InvalidOperationException(
+                    "A taskbar is already disabled; refusing to take ownership.");
 
             if (!IsExplorerTaskbar(hwnd, out var pid))
                 throw new InvalidOperationException(

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
@@ -98,6 +98,9 @@ internal sealed class GlassHomeWindow : Window
     private bool closed, changingVisibility;
     private bool active, searchFocusPending;
     private int focusAttempts;
+
+    public bool IsVisible => !closed && session.State != GlassHomeState.Hidden;
+    public event EventHandler? HomeVisibilityChanged;
 
     public GlassHomeWindow()
     {
@@ -1177,6 +1180,7 @@ internal sealed class GlassHomeWindow : Window
             UpdateGlassBounds();
             RequestSearchFocus();
             polling.Start();
+            HomeVisibilityChanged?.Invoke(this, EventArgs.Empty);
         }
         catch { HideHome(); throw; }
         finally { changingVisibility = false; }
@@ -1305,6 +1309,7 @@ internal sealed class GlassHomeWindow : Window
     public void HideHome()
     {
         if (closed) return;
+        var wasVisible = session.State != GlassHomeState.Hidden;
         searchFocusPending = false;
         focusAttempts = 0;
         focusRetry.Stop();
@@ -1320,6 +1325,8 @@ internal sealed class GlassHomeWindow : Window
         renderedResultsKey = string.Empty;
 
         AppWindow.Hide(); // Keep the HWND and SystemBackdrop; reconnect restores the retained mask.
+        if (wasVisible)
+            HomeVisibilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Poll(DispatcherQueueTimer sender, object args)
