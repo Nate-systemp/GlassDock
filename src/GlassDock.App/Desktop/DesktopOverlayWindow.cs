@@ -463,10 +463,27 @@ keyboard.RecoveryRequested +=
     }
     private double CalculateTargetDockWidth()
     {
-        var applicationWidth = Appearance.TargetDockWidth(VisibleDockApplications.Count);
+        var count = VisibleDockApplications.Count;
 
-        // Keep a small glass margin at both sides of the fixed desktop overlay.
-        var maximumWidth = Math.Max(120, (root.ActualWidth > 0 ? root.ActualWidth : WindowsOverlayManager.Width) - 32);
+        // Do not use DockAppearanceSettings.TargetDockWidth here: that helper
+        // intentionally caps the app-only dock at 560 DIP. Once the fixed
+        // system/clock cluster was added, that legacy cap made the icon StackPanel
+        // wider than the glass surface, producing the visible overflow near the
+        // right edge. Compute the real content width from the configured button
+        // geometry instead.
+        var applicationWidth = count <= 0
+            ? 100d
+            : count * Appearance.ButtonWidth +
+              Math.Max(0, count - 1) * Appearance.IconSpacing +
+              36d; // breathing room around the app section
+
+        // The overlay host is now monitor-aware and can grow well beyond the old
+        // 960-DIP ceiling. Keep 16 DIP of invisible host margin on each side.
+        var hostWidth = root.ActualWidth > 0
+            ? root.ActualWidth
+            : windowManager.CurrentHostWidthDips;
+        var maximumWidth = Math.Max(120d, hostWidth - 32d);
+
         return Math.Min(maximumWidth, applicationWidth + UtilityClusterWidth);
     }
 

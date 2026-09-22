@@ -26,7 +26,12 @@ public sealed class DockAppearanceRuntimeWiringTests
             "DockAnimationController.cs")).ReplaceLineEndings("\n");
 
         Assert.Contains("icons.Spacing = appearance.IconSpacing;", dock, StringComparison.Ordinal);
-        Assert.Contains("Appearance.TargetDockWidth(VisibleDockApplications.Count)", dock, StringComparison.Ordinal);
+        // Responsive dock sizing must remain wired to the current appearance geometry
+        // without relying on the legacy app-only TargetDockWidth cap.
+        Assert.Contains("count * Appearance.ButtonWidth", dock, StringComparison.Ordinal);
+        Assert.Contains("Math.Max(0, count - 1) * Appearance.IconSpacing", dock, StringComparison.Ordinal);
+        Assert.Contains("windowManager.CurrentHostWidthDips", dock, StringComparison.Ordinal);
+        Assert.Contains("applicationWidth + UtilityClusterWidth", dock, StringComparison.Ordinal);
         Assert.Contains("new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale)", dock, StringComparison.Ordinal);
         Assert.Contains("icon.Configure(appearance.IconSize, appearance.MagnificationScale);", dock, StringComparison.Ordinal);
         Assert.Contains("animation.SetMaximumMagnificationScale(appearance.MagnificationScale);", dock, StringComparison.Ordinal);

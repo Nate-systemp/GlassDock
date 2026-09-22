@@ -25,8 +25,12 @@ public sealed class WindowsOverlayManager : IDisposable
     public event EventHandler? PointerMovedOutsideInput;
     public event EventHandler? PointerMovedInsideInput;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
-    public const double Width = 960;
+    // Maximum invisible host width. The actual host is clamped to the current
+    // monitor so the visible dock can grow with pinned applications without
+    // ever extending beyond the display.
+    public const double Width = 1600;
     public const double Height = 144;
+    public double CurrentHostWidthDips { get; private set; } = 960;
     public double Scale => NativeMethods.GetDpiForWindow(hwnd) is var dpi && dpi > 0 ? dpi / 96d : 1;
 
     public void Configure(bool inspection = false)
@@ -148,9 +152,18 @@ public sealed class WindowsOverlayManager : IDisposable
             info.Monitor.Bottom - info.Monitor.Top);
 
         var scale = GetMonitorScale(monitor);
+
+        // Size the transparent overlay host to the current monitor rather than
+        // keeping the historical 960-DIP cap. The host itself is invisible;
+        // only the glass surface grows to its content. Leave a small physical
+        // edge margin so large docks never touch or cross the display edges.
+        var availableWidthDips = Math.Max(320d, screen.Width / scale - 32d);
+        var hostWidthDips = Math.Min(Width, availableWidthDips);
+        CurrentHostWidthDips = hostWidthDips;
+
         var rect = DesktopPlacement.BottomCenter(
             screen,
-            Width,
+            hostWidthDips,
             Height,
             margin,
             scale);
