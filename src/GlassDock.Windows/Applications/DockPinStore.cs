@@ -153,6 +153,77 @@ internal sealed class DockPinStore
         }
     }
 
+    public bool AddExternalTarget(string path)
+    {
+        lock (gate)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            path = Path.GetFullPath(path);
+
+            if (!File.Exists(path) && !Directory.Exists(path))
+                return false;
+
+            // Keep the shell target exact (including .lnk files and folders).
+            // The identity is GlassDock-local; LaunchTarget remains the authoritative
+            // ShellExecute target.
+            var identity = new ApplicationIdentity(null, path);
+            var id = identity.Key;
+
+            var name = Directory.Exists(path)
+                ? (Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) is { Length: > 0 } folderName
+                    ? folderName
+                    : path)
+                : Path.GetFileNameWithoutExtension(path);
+
+            if (string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var description = System.Diagnostics.FileVersionInfo
+                        .GetVersionInfo(path)
+                        .FileDescription;
+
+                    if (!string.IsNullOrWhiteSpace(description))
+                        name = description;
+                }
+                catch
+                {
+                    // Filename remains a safe display name.
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+                name = path;
+
+            var pins = preferences.Pins
+                .Where(pin => pin.Identity.Key != id)
+                .ToList();
+
+            pins.Add(new(identity, name, path));
+
+            var excluded = new HashSet<string>(
+                preferences.Excluded,
+                StringComparer.Ordinal);
+
+            excluded.Remove(id);
+
+            var order = preferences.Order?.Where(existing => existing != id).ToList();
+
+            // If a custom order already exists, append the new item. If there is
+            // no custom order yet, Apply() naturally appends GlassDock-only pins.
+            order?.Add(id);
+
+            return Save(new Preferences
+            {
+                Pins = pins,
+                Excluded = excluded,
+                Order = order
+            });
+        }
+    }
+
     public bool Reorder(
         IReadOnlyList<PinnedApplication> currentPins,
         IReadOnlyList<string> orderedIds)

@@ -213,6 +213,17 @@ public sealed class WindowsApplicationService : IApplicationService
         return saved;
     }
 
+    public bool PinExternalTarget(string path)
+    {
+        var saved = pinStore.AddExternalTarget(path);
+
+        if (saved)
+            Interlocked.Increment(ref pinRevision);
+
+        RequestRefresh();
+        return saved;
+    }
+
     public bool ReorderPinned(IReadOnlyList<string> orderedIds)
     {
         var pins = Volatile.Read(ref currentPins);
