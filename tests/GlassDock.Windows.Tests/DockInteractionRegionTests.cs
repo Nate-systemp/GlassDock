@@ -71,12 +71,14 @@ public sealed class DockInteractionRegionTests
         finally { DeleteObject(region); DestroyWindow(window); }
     }
 
-    [Fact]
-    public void Peek_keeps_reacquisition_timer_and_input_region_without_visual_clipping()
+    [Theory]
+    [InlineData(640)]
+    [InlineData(960)]
+    public void Peek_keeps_reacquisition_timer_and_input_region_without_visual_clipping(int hostWidth)
     {
         Assert.True(GetCursorPos(out var cursor));
         var window = CreateWindowExW(0x08000080, "STATIC", "Peek reacquisition test", 0x80000000,
-            cursor.X - 320, cursor.Y - 120, 640, 144, 0, 0, 0, 0);
+            cursor.X - hostWidth / 2, cursor.Y - 120, hostWidth, 144, 0, 0, 0, 0);
         Assert.NotEqual(0, window);
         try
         {
@@ -84,8 +86,8 @@ public sealed class DockInteractionRegionTests
             manager.Configure();
             // Position using the target HWND's DPI; no mouse movement or activation.
             var scale = manager.Scale;
-            SetWindowPos(window, 0, cursor.X - (int)(320 * scale), cursor.Y - (int)(120 * scale),
-                (int)(640 * scale), (int)(144 * scale), 0x0014);
+            SetWindowPos(window, 0, cursor.X - (int)(hostWidth / 2 * scale), cursor.Y - (int)(120 * scale),
+                (int)(hostWidth * scale), (int)(144 * scale), 0x0014);
             manager.SetPeekInteraction(-2);
             Assert.False(manager.IsPointerInsideInput());
             Assert.NotEqual(0, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);

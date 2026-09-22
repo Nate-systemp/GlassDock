@@ -25,7 +25,7 @@ public sealed class WindowsOverlayManager : IDisposable
     public event EventHandler? PointerMovedOutsideInput;
     public event EventHandler? PointerMovedInsideInput;
     public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
-    public const double Width = 640;
+    public const double Width = 960;
     public const double Height = 144;
     public double Scale => NativeMethods.GetDpiForWindow(hwnd) is var dpi && dpi > 0 ? dpi / 96d : 1;
 
@@ -280,9 +280,10 @@ public sealed class WindowsOverlayManager : IDisposable
         lastInteractionPolygon = null;
         var scale = Scale;
         // The idle hit target surrounds the pill and reaches through its lower margin.
-        var x = expanded ? 0 : 220;
+        var hostWidth = NativeMethods.GetClientRect(hwnd, out var client) ? (client.Right - client.Left) / scale : Width;
+        var x = expanded ? 0 : (hostWidth - 200) / 2;
         var y = expanded ? 0 : Math.Max(0, Height - bottomMargin - 28);
-        var width = expanded ? Width : 200;
+        var width = expanded ? hostWidth : 200;
         var height = Height - y;
         var region = NativeMethods.CreateRoundRectRgn((int)(x * scale), (int)(y * scale),
             (int)((x + width) * scale) + 1, (int)((y + height) * scale) + 1, (int)(16 * scale), (int)(16 * scale));
@@ -325,7 +326,8 @@ public sealed class WindowsOverlayManager : IDisposable
     /// <summary>Input follows the visible pill; eight DIP extend only below it.</summary>
     public void SetPeekInteraction(double bottom)
     {
-        var left = (Width - 120) / 2;
+        var hostWidth = NativeMethods.GetClientRect(hwnd, out var client) ? (client.Right - client.Left) / Scale : Width;
+        var left = (hostWidth - 120) / 2;
         var top = Height - bottom - 5;
         SetInteractionPolygon([(left, top), (left + 120, top),
             (left + 120, top + 13), (left, top + 13)]);

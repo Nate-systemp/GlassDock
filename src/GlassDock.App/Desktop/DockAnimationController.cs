@@ -513,8 +513,15 @@ internal sealed class DockAnimationController
     {
         foreach (var child in icons.Children)
         {
-            if (child is FrameworkElement element)
-                yield return element;
+            if (child is not FrameworkElement element)
+                continue;
+
+            // Non-app dock content (system tray / clock cluster) deliberately stays
+            // compact while the application icons use macOS-style magnification.
+            if (string.Equals(element.Tag as string, "NoMagnify", StringComparison.Ordinal))
+                continue;
+
+            yield return element;
         }
     }
 

@@ -176,6 +176,21 @@ public sealed class DesktopOverlayWindow : Window
     private bool externalDragActive;
     private Button? externalDropTargetButton;
 
+    // Compact system area shown at the right edge of the expanded dock.
+    private readonly WindowsSystemControlService systemControls = new();
+    private readonly StackPanel utilityCluster = new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 7,
+        VerticalAlignment = VerticalAlignment.Center,
+        Tag = "NoMagnify"
+    };
+    private readonly TextBlock utilityClock = new();
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer utilityTimer;
+    private SystemQuickSettingsWindow? quickSettings;
+    private bool quickSettingsOpen;
+    private const double UtilityClusterWidth = 286;
+
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
     private const double PillHideDurationMilliseconds = 210;
@@ -258,6 +273,12 @@ public sealed class DesktopOverlayWindow : Window
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator);
+
+        BuildUtilityCluster();
+        utilityTimer = DispatcherQueue.CreateTimer();
+        utilityTimer.Interval = TimeSpan.FromSeconds(1);
+        utilityTimer.Tick += (_, _) => RefreshUtilityStatus();
+
         ApplyAppearance(Appearance);
         animation.PlacementChanged += (_, _) =>
         {
@@ -381,6 +402,8 @@ keyboard.RecoveryRequested +=
         indicator.Opacity = 1;
         ApplyMaterial(false);
         applicationService.Start();
+        RefreshUtilityStatus();
+        utilityTimer.Start();
         await StartTaskbarTestAsync(whileAppActive: true);
     }
 
@@ -424,8 +447,14 @@ keyboard.RecoveryRequested +=
             UpdateBackdropBounds();
         }
     }
-    private double CalculateTargetDockWidth() =>
-        Appearance.TargetDockWidth(VisibleDockApplications.Count);
+    private double CalculateTargetDockWidth()
+    {
+        var applicationWidth = Appearance.TargetDockWidth(VisibleDockApplications.Count);
+
+        // Keep a small glass margin at both sides of the fixed desktop overlay.
+        var maximumWidth = Math.Max(120, (root.ActualWidth > 0 ? root.ActualWidth : WindowsOverlayManager.Width) - 32);
+        return Math.Min(maximumWidth, applicationWidth + UtilityClusterWidth);
+    }
 
     private Button CreateApplicationButton(DockApplicationItem item)
     {
@@ -539,6 +568,150 @@ keyboard.RecoveryRequested +=
 
         previews.Attach(button, item);
         return button;
+    }
+
+    private void BuildUtilityCluster()
+    {
+        var divider = new Border
+        {
+            Width = 1,
+            Height = 34,
+            Margin = new Thickness(10, 0, 9, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(
+                global::Windows.UI.Color.FromArgb(66, 235, 245, 255)),
+            Tag = "NoMagnify"
+        };
+
+        var trayButton = CreateUtilityButton("\uE70E", "Quick settings", ToggleQuickSettings);
+        var networkButton = CreateUtilityButton("\uE701", "Network", ToggleQuickSettings);
+        var volumeButton = CreateUtilityButton("\uE767", "Volume", ToggleQuickSettings);
+        var batteryButton = CreateUtilityButton("\uE83F", "Battery", ToggleQuickSettings);
+
+        utilityClock.FontSize = 13;
+        utilityClock.Foreground = new SolidColorBrush(Colors.White);
+        utilityClock.VerticalAlignment = VerticalAlignment.Center;
+        utilityClock.HorizontalAlignment = HorizontalAlignment.Center;
+        utilityClock.TextAlignment = TextAlignment.Center;
+        utilityClock.MinWidth = 70;
+        utilityClock.Tag = "NoMagnify";
+
+        var clockButton = new Button
+        {
+            Padding = new Thickness(4, 0, 4, 0),
+            Margin = new Thickness(0),
+            MinWidth = 78,
+            Height = 42,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(10),
+            Content = utilityClock,
+            Tag = "NoMagnify",
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        clockButton.Resources["ButtonBackgroundPointerOver"] =
+            new SolidColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
+        clockButton.Resources["ButtonBackgroundPressed"] =
+            new SolidColorBrush(global::Windows.UI.Color.FromArgb(50, 255, 255, 255));
+        ToolTipService.SetToolTip(clockButton, "Clock and quick settings");
+        clockButton.Click += (_, _) => ToggleQuickSettings();
+
+        utilityCluster.Children.Add(divider);
+        utilityCluster.Children.Add(trayButton);
+        utilityCluster.Children.Add(networkButton);
+        utilityCluster.Children.Add(volumeButton);
+        utilityCluster.Children.Add(batteryButton);
+        utilityCluster.Children.Add(clockButton);
+
+        // SynchronizeItems inserts application buttons by index, which naturally
+        // keeps this utility cluster after all pinned/running applications.
+        icons.Children.Add(utilityCluster);
+    }
+
+    private Button CreateUtilityButton(
+        string glyph,
+        string tooltip,
+        Action click)
+    {
+        var button = SystemControlStyle.Button(SystemControlStyle.Icon(glyph), tooltip, click);
+        button.Tag = "NoMagnify";
+        return button;
+    }
+
+    private void RefreshUtilityStatus()
+    {
+        if (closing)
+            return;
+
+        var snapshot = systemControls.GetSnapshot();
+        utilityClock.Text = DateTime.Now.ToString("h:mm tt");
+        ToolTipService.SetToolTip(utilityCluster.Children[2], snapshot.NetworkAvailable ? snapshot.NetworkName : "Offline");
+        ToolTipService.SetToolTip(utilityCluster.Children[3], snapshot.Muted ? "Muted" : $"Volume {snapshot.VolumePercent}%");
+        ToolTipService.SetToolTip(utilityCluster.Children[4], snapshot.HasBattery ? $"Battery {snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power");
+
+        quickSettings?.Refresh();
+    }
+
+    private void ToggleQuickSettings()
+    {
+        if (quickSettingsOpen)
+        {
+            CloseQuickSettings();
+            return;
+        }
+
+        collapseDelay?.Cancel();
+        CancelPillHide();
+        previews.Hide();
+        animation.ResetMagnification();
+
+        quickSettings = new SystemQuickSettingsWindow(systemControls);
+        quickSettings.Closed += (_, _) =>
+        {
+            quickSettingsOpen = false;
+            quickSettings = null;
+
+            if (closing)
+                return;
+
+            pointerInsideDock = windowManager.IsPointerInsideInput();
+            RefreshHoverVisuals();
+
+            if (!pointerInsideDock &&
+                !previews.HoldsDock &&
+                state.State is DockState.Expanded or DockState.Expanding)
+            {
+                ScheduleCollapse();
+            }
+        };
+
+        quickSettingsOpen = true;
+        var anchor = utilityCluster.TransformToVisual(root).TransformPoint(new global::Windows.Foundation.Point(utilityCluster.ActualWidth / 2, 0));
+        quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        quickSettings.Activate();
+        quickSettings.Refresh();
+    }
+
+    private void CloseQuickSettings()
+    {
+        if (quickSettings is null)
+        {
+            quickSettingsOpen = false;
+            return;
+        }
+
+        var window = quickSettings;
+        quickSettings = null;
+        quickSettingsOpen = false;
+
+        try
+        {
+            window.Close();
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     private void BeginReorderCandidate(
@@ -1349,6 +1522,7 @@ keyboard.RecoveryRequested +=
         if (previews.ContextMenuOpen ||
             externalDragActive ||
             reorderButton is not null ||
+            quickSettingsOpen ||
             state.State != DockState.Expanded)
             return;
         if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out _))
@@ -1385,7 +1559,8 @@ keyboard.RecoveryRequested +=
         pointerInsideDock = false;
         if (previews.ContextMenuOpen ||
             externalDragActive ||
-            reorderButton is not null)
+            reorderButton is not null ||
+            quickSettingsOpen)
             return;
         RefreshHoverVisuals();
         if (previews.HoldsDock) return;
@@ -2212,6 +2387,12 @@ keyboard.RecoveryRequested +=
         if (previews.ContextMenuOpen)
             return Task.CompletedTask;
 
+        if (quickSettingsOpen)
+        {
+            CloseQuickSettings();
+            return Task.CompletedTask;
+        }
+
         return state.State is DockState.Expanded or DockState.Expanding
             ? CollapseDockAsync()
             : ExpandDockAsync();
@@ -2252,7 +2433,7 @@ keyboard.RecoveryRequested +=
     }
     private async Task CollapseDockAsync()
     {
-        if (previews.HoldsDock) return;
+        if (previews.HoldsDock || quickSettingsOpen) return;
         previews.Hide();
 
         CancelPillHide();
@@ -2642,6 +2823,8 @@ keyboard.RecoveryRequested +=
         CancelPillHide();
         heartbeat.Stop();
         displayTimer.Stop();
+        utilityTimer.Stop();
+        CloseQuickSettings();
 
         StopDockWaveTimer(clear: true);
         dockWaveTimer.Tick -= TickDockWave;

@@ -3,6 +3,7 @@
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.0" />
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />
   </ItemGroup>
 </Project>
