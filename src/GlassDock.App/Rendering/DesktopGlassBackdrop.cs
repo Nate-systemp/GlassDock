@@ -15,23 +15,64 @@ namespace GlassDock.App.Rendering;
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
     public bool UseInnerEdge { get; set; }
-    private double presentationScale = 1, presentationOffset, presentationX, presentationY, presentationOpacity = 1;
-    public void SetPresentation(double scale, double offsetY, double originX, double originY, double opacity)
+    private double presentationScaleX = 1;
+    private double presentationScaleY = 1;
+    private double presentationOffsetX;
+    private double presentationOffsetY;
+    private double presentationX;
+    private double presentationY;
+    private double presentationOpacity = 1;
+
+    // Backward-compatible uniform transform used by existing callers.
+    public void SetPresentation(double scale, double offsetY, double originX, double originY, double opacity) =>
+        SetPresentation(scale, scale, 0, offsetY, originX, originY, opacity);
+
+    /// <summary>
+    /// Applies the same affine presentation transform used by a utility popup's
+    /// content to the desktop-glass mask and inner edge. Values are in DIPs.
+    /// </summary>
+    public void SetPresentation(
+        double scaleX,
+        double scaleY,
+        double offsetX,
+        double offsetY,
+        double originX,
+        double originY,
+        double opacity)
     {
-        presentationScale = scale;
-        presentationOffset = offsetY;
-        presentationX = originX;
-        presentationY = originY;
-        presentationOpacity = opacity;
-        if (visual is null) return;
+        presentationScaleX = double.IsFinite(scaleX) ? Math.Max(0.01, scaleX) : 1;
+        presentationScaleY = double.IsFinite(scaleY) ? Math.Max(0.01, scaleY) : 1;
+        presentationOffsetX = double.IsFinite(offsetX) ? offsetX : 0;
+        presentationOffsetY = double.IsFinite(offsetY) ? offsetY : 0;
+        presentationX = double.IsFinite(originX) ? originX : 0;
+        presentationY = double.IsFinite(originY) ? originY : 0;
+        presentationOpacity = double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
+
+        if (visual is null)
+            return;
+
         var units = (float)(lastScale * (UseInnerEdge ? 2 : 1));
-        var origin = new Vector3((float)originX * units, (float)originY * units, 0);
+        var origin = new Vector3(
+            (float)presentationX * units,
+            (float)presentationY * units,
+            0);
+        var translation = new Vector3(
+            (float)presentationOffsetX * units,
+            (float)presentationOffsetY * units,
+            0);
+
         var matrix = Matrix4x4.CreateTranslation(-origin) *
-            Matrix4x4.CreateScale((float)scale, (float)scale, 1) *
-            Matrix4x4.CreateTranslation(origin + new Vector3(0, (float)offsetY * units, 0));
+            Matrix4x4.CreateScale(
+                (float)presentationScaleX,
+                (float)presentationScaleY,
+                1) *
+            Matrix4x4.CreateTranslation(origin + translation);
+
         visual.TransformMatrix = matrix;
-        visual.Opacity = (float)(opacity * lastOpacity);
-        if (edgeVisual is not null) edgeVisual.TransformMatrix = matrix;
+        visual.Opacity = (float)(presentationOpacity * lastOpacity);
+
+        if (edgeVisual is not null)
+            edgeVisual.TransformMatrix = matrix;
     }
     private W.CompositionEffectFactory? edgeFactory;
     private W.CompositionEffectBrush? edgeEffect;
@@ -249,7 +290,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
         }
 
-        SetPresentation(presentationScale, presentationOffset, presentationX, presentationY, presentationOpacity);
+        SetPresentation(
+            presentationScaleX,
+            presentationScaleY,
+            presentationOffsetX,
+            presentationOffsetY,
+            presentationX,
+            presentationY,
+            presentationOpacity);
 
         var size =
             new Vector2(

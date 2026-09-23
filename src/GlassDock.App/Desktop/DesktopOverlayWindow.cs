@@ -154,10 +154,15 @@ public sealed class DesktopOverlayWindow : Window
     private SystemQuickSettingsWindow? quickSettings;
     private SystemTrayWindow? trayWindow;
     private CalendarPopoverWindow? calendarWindow;
+    private FrameworkElement? quickSettingsSource;
+    private FrameworkElement? trayWindowSource;
+    private FrameworkElement? calendarWindowSource;
+    private Button? activeUtilityButton;
+    private bool utilityTransitionPending;
     private bool quickSettingsOpen;
     private bool trayWindowOpen;
     private bool calendarWindowOpen;
-    private bool SystemPopupOpen => quickSettingsOpen || trayWindowOpen || calendarWindowOpen;
+    private bool SystemPopupOpen => utilityTransitionPending || quickSettingsOpen || trayWindowOpen || calendarWindowOpen;
     private const double UtilityClusterWidth = 248;
 
     private const double DockWaveHalfWidth = 92;
@@ -614,11 +619,9 @@ keyboard.RecoveryRequested +=
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
-        clockButton.Resources["ButtonBackgroundPointerOver"] =
-            new SolidColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
-        clockButton.Resources["ButtonBackgroundPressed"] =
-            new SolidColorBrush(global::Windows.UI.Color.FromArgb(50, 255, 255, 255));
+        SetUtilityButtonSelected(clockButton, selected: false);
         ToolTipService.SetToolTip(clockButton, "Clock and calendar");
+        AutomationProperties.SetName(clockButton, "Clock and calendar");
         clockButton.Click += (_, _) => { utilitySource = clockButton; ToggleCalendar(); };
 
         utilityCluster.Children.Add(divider);
@@ -659,7 +662,40 @@ keyboard.RecoveryRequested +=
         button.HorizontalContentAlignment = HorizontalAlignment.Center;
         button.VerticalContentAlignment = VerticalAlignment.Center;
         button.Tag = "NoMagnify";
+        SetUtilityButtonSelected(button, selected: false);
         return button;
+    }
+
+    private static void SetUtilityButtonSelected(Button button, bool selected)
+    {
+        var normal = new SolidColorBrush(
+            selected
+                ? global::Windows.UI.Color.FromArgb(34, 255, 255, 255)
+                : Colors.Transparent);
+        var hover = new SolidColorBrush(
+            global::Windows.UI.Color.FromArgb((byte)(selected ? 46 : 30), 255, 255, 255));
+        var pressed = new SolidColorBrush(
+            global::Windows.UI.Color.FromArgb((byte)(selected ? 60 : 50), 255, 255, 255));
+
+        button.Background = normal;
+        button.Resources["ButtonBackground"] = normal;
+        button.Resources["ButtonBackgroundPointerOver"] = hover;
+        button.Resources["ButtonBackgroundPressed"] = pressed;
+    }
+
+    private void SetActiveUtilitySource(FrameworkElement? source)
+    {
+        var next = source as Button;
+        if (ReferenceEquals(activeUtilityButton, next))
+            return;
+
+        if (activeUtilityButton is not null)
+            SetUtilityButtonSelected(activeUtilityButton, selected: false);
+
+        activeUtilityButton = next;
+
+        if (activeUtilityButton is not null)
+            SetUtilityButtonSelected(activeUtilityButton, selected: true);
     }
 
     private void RefreshUtilityStatus()
@@ -668,7 +704,7 @@ keyboard.RecoveryRequested +=
             return;
 
         var snapshot = systemControls.GetSnapshot();
-        utilityClock.Text = DateTime.Now.ToString("h:mm tt");
+        utilityClock.Text = DateTime.Now.ToString("t");
         ToolTipService.SetToolTip(utilityCluster.Children[2], snapshot.NetworkAvailable ? snapshot.NetworkName : "Offline");
         ToolTipService.SetToolTip(utilityCluster.Children[3], snapshot.Muted ? "Muted" : $"Volume {snapshot.VolumePercent}%");
         ToolTipService.SetToolTip(utilityCluster.Children[4], snapshot.HasBattery ? $"Battery {snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power");
@@ -691,22 +727,43 @@ keyboard.RecoveryRequested +=
     }
 
     private FrameworkElement? utilitySource;
-    private global::Windows.Foundation.Point UtilityAnchor()
+
+    private global::Windows.Foundation.Point UtilityAnchor(FrameworkElement? source = null)
     {
-        var source = utilitySource ?? utilityCluster;
-        return source.TransformToVisual(root).TransformPoint(
-            new global::Windows.Foundation.Point(source.ActualWidth / 2, 0));
+        var anchorSource = source ?? utilitySource ?? utilityCluster;
+        return anchorSource.TransformToVisual(root).TransformPoint(
+            new global::Windows.Foundation.Point(
+                anchorSource.ActualWidth / 2,
+                anchorSource.ActualHeight / 2));
     }
 
     private void RepositionSystemPopups()
     {
         if (root.ActualWidth <= 0 || root.ActualHeight <= 0 ||
-            (quickSettings is null && trayWindow is null && calendarWindow is null)) return;
-        var anchor = UtilityAnchor();
+            (quickSettings is null && trayWindow is null && calendarWindow is null))
+        {
+            return;
+        }
+
         var top = root.ActualHeight - BottomMargin - ExpandedDockHeight;
-        quickSettings?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
-        trayWindow?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
-        calendarWindow?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
+
+        if (quickSettings is not null)
+        {
+            var anchor = UtilityAnchor(quickSettingsSource);
+            quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+        }
+
+        if (trayWindow is not null)
+        {
+            var anchor = UtilityAnchor(trayWindowSource);
+            trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+        }
+
+        if (calendarWindow is not null)
+        {
+            var anchor = UtilityAnchor(calendarWindowSource);
+            calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+        }
     }
 
     private void SystemPopupClosed()
@@ -714,6 +771,12 @@ keyboard.RecoveryRequested +=
         if (closing)
             return;
 
+        // A popup-to-popup switch deliberately finishes the outgoing collapse before
+        // creating the next window. Keep the dock held during that short transition.
+        if (utilityTransitionPending || SystemPopupOpen)
+            return;
+
+        SetActiveUtilitySource(null);
         pointerInsideDock = windowManager.IsPointerInsideInput();
         RefreshHoverVisuals();
 
@@ -725,31 +788,52 @@ keyboard.RecoveryRequested +=
         }
     }
 
-    private void ToggleQuickSettings()
+    private async void ToggleQuickSettings()
     {
+        if (utilityTransitionPending)
+            return;
+
         if (quickSettingsOpen)
         {
-            CloseQuickSettings(true);
+            CloseQuickSettings(animate: true);
             return;
         }
 
-        CloseSystemTray();
-        CloseCalendar();
-        PrepareSystemPopup();
+        var source = utilitySource;
+        await CloseOtherSystemPopupsAsync(keepQuickSettings: true);
+        if (closing)
+            return;
 
-        quickSettings = new SystemQuickSettingsWindow(systemControls, Appearance);
+        PrepareSystemPopup();
+        quickSettingsSource = source;
+        SetActiveUtilitySource(quickSettingsSource);
+        try
+        {
+            quickSettings = new SystemQuickSettingsWindow(systemControls, Appearance);
+        }
+        catch (Exception error)
+        {
+            quickSettingsSource = null;
+            SetActiveUtilitySource(null);
+            SetStatus($"Quick Settings could not open: {error.Message}");
+            SystemPopupClosed();
+            return;
+        }
+
         quickSettings.Closed += (_, _) =>
         {
             quickSettingsOpen = false;
             quickSettings = null;
-
+            quickSettingsSource = null;
             SystemPopupClosed();
         };
 
         quickSettingsOpen = true;
-        var anchor = UtilityAnchor();
-        quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        var anchor = UtilityAnchor(quickSettingsSource);
+        quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
+            root.ActualHeight - BottomMargin - ExpandedDockHeight);
         quickSettings.Activate();
+        quickSettings.Present();
         quickSettings.Refresh();
     }
 
@@ -762,44 +846,63 @@ keyboard.RecoveryRequested +=
         }
 
         var window = quickSettings;
-        if (animate) { window.Dismiss(); return; }
-        quickSettings = null;
-        quickSettingsOpen = false;
-
-        try
+        if (animate)
         {
-            window.CloseImmediately();
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
-
-    private void ToggleSystemTray()
-    {
-        if (trayWindowOpen)
-        {
-            CloseSystemTray(true);
+            window.Dismiss();
             return;
         }
 
-        CloseQuickSettings();
-        CloseCalendar();
-        PrepareSystemPopup();
+        quickSettings = null;
+        quickSettingsOpen = false;
+        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+    }
 
-        trayWindow = new SystemTrayWindow(systemControls, Appearance);
+    private async void ToggleSystemTray()
+    {
+        if (utilityTransitionPending)
+            return;
+
+        if (trayWindowOpen)
+        {
+            CloseSystemTray(animate: true);
+            return;
+        }
+
+        var source = utilitySource;
+        await CloseOtherSystemPopupsAsync(keepSystemTray: true);
+        if (closing)
+            return;
+
+        PrepareSystemPopup();
+        trayWindowSource = source;
+        SetActiveUtilitySource(trayWindowSource);
+        try
+        {
+            trayWindow = new SystemTrayWindow(systemControls, Appearance);
+        }
+        catch (Exception error)
+        {
+            trayWindowSource = null;
+            SetActiveUtilitySource(null);
+            SetStatus($"Hidden tray could not open: {error.Message}");
+            SystemPopupClosed();
+            return;
+        }
+
         trayWindow.Closed += (_, _) =>
         {
             trayWindowOpen = false;
             trayWindow = null;
+            trayWindowSource = null;
             SystemPopupClosed();
         };
 
         trayWindowOpen = true;
-        var anchor = UtilityAnchor();
-        trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X,
+        var anchor = UtilityAnchor(trayWindowSource);
+        trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             root.ActualHeight - BottomMargin - ExpandedDockHeight);
         trayWindow.Activate();
+        trayWindow.Present();
         trayWindow.Refresh();
     }
 
@@ -812,37 +915,63 @@ keyboard.RecoveryRequested +=
         }
 
         var window = trayWindow;
-        if (animate) { window.Dismiss(); return; }
+        if (animate)
+        {
+            window.Dismiss();
+            return;
+        }
+
         trayWindow = null;
         trayWindowOpen = false;
         try { window.CloseImmediately(); } catch (InvalidOperationException) { }
     }
 
-    private void ToggleCalendar()
+    private async void ToggleCalendar()
     {
+        if (utilityTransitionPending)
+            return;
+
         if (calendarWindowOpen)
         {
-            CloseCalendar(true);
+            CloseCalendar(animate: true);
             return;
         }
 
-        CloseQuickSettings();
-        CloseSystemTray();
-        PrepareSystemPopup();
+        var source = utilitySource;
+        await CloseOtherSystemPopupsAsync(keepCalendar: true);
+        if (closing)
+            return;
 
-        calendarWindow = new CalendarPopoverWindow(Appearance);
+        PrepareSystemPopup();
+        calendarWindowSource = source;
+        SetActiveUtilitySource(calendarWindowSource);
+        try
+        {
+            calendarWindow = new CalendarPopoverWindow(Appearance);
+        }
+        catch (Exception error)
+        {
+            calendarWindowSource = null;
+            SetActiveUtilitySource(null);
+            SetStatus($"Calendar could not open: {error.Message}");
+            SystemPopupClosed();
+            return;
+        }
+
         calendarWindow.Closed += (_, _) =>
         {
             calendarWindowOpen = false;
             calendarWindow = null;
+            calendarWindowSource = null;
             SystemPopupClosed();
         };
 
         calendarWindowOpen = true;
-        var anchor = UtilityAnchor();
-        calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X,
+        var anchor = UtilityAnchor(calendarWindowSource);
+        calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             root.ActualHeight - BottomMargin - ExpandedDockHeight);
         calendarWindow.Activate();
+        calendarWindow.Present();
         calendarWindow.Refresh();
     }
 
@@ -855,10 +984,72 @@ keyboard.RecoveryRequested +=
         }
 
         var window = calendarWindow;
-        if (animate) { window.Dismiss(); return; }
+        if (animate)
+        {
+            window.Dismiss();
+            return;
+        }
+
         calendarWindow = null;
         calendarWindowOpen = false;
         try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+    }
+
+    private async Task CloseOtherSystemPopupsAsync(
+        bool keepQuickSettings = false,
+        bool keepSystemTray = false,
+        bool keepCalendar = false)
+    {
+        var hasOutgoing =
+            (!keepQuickSettings && quickSettings is not null) ||
+            (!keepSystemTray && trayWindow is not null) ||
+            (!keepCalendar && calendarWindow is not null);
+
+        if (!hasOutgoing)
+            return;
+
+        // Set this before Dismiss(): with Windows animations disabled a popup may
+        // close synchronously, and its Closed handler must not restart hover/collapse.
+        utilityTransitionPending = true;
+        try
+        {
+            var pending = new List<Task>(2);
+
+            if (!keepQuickSettings && quickSettings is { } quick)
+                pending.Add(DismissAndWaitAsync(quick, quick.Dismiss));
+
+            if (!keepSystemTray && trayWindow is { } tray)
+                pending.Add(DismissAndWaitAsync(tray, tray.Dismiss));
+
+            if (!keepCalendar && calendarWindow is { } calendar)
+                pending.Add(DismissAndWaitAsync(calendar, calendar.Dismiss));
+
+            await Task.WhenAll(pending);
+        }
+        finally
+        {
+            utilityTransitionPending = false;
+        }
+    }
+
+    private static async Task DismissAndWaitAsync(Window window, Action dismiss)
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        window.Closed += (_, _) => completion.TrySetResult(true);
+
+        try
+        {
+            dismiss();
+        }
+        catch (InvalidOperationException)
+        {
+            completion.TrySetResult(true);
+        }
+
+        // Never wedge utility switching if Windows destroys a popup without raising
+        // the expected managed close path. Normal animation completes well before this.
+        await Task.WhenAny(completion.Task, Task.Delay(500));
     }
 
     private void BeginReorderCandidate(

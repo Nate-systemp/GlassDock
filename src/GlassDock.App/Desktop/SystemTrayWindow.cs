@@ -129,13 +129,22 @@ internal sealed class SystemTrayWindow : Window
 
     public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
 
+    public void Present() => presentation.Present();
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
-    public void PositionNear(AppWindow owner, double scale, double anchorX, double dockTop)
+    public void PositionNear(
+        AppWindow owner,
+        double scale,
+        double anchorX,
+        double anchorY,
+        double dockTop)
     {
         UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, PanelWidth, PanelHeight);
-        presentation.AnchorX = (owner.Position.X + anchorX * scale - AppWindow.Position.X) / scale;
+        presentation.SetTargetWindowGeometry(
+            owner.Position.X + anchorX * scale,
+            owner.Position.Y + anchorY * scale,
+            scale);
     }
 
 

@@ -147,20 +147,29 @@ internal sealed class CalendarPopoverWindow : Window
         if (closed) return;
         var now = DateTimeOffset.Now;
         day.Text = now.ToString("dddd, MMMM d");
-        time.Text = now.ToString("h:mm tt");
+        time.Text = now.ToString("t");
         if (calendar.SelectedDates.Count == 0)
             calendar.SelectedDates.Add(now);
     }
 
     public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
 
+    public void Present() => presentation.Present();
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
-    public void PositionNear(AppWindow owner, double scale, double anchorX, double dockTop)
+    public void PositionNear(
+        AppWindow owner,
+        double scale,
+        double anchorX,
+        double anchorY,
+        double dockTop)
     {
         UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, PanelWidth, PanelHeight);
-        presentation.AnchorX = (owner.Position.X + anchorX * scale - AppWindow.Position.X) / scale;
+        presentation.SetTargetWindowGeometry(
+            owner.Position.X + anchorX * scale,
+            owner.Position.Y + anchorY * scale,
+            scale);
     }
 
 
