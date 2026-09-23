@@ -20,6 +20,7 @@ public sealed class WindowsApplicationService : IApplicationService
     private volatile bool stopping;
     private IReadOnlyList<PinnedApplication> currentPins = Array.Empty<PinnedApplication>();
     private int pinRevision;
+    private IReadOnlyList<DockApplication> currentApplications = Array.Empty<DockApplication>();
     public event EventHandler<ApplicationSnapshot>? SnapshotChanged;
 
     public WindowsApplicationService() => callback = (_, eventId, window, objectId, childId, _, _) =>
@@ -82,7 +83,8 @@ public sealed class WindowsApplicationService : IApplicationService
                         lastPins = DateTime.UtcNow;
                     }
                     var windows = ReadWindows(icons);
-                    var applications = DockApplicationCollection.Combine(pins, windows);
+                    var applications = pinStore.ApplyOrder(DockApplicationCollection.Combine(pins, windows));
+                    Volatile.Write(ref currentApplications, applications);
                     icons.Retain(pins.Select(pin => pin.Identity.Key).Concat(windows.Select(window => window.Identity.Key)));
                     if (!stopping) SnapshotChanged?.Invoke(this, new(applications, pinWarning));
                 }
@@ -224,10 +226,10 @@ public sealed class WindowsApplicationService : IApplicationService
         return saved;
     }
 
-    public bool ReorderPinned(IReadOnlyList<string> orderedIds)
+    public bool ReorderApplications(IReadOnlyList<string> orderedIds)
     {
-        var pins = Volatile.Read(ref currentPins);
-        if (!pinStore.Reorder(pins, orderedIds))
+        var ids = Volatile.Read(ref currentApplications).Select(app => app.Id).ToArray();
+        if (!pinStore.Reorder(ids, orderedIds))
             return false;
 
         Interlocked.Increment(ref pinRevision);

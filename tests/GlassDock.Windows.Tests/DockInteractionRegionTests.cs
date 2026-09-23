@@ -7,6 +7,28 @@ namespace GlassDock.Windows.Tests;
 public sealed class DockInteractionRegionTests
 {
     [Fact]
+    public void Topmost_recheck_repairs_demoted_dock_without_activation()
+    {
+        var foreground = GetForegroundWindow();
+        Assert.NotEqual(0, foreground);
+        var window = CreateWindowExW(0x08000080, "STATIC", "Dock stacking test", 0x80000000,
+            -960, -144, 960, 144, 0, 0, 0, 0);
+        Assert.NotEqual(0, window);
+        try
+        {
+            using var manager = new WindowsOverlayManager(window);
+            manager.Configure();
+            Assert.True(SetWindowPos(window, -2, 0, 0, 0, 0, 0x0013));
+            Assert.Equal(0, GetWindowLongPtrW(window, -20).ToInt64() & 8);
+            SendMessageW(window, 0x113, 0x4745, 0);
+            Assert.NotEqual(0, GetWindowLongPtrW(window, -20).ToInt64() & 8);
+            Assert.Equal(foreground, GetForegroundWindow());
+        }
+        finally { DestroyWindow(window); }
+    }
+
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [Fact]
     public void Region_excludes_transparent_host_and_updates_without_recreating_window()
     {
         var window = CreateWindowExW(0x08000080, "STATIC", "Dock region test", 0x80000000,

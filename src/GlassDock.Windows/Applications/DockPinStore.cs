@@ -23,8 +23,9 @@ internal sealed class DockPinStore
 
     private Preferences preferences = new();
 
-    public DockPinStore()
+    public DockPinStore(string? preferencesPath = null)
     {
+        if (preferencesPath is not null) path = preferencesPath;
         try
         {
             if (!File.Exists(path))
@@ -224,23 +225,29 @@ internal sealed class DockPinStore
         }
     }
 
+    public IReadOnlyList<DockApplication> ApplyOrder(IReadOnlyList<DockApplication> applications)
+    {
+        lock (gate)
+        {
+            if (preferences.Order is not { Count: > 0 } order) return applications;
+            var indices = order.Select((id, index) => (id, index))
+                .ToDictionary(pair => pair.id, pair => pair.index, StringComparer.Ordinal);
+            return applications.OrderBy(app => indices.GetValueOrDefault(app.Id, int.MaxValue)).ToArray();
+        }
+    }
+
     public bool Reorder(
-        IReadOnlyList<PinnedApplication> currentPins,
+        IReadOnlyList<string> currentIds,
         IReadOnlyList<string> orderedIds)
     {
         lock (gate)
         {
-            var currentIds = currentPins
-                .Select(pin => pin.Identity.Key)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-
             var requested = orderedIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
 
-            if (requested.Length != currentIds.Length)
+            if (requested.Length != currentIds.Count)
                 return false;
 
             var currentSet = currentIds.ToHashSet(StringComparer.Ordinal);
@@ -253,7 +260,9 @@ internal sealed class DockPinStore
                 Excluded = new HashSet<string>(
                     preferences.Excluded,
                     StringComparer.Ordinal),
-                Order = requested.ToList()
+                // Keep identities of temporarily absent apps without pinning them.
+                Order = requested.Concat(preferences.Order ?? [])
+                    .Distinct(StringComparer.Ordinal).ToList()
             });
         }
     }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Collections.ObjectModel;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
@@ -124,7 +124,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly WindowPreviewCoordinator previews;
     private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
-    private readonly DesktopGlassBackdrop desktopBackdrop = new();
+    private readonly DesktopGlassBackdrop desktopBackdrop = new() { UseInnerEdge = true };
     private readonly WindowsOverlayManager windowManager;
     private readonly WindowsKeyboardService keyboard;
     private readonly DockAnimationController animation;
@@ -135,7 +135,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly RetainedWindowSlot<SettingsWindow> settingsWindow = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer displayTimer;
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer dockWaveTimer;
+    private long dockWaveLastFrame;
     private CancellationTokenSource? collapseDelay;
 
     private CancellationTokenSource? pillHideDelay;
@@ -181,15 +181,20 @@ public sealed class DesktopOverlayWindow : Window
     private readonly StackPanel utilityCluster = new()
     {
         Orientation = Orientation.Horizontal,
-        Spacing = 7,
+        Spacing = 4,
         VerticalAlignment = VerticalAlignment.Center,
         Tag = "NoMagnify"
     };
     private readonly TextBlock utilityClock = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer utilityTimer;
     private SystemQuickSettingsWindow? quickSettings;
+    private SystemTrayWindow? trayWindow;
+    private CalendarPopoverWindow? calendarWindow;
     private bool quickSettingsOpen;
-    private const double UtilityClusterWidth = 286;
+    private bool trayWindowOpen;
+    private bool calendarWindowOpen;
+    private bool SystemPopupOpen => quickSettingsOpen || trayWindowOpen || calendarWindowOpen;
+    private const double UtilityClusterWidth = 248;
 
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
@@ -238,8 +243,8 @@ public sealed class DesktopOverlayWindow : Window
         windowManager = new WindowsOverlayManager(hwnd);
         windowManager.Configure(inspection);
         root.Children.Add(surface);
-        root.Children.Add(dockWaveGlow);
-        root.Children.Add(dockWaveRim);
+        // Keep the wave path for native hit-test sampling; its XAML stroke is
+        // no longer rendered over the compositor's independently sampled edge.
         root.Children.Add(indicator);
         root.Children.Add(icons);
         root.Children.Add(externalDropHighlight);
@@ -263,6 +268,7 @@ public sealed class DesktopOverlayWindow : Window
             UpdateBackdropBounds();
             UpdateDockWaveOutline();
             UpdateExternalDropHighlight();
+            RepositionSystemPopups();
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
@@ -273,8 +279,9 @@ public sealed class DesktopOverlayWindow : Window
         {
             // Visual Studio/debugger activation and some shell z-order changes can
             // disturb a freshly shown overlay. Reassert the documented dock contract.
-            presenter.IsAlwaysOnTop = true;
+            if (!presenter.IsAlwaysOnTop) presenter.IsAlwaysOnTop = true;
             previews.Reposition();
+            RepositionSystemPopups();
         };
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
@@ -330,9 +337,7 @@ public sealed class DesktopOverlayWindow : Window
             previews.Reposition();
         };
 
-        dockWaveTimer = DispatcherQueue.CreateTimer();
-        dockWaveTimer.Interval = TimeSpan.FromMilliseconds(16);
-        dockWaveTimer.Tick += TickDockWave;
+
 
         keyboard = new WindowsKeyboardService(hwnd);
 
@@ -606,36 +611,39 @@ keyboard.RecoveryRequested +=
         var divider = new Border
         {
             Width = 1,
-            Height = 34,
-            Margin = new Thickness(10, 0, 9, 0),
+            Height = 30,
+            Margin = new Thickness(8, 0, 6, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Background = new SolidColorBrush(
-                global::Windows.UI.Color.FromArgb(66, 235, 245, 255)),
+                global::Windows.UI.Color.FromArgb(58, 235, 245, 255)),
             Tag = "NoMagnify"
         };
 
-        var trayButton = CreateUtilityButton("\uE70E", "Quick settings", ToggleQuickSettings);
-        var networkButton = CreateUtilityButton("\uE701", "Network", ToggleQuickSettings);
-        var volumeButton = CreateUtilityButton("\uE767", "Volume", ToggleQuickSettings);
-        var batteryButton = CreateUtilityButton("\uE83F", "Battery", ToggleQuickSettings);
+        // Fluent glyphs have different optical bounds, so use a shared button
+        // box with small per-glyph size adjustments for a visually even row.
+        var trayButton = CreateUtilityButton("\uE70E", "Hidden tray", ToggleSystemTray, 14.5);
+        var networkButton = CreateUtilityButton("\uE701", "Network", ToggleQuickSettings, 16);
+        var volumeButton = CreateUtilityButton("\uE767", "Volume", ToggleQuickSettings, 16);
+        var batteryButton = CreateUtilityButton("\uE83F", "Battery", ToggleQuickSettings, 15);
 
-        utilityClock.FontSize = 13;
+        utilityClock.FontSize = 12.5;
         utilityClock.Foreground = new SolidColorBrush(Colors.White);
         utilityClock.VerticalAlignment = VerticalAlignment.Center;
         utilityClock.HorizontalAlignment = HorizontalAlignment.Center;
         utilityClock.TextAlignment = TextAlignment.Center;
-        utilityClock.MinWidth = 70;
+        utilityClock.MinWidth = 62;
         utilityClock.Tag = "NoMagnify";
 
         var clockButton = new Button
         {
             Padding = new Thickness(4, 0, 4, 0),
             Margin = new Thickness(0),
-            MinWidth = 78,
-            Height = 42,
+            MinWidth = 68,
+            Width = 68,
+            Height = 38,
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(9),
             Content = utilityClock,
             Tag = "NoMagnify",
             HorizontalContentAlignment = HorizontalAlignment.Center,
@@ -645,8 +653,8 @@ keyboard.RecoveryRequested +=
             new SolidColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
         clockButton.Resources["ButtonBackgroundPressed"] =
             new SolidColorBrush(global::Windows.UI.Color.FromArgb(50, 255, 255, 255));
-        ToolTipService.SetToolTip(clockButton, "Clock and quick settings");
-        clockButton.Click += (_, _) => ToggleQuickSettings();
+        ToolTipService.SetToolTip(clockButton, "Clock and calendar");
+        clockButton.Click += (_, _) => { utilitySource = clockButton; ToggleCalendar(); };
 
         utilityCluster.Children.Add(divider);
         utilityCluster.Children.Add(trayButton);
@@ -663,9 +671,28 @@ keyboard.RecoveryRequested +=
     private Button CreateUtilityButton(
         string glyph,
         string tooltip,
-        Action click)
+        Action click,
+        double glyphSize)
     {
-        var button = SystemControlStyle.Button(SystemControlStyle.Icon(glyph), tooltip, click);
+        // SystemControlStyle.Icon returns FontIcon, so size it directly.
+        var icon = SystemControlStyle.Icon(glyph);
+        icon.FontSize = glyphSize;
+        icon.Width = 20;
+        icon.Height = 20;
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+
+        Button? source = null;
+        var button = SystemControlStyle.Button(icon, tooltip, () => { utilitySource = source; click(); });
+        source = button;
+        button.Width = 34;
+        button.MinWidth = 34;
+        button.Height = 38;
+        button.Padding = new Thickness(0);
+        button.Margin = new Thickness(0);
+        button.CornerRadius = new CornerRadius(9);
+        button.HorizontalContentAlignment = HorizontalAlignment.Center;
+        button.VerticalContentAlignment = VerticalAlignment.Center;
         button.Tag = "NoMagnify";
         return button;
     }
@@ -682,49 +709,86 @@ keyboard.RecoveryRequested +=
         ToolTipService.SetToolTip(utilityCluster.Children[4], snapshot.HasBattery ? $"Battery {snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power");
 
         quickSettings?.Refresh();
+        trayWindow?.Refresh();
+        calendarWindow?.Refresh();
+    }
+
+    private void PrepareSystemPopup()
+    {
+        collapseDelay?.Cancel();
+        CancelPillHide();
+        previews.Hide();
+        animation.ResetMagnification();
+        dockWaveCurrentStrength = dockWaveTargetStrength = 0;
+        desktopBackdrop.ClearDockWave();
+        UpdateDockWaveOutline();
+        StopDockWaveTimer(clear: false);
+    }
+
+    private FrameworkElement? utilitySource;
+    private global::Windows.Foundation.Point UtilityAnchor()
+    {
+        var source = utilitySource ?? utilityCluster;
+        return source.TransformToVisual(root).TransformPoint(
+            new global::Windows.Foundation.Point(source.ActualWidth / 2, 0));
+    }
+
+    private void RepositionSystemPopups()
+    {
+        if (root.ActualWidth <= 0 || root.ActualHeight <= 0 ||
+            (quickSettings is null && trayWindow is null && calendarWindow is null)) return;
+        var anchor = UtilityAnchor();
+        var top = root.ActualHeight - BottomMargin - ExpandedDockHeight;
+        quickSettings?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
+        trayWindow?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
+        calendarWindow?.PositionNear(AppWindow, windowManager.Scale, anchor.X, top);
+    }
+
+    private void SystemPopupClosed()
+    {
+        if (closing)
+            return;
+
+        pointerInsideDock = windowManager.IsPointerInsideInput();
+        RefreshHoverVisuals();
+
+        if (!pointerInsideDock &&
+            !previews.HoldsDock &&
+            state.State is DockState.Expanded or DockState.Expanding)
+        {
+            ScheduleCollapse();
+        }
     }
 
     private void ToggleQuickSettings()
     {
         if (quickSettingsOpen)
         {
-            CloseQuickSettings();
+            CloseQuickSettings(true);
             return;
         }
 
-        collapseDelay?.Cancel();
-        CancelPillHide();
-        previews.Hide();
-        animation.ResetMagnification();
+        CloseSystemTray();
+        CloseCalendar();
+        PrepareSystemPopup();
 
-        quickSettings = new SystemQuickSettingsWindow(systemControls);
+        quickSettings = new SystemQuickSettingsWindow(systemControls, Appearance);
         quickSettings.Closed += (_, _) =>
         {
             quickSettingsOpen = false;
             quickSettings = null;
 
-            if (closing)
-                return;
-
-            pointerInsideDock = windowManager.IsPointerInsideInput();
-            RefreshHoverVisuals();
-
-            if (!pointerInsideDock &&
-                !previews.HoldsDock &&
-                state.State is DockState.Expanded or DockState.Expanding)
-            {
-                ScheduleCollapse();
-            }
+            SystemPopupClosed();
         };
 
         quickSettingsOpen = true;
-        var anchor = utilityCluster.TransformToVisual(root).TransformPoint(new global::Windows.Foundation.Point(utilityCluster.ActualWidth / 2, 0));
+        var anchor = UtilityAnchor();
         quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, root.ActualHeight - BottomMargin - ExpandedDockHeight);
         quickSettings.Activate();
         quickSettings.Refresh();
     }
 
-    private void CloseQuickSettings()
+    private void CloseQuickSettings(bool animate = false)
     {
         if (quickSettings is null)
         {
@@ -733,16 +797,103 @@ keyboard.RecoveryRequested +=
         }
 
         var window = quickSettings;
+        if (animate) { window.Dismiss(); return; }
         quickSettings = null;
         quickSettingsOpen = false;
 
         try
         {
-            window.Close();
+            window.CloseImmediately();
         }
         catch (InvalidOperationException)
         {
         }
+    }
+
+    private void ToggleSystemTray()
+    {
+        if (trayWindowOpen)
+        {
+            CloseSystemTray(true);
+            return;
+        }
+
+        CloseQuickSettings();
+        CloseCalendar();
+        PrepareSystemPopup();
+
+        trayWindow = new SystemTrayWindow(systemControls, Appearance);
+        trayWindow.Closed += (_, _) =>
+        {
+            trayWindowOpen = false;
+            trayWindow = null;
+            SystemPopupClosed();
+        };
+
+        trayWindowOpen = true;
+        var anchor = UtilityAnchor();
+        trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X,
+            root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        trayWindow.Activate();
+        trayWindow.Refresh();
+    }
+
+    private void CloseSystemTray(bool animate = false)
+    {
+        if (trayWindow is null)
+        {
+            trayWindowOpen = false;
+            return;
+        }
+
+        var window = trayWindow;
+        if (animate) { window.Dismiss(); return; }
+        trayWindow = null;
+        trayWindowOpen = false;
+        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+    }
+
+    private void ToggleCalendar()
+    {
+        if (calendarWindowOpen)
+        {
+            CloseCalendar(true);
+            return;
+        }
+
+        CloseQuickSettings();
+        CloseSystemTray();
+        PrepareSystemPopup();
+
+        calendarWindow = new CalendarPopoverWindow(Appearance);
+        calendarWindow.Closed += (_, _) =>
+        {
+            calendarWindowOpen = false;
+            calendarWindow = null;
+            SystemPopupClosed();
+        };
+
+        calendarWindowOpen = true;
+        var anchor = UtilityAnchor();
+        calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X,
+            root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        calendarWindow.Activate();
+        calendarWindow.Refresh();
+    }
+
+    private void CloseCalendar(bool animate = false)
+    {
+        if (calendarWindow is null)
+        {
+            calendarWindowOpen = false;
+            return;
+        }
+
+        var window = calendarWindow;
+        if (animate) { window.Dismiss(); return; }
+        calendarWindow = null;
+        calendarWindowOpen = false;
+        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
     }
 
     private void BeginReorderCandidate(
@@ -750,8 +901,7 @@ keyboard.RecoveryRequested +=
         DockApplicationItem item,
         PointerRoutedEventArgs e)
     {
-        if (!item.IsPinned ||
-            state.State != DockState.Expanded ||
+        if (state.State != DockState.Expanded ||
             previews.ContextMenuOpen ||
             reorderButton is not null)
         {
@@ -798,7 +948,6 @@ keyboard.RecoveryRequested +=
                 return;
 
             var pinnedItems = VisibleDockApplications
-                .Where(candidate => candidate.IsPinned)
                 .ToArray();
 
             reorderSourceIndex = Array.FindIndex(
@@ -982,7 +1131,6 @@ keyboard.RecoveryRequested +=
             reorderTargetIndex = ResolveReorderTargetIndex(releasePoint);
 
         var orderedIds = VisibleDockApplications
-            .Where(candidate => candidate.IsPinned)
             .Select(candidate => candidate.Id)
             .ToList();
 
@@ -998,7 +1146,7 @@ keyboard.RecoveryRequested +=
             orderedIds.RemoveAt(reorderSourceIndex);
             orderedIds.Insert(reorderTargetIndex, draggedId);
 
-            if (applicationService.ReorderPinned(orderedIds))
+            if (applicationService.ReorderApplications(orderedIds))
             {
                 // Keep the observable collection in the same order immediately.
                 // That prevents the asynchronous application snapshot from
@@ -1015,11 +1163,11 @@ keyboard.RecoveryRequested +=
                     reorderCommitting = false;
                 }
 
-                SetStatus("Pinned app order saved.");
+                SetStatus("App order saved.");
             }
             else
             {
-                SetStatus("GlassDock could not save the pinned app order.");
+                SetStatus("GlassDock could not save the app order.");
                 SynchronizeItems();
             }
         }
@@ -1553,7 +1701,7 @@ keyboard.RecoveryRequested +=
         if (previews.ContextMenuOpen ||
             externalDragActive ||
             reorderButton is not null ||
-            quickSettingsOpen ||
+            SystemPopupOpen ||
             state.State != DockState.Expanded)
             return;
         if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out _))
@@ -1591,7 +1739,7 @@ keyboard.RecoveryRequested +=
         if (previews.ContextMenuOpen ||
             externalDragActive ||
             reorderButton is not null ||
-            quickSettingsOpen)
+            SystemPopupOpen)
             return;
         RefreshHoverVisuals();
         if (previews.HoldsDock) return;
@@ -1606,6 +1754,7 @@ keyboard.RecoveryRequested +=
         CancelPillHide();
 
         if (previews.ContextMenuOpen ||
+            SystemPopupOpen ||
             reorderButton is not null ||
             state.State != DockState.Expanded)
             return;
@@ -1648,10 +1797,10 @@ keyboard.RecoveryRequested +=
     }
 
     private void TickDockWave(
-        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object? sender,
         object args)
     {
-        if (previews.ContextMenuOpen)
+        if (previews.ContextMenuOpen || SystemPopupOpen)
         {
             StopDockWaveTimer(clear: false);
             return;
@@ -1683,39 +1832,13 @@ keyboard.RecoveryRequested +=
             ClampDockWaveCenter(
                 dockWaveTargetX);
 
-        // Position responds quickly; height follows slightly slower.
-        // That combination reads as a flexible surface instead of a pill
-        // physically sliding over the dock.
-        dockWaveCurrentX =
-            Lerp(
-                dockWaveCurrentX,
-                dockWaveTargetX,
-                0.34);
-
-        dockWaveCurrentStrength =
-            Lerp(
-                dockWaveCurrentStrength,
-                dockWaveTargetStrength,
-                0.22);
-
-        if (Math.Abs(
-                dockWaveCurrentX -
-                dockWaveTargetX) <
-            0.08)
-        {
-            dockWaveCurrentX =
-                dockWaveTargetX;
-        }
-
-        if (Math.Abs(
-                dockWaveCurrentStrength -
-                dockWaveTargetStrength) <
-            0.003)
-        {
-            dockWaveCurrentStrength =
-                dockWaveTargetStrength;
-        }
-
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(dockWaveLastFrame, now).TotalSeconds;
+        dockWaveLastFrame = now;
+        dockWaveCurrentX = GlassDock.Core.Desktop.DockWaveGeometry.Follow(
+            dockWaveCurrentX, dockWaveTargetX, elapsed, .0385);
+        dockWaveCurrentStrength = GlassDock.Core.Desktop.DockWaveGeometry.Follow(
+            dockWaveCurrentStrength, dockWaveTargetStrength, elapsed, .0644);
         desktopBackdrop.SetDockWave(
             dockWaveCurrentX,
             DockWaveHalfWidth,
@@ -1728,13 +1851,13 @@ keyboard.RecoveryRequested +=
             Math.Abs(
                 dockWaveCurrentX -
                 dockWaveTargetX) <
-            0.08;
+            0.001;
 
         var strengthSettled =
             Math.Abs(
                 dockWaveCurrentStrength -
                 dockWaveTargetStrength) <
-            0.003;
+            0.00001;
 
         if (!xSettled ||
             !strengthSettled)
@@ -1774,14 +1897,7 @@ keyboard.RecoveryRequested +=
                 ? dockWaveCurrentX
                 : root.ActualWidth / 2;
 
-        // WinUI Geometry instances cannot be assigned to two Path.Data
-        // properties at the same time. Give each stroke its own geometry
-        // instance, built from the exact same values so they stay aligned.
-        dockWaveGlow.Data =
-            CreateDockWaveGeometry(
-                centerX,
-                dockWaveCurrentStrength);
-
+        // The input outline consumes the same continuous geometry as the glass mask.
         dockWaveRim.Data =
             CreateDockWaveGeometry(
                 centerX,
@@ -1819,499 +1935,27 @@ keyboard.RecoveryRequested +=
         windowManager.SetInteractionPolygon(outline);
     }
 
-    private Geometry CreateDockWaveGeometry(
-        double centerX,
-        double strength)
+    private Geometry CreateDockWaveGeometry(double centerX, double strength)
     {
-        var dockWidth =
-            surface.ActualWidth;
-
-        var dockHeight =
-            surface.ActualHeight;
-
-        var left =
-            (root.ActualWidth -
-             dockWidth) /
-            2;
-
-        var top =
-            root.ActualHeight -
-            surface.Margin.Bottom -
-            dockHeight;
-
-        var right =
-            left +
-            dockWidth;
-
-        var bottom =
-            top +
-            dockHeight;
-
-        // True stadium / pill geometry:
-        // the end radius is exactly half of the dock height.
-        var radius =
-            Math.Max(
-                0,
-                Math.Min(
-                    dockHeight / 2,
-                    dockWidth / 2));
-
-        var eased =
-            Math.Clamp(
-                strength,
-                0,
-                1);
-
-        eased =
-            eased *
-            eased *
-            (3 - 2 * eased);
-
-        var rise =
-            DockWaveRise *
-            eased;
-
-        centerX =
-            ClampDockWaveCenter(
-                centerX);
-
-        var availableTop =
-            Math.Max(
-                0,
-                dockWidth -
-                radius * 2);
-
-        var requestedHalfWidth =
-            Math.Min(
-                DockWaveHalfWidth,
-                Math.Max(
-                    24,
-                    availableTop * 0.46));
-
-        var topStart =
-            left +
-            radius;
-
-        var topEnd =
-            right -
-            radius;
-
-        var leftRoom =
-            Math.Max(
-                0,
-                centerX -
-                topStart);
-
-        var rightRoom =
-            Math.Max(
-                0,
-                topEnd -
-                centerX);
-
-        // At an end, the crest stays where the first/last app is.
-        // Instead of ending the wave early, its OUTER side becomes the
-        // dock corner itself. That makes the corner and bump one curve.
-        var edgeMergeThreshold =
-            Math.Min(
-                radius + 12,
-                requestedHalfWidth * 0.68);
-
-        var leftEdge =
-            rise > 0.01 &&
-            leftRoom <
-            edgeMergeThreshold;
-
-        var rightEdge =
-            rise > 0.01 &&
-            rightRoom <
-            edgeMergeThreshold;
-
-        if (leftEdge &&
-            rightEdge)
+        var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(
+            (root.ActualWidth - surface.ActualWidth) / 2,
+            root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight,
+            surface.ActualWidth, surface.ActualHeight, 34,
+            centerX, DockWaveHalfWidth, DockWaveRise, strength);
+        static global::Windows.Foundation.Point Point(GlassDock.Core.Desktop.DockWaveGeometry.Point p) => new(p.X, p.Y);
+        var figure = new PathFigure { StartPoint = Point(outline.Start), IsClosed = true };
+        foreach (var segment in outline.Segments)
         {
-            // Very small docks cannot meaningfully merge both ends at once.
-            leftEdge = false;
-            rightEdge = false;
-        }
-
-        var leftSpan =
-            Math.Min(
-                requestedHalfWidth,
-                leftRoom);
-
-        var rightSpan =
-            Math.Min(
-                requestedHalfWidth,
-                rightRoom);
-
-        var waveStart =
-            centerX -
-            leftSpan;
-
-        var waveEnd =
-            centerX +
-            rightSpan;
-
-        const double kappa =
-            0.55228475;
-
-        // Merge a little below the normal top-right/top-left tangent.
-        // The cubic reaches this point vertically, so the dock side stays
-        // rounded with no visible kink.
-        // Merge at the side midpoint so the bump and the capsule end
-        // become one smooth continuous rounded profile.
-        var cornerMergeY =
-            top +
-            radius;
-
-        PathFigure figure;
-
-        if (leftEdge)
-        {
-            figure =
-                new PathFigure
-                {
-                    StartPoint =
-                        new global::Windows.Foundation.Point(
-                            left,
-                            cornerMergeY),
-
-                    IsClosed = true,
-                    IsFilled = false
-                };
-
-            var outerDistance =
-                Math.Max(
-                    18,
-                    centerX - left);
-
-            // LEFT CORNER + BUMP are one continuous cubic.
-            figure.Segments.Add(
-                new BezierSegment
-                {
-                    Point1 =
-                        new global::Windows.Foundation.Point(
-                            left,
-                            top +
-                            radius * 0.08),
-
-                    Point2 =
-                        new global::Windows.Foundation.Point(
-                            centerX -
-                            outerDistance * 0.48,
-                            top - rise),
-
-                    Point3 =
-                        new global::Windows.Foundation.Point(
-                            centerX,
-                            top - rise)
-                });
-        }
-        else
-        {
-            figure =
-                new PathFigure
-                {
-                    StartPoint =
-                        new global::Windows.Foundation.Point(
-                            left + radius,
-                            top),
-
-                    IsClosed = true,
-                    IsFilled = false
-                };
-
-            if (rise > 0.01)
+            if (segment.IsLine) figure.Segments.Add(new LineSegment { Point = Point(segment.End) });
+            else figure.Segments.Add(new BezierSegment
             {
-                figure.Segments.Add(
-                    new LineSegment
-                    {
-                        Point =
-                            new global::Windows.Foundation.Point(
-                                waveStart,
-                                top)
-                    });
-
-                figure.Segments.Add(
-                    new BezierSegment
-                    {
-                        Point1 =
-                            new global::Windows.Foundation.Point(
-                                waveStart +
-                                leftSpan * 0.38,
-                                top),
-
-                        Point2 =
-                            new global::Windows.Foundation.Point(
-                                centerX -
-                                leftSpan * 0.46,
-                                top - rise),
-
-                        Point3 =
-                            new global::Windows.Foundation.Point(
-                                centerX,
-                                top - rise)
-                    });
-            }
-        }
-
-        //
-        // CREST -> RIGHT SIDE
-        //
-        if (rise > 0.01)
-        {
-            if (rightEdge)
-            {
-                var outerDistance =
-                    Math.Max(
-                        18,
-                        right - centerX);
-
-                // RIGHT BUMP + CORNER are one continuous cubic.
-                // Point1 keeps the crest tangent horizontal.
-                // Point2/Point3 make the end tangent vertical into the side.
-                figure.Segments.Add(
-                    new BezierSegment
-                    {
-                        Point1 =
-                            new global::Windows.Foundation.Point(
-                                centerX +
-                                outerDistance * 0.48,
-                                top - rise),
-
-                        Point2 =
-                            new global::Windows.Foundation.Point(
-                                right,
-                                top +
-                                radius * 0.18),
-
-                        Point3 =
-                            new global::Windows.Foundation.Point(
-                                right,
-                                cornerMergeY)
-                    });
-            }
-            else
-            {
-                figure.Segments.Add(
-                    new BezierSegment
-                    {
-                        Point1 =
-                            new global::Windows.Foundation.Point(
-                                centerX +
-                                rightSpan * 0.46,
-                                top - rise),
-
-                        Point2 =
-                            new global::Windows.Foundation.Point(
-                                waveEnd -
-                                rightSpan * 0.38,
-                                top),
-
-                        Point3 =
-                            new global::Windows.Foundation.Point(
-                                waveEnd,
-                                top)
-                    });
-
-                figure.Segments.Add(
-                    new LineSegment
-                    {
-                        Point =
-                            new global::Windows.Foundation.Point(
-                                right - radius,
-                                top)
-                    });
-
-                // Normal top-right rounded corner when the wave is not
-                // merging into this end.
-                figure.Segments.Add(
-                    new BezierSegment
-                    {
-                        Point1 =
-                            new global::Windows.Foundation.Point(
-                                right -
-                                radius +
-                                radius * kappa,
-                                top),
-
-                        Point2 =
-                            new global::Windows.Foundation.Point(
-                                right,
-                                top +
-                                radius -
-                                radius * kappa),
-
-                        Point3 =
-                            new global::Windows.Foundation.Point(
-                                right,
-                                top + radius)
-                    });
-            }
-        }
-        else
-        {
-            figure.Segments.Add(
-                new LineSegment
-                {
-                    Point =
-                        new global::Windows.Foundation.Point(
-                            right - radius,
-                            top)
-                });
-
-            figure.Segments.Add(
-                new BezierSegment
-                {
-                    Point1 =
-                        new global::Windows.Foundation.Point(
-                            right -
-                            radius +
-                            radius * kappa,
-                            top),
-
-                    Point2 =
-                        new global::Windows.Foundation.Point(
-                            right,
-                            top +
-                            radius -
-                            radius * kappa),
-
-                    Point3 =
-                        new global::Windows.Foundation.Point(
-                            right,
-                            top + radius)
-                });
-        }
-
-        //
-        // RIGHT SIDE + BOTTOM-RIGHT
-        //
-        figure.Segments.Add(
-            new LineSegment
-            {
-                Point =
-                    new global::Windows.Foundation.Point(
-                        right,
-                        bottom - radius)
+                Point1 = Point(segment.Control1), Point2 = Point(segment.Control2), Point3 = Point(segment.End)
             });
-
-        figure.Segments.Add(
-            new BezierSegment
-            {
-                Point1 =
-                    new global::Windows.Foundation.Point(
-                        right,
-                        bottom -
-                        radius +
-                        radius * kappa),
-
-                Point2 =
-                    new global::Windows.Foundation.Point(
-                        right -
-                        radius +
-                        radius * kappa,
-                        bottom),
-
-                Point3 =
-                    new global::Windows.Foundation.Point(
-                        right - radius,
-                        bottom)
-            });
-
-        //
-        // BOTTOM + BOTTOM-LEFT
-        //
-        figure.Segments.Add(
-            new LineSegment
-            {
-                Point =
-                    new global::Windows.Foundation.Point(
-                        left + radius,
-                        bottom)
-            });
-
-        figure.Segments.Add(
-            new BezierSegment
-            {
-                Point1 =
-                    new global::Windows.Foundation.Point(
-                        left +
-                        radius -
-                        radius * kappa,
-                        bottom),
-
-                Point2 =
-                    new global::Windows.Foundation.Point(
-                        left,
-                        bottom -
-                        radius +
-                        radius * kappa),
-
-                Point3 =
-                    new global::Windows.Foundation.Point(
-                        left,
-                        bottom - radius)
-            });
-
-        //
-        // LEFT SIDE + TOP-LEFT
-        //
-        if (leftEdge)
-        {
-            figure.Segments.Add(
-                new LineSegment
-                {
-                    Point =
-                        new global::Windows.Foundation.Point(
-                            left,
-                            cornerMergeY)
-                });
         }
-        else
-        {
-            figure.Segments.Add(
-                new LineSegment
-                {
-                    Point =
-                        new global::Windows.Foundation.Point(
-                            left,
-                            top + radius)
-                });
-
-            figure.Segments.Add(
-                new BezierSegment
-                {
-                    Point1 =
-                        new global::Windows.Foundation.Point(
-                            left,
-                            top +
-                            radius -
-                            radius * kappa),
-
-                    Point2 =
-                        new global::Windows.Foundation.Point(
-                            left +
-                            radius -
-                            radius * kappa,
-                            top),
-
-                    Point3 =
-                        new global::Windows.Foundation.Point(
-                            left + radius,
-                            top)
-                });
-        }
-
-        var result =
-            new PathGeometry();
-
-        result.Figures.Add(
-            figure);
-
-        return result;
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        return geometry;
     }
-
     private double ClampDockWaveCenter(
         double value)
     {
@@ -2391,7 +2035,8 @@ keyboard.RecoveryRequested +=
             return;
 
         dockWaveTimerRunning = true;
-        dockWaveTimer.Start();
+        dockWaveLastFrame = System.Diagnostics.Stopwatch.GetTimestamp();
+        CompositionTarget.Rendering += TickDockWave;
     }
 
     private void StopDockWaveTimer(
@@ -2400,7 +2045,7 @@ keyboard.RecoveryRequested +=
         if (dockWaveTimerRunning)
         {
             dockWaveTimerRunning = false;
-            dockWaveTimer.Stop();
+            CompositionTarget.Rendering -= TickDockWave;
         }
 
         if (!clear)
@@ -2418,9 +2063,11 @@ keyboard.RecoveryRequested +=
         if (previews.ContextMenuOpen)
             return Task.CompletedTask;
 
-        if (quickSettingsOpen)
+        if (SystemPopupOpen)
         {
             CloseQuickSettings();
+            CloseSystemTray();
+            CloseCalendar();
             return Task.CompletedTask;
         }
 
@@ -2464,7 +2111,7 @@ keyboard.RecoveryRequested +=
     }
     private async Task CollapseDockAsync()
     {
-        if (previews.HoldsDock || quickSettingsOpen) return;
+        if (previews.HoldsDock || SystemPopupOpen) return;
         previews.Hide();
 
         CancelPillHide();
@@ -2566,7 +2213,7 @@ keyboard.RecoveryRequested +=
             expanded);
 
         surface.Apply(material);
-        desktopBackdrop.Apply(material);
+        desktopBackdrop.Apply(material with { BorderOpacity = expanded ? Appearance.BorderOpacity : 0 });
         UpdateBackdropBounds();
     }
 
@@ -2614,6 +2261,9 @@ keyboard.RecoveryRequested +=
 
     private void ApplyAppearance(DockAppearanceSettings appearance)
     {
+        quickSettings?.ApplyAppearance(appearance);
+        trayWindow?.ApplyAppearance(appearance);
+        calendarWindow?.ApplyAppearance(appearance);
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
@@ -2871,9 +2521,11 @@ keyboard.RecoveryRequested +=
         displayTimer.Stop();
         utilityTimer.Stop();
         CloseQuickSettings();
+        CloseSystemTray();
+        CloseCalendar();
 
         StopDockWaveTimer(clear: true);
-        dockWaveTimer.Tick -= TickDockWave;
+        CompositionTarget.Rendering -= TickDockWave;
 
         settingsSession.Changed -= SettingsChanged;
         settingsWindow.BeginShutdown()?.Close();

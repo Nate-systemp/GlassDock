@@ -1,3 +1,4 @@
+using GlassDock.Core.Settings;
 using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Materials;
@@ -46,9 +47,10 @@ internal sealed class SystemQuickSettingsWindow : Window
     private DateTime nextHardwareRefresh;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer refreshTimer;
     private bool syncing;
+    private readonly UtilityPopupPresentation presentation;
     private bool closed;
 
-    public SystemQuickSettingsWindow(WindowsSystemControlService controls)
+    public SystemQuickSettingsWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance)
     {
         this.controls = controls;
         Title = "GlassDock Quick Settings";
@@ -57,19 +59,14 @@ internal sealed class SystemQuickSettingsWindow : Window
         presenter.SetBorderAndTitleBar(false, false);
         presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
-        var material = new GlassMaterial
-        {
-            BlurAmount = 28, Opacity = .82, Tint = 0x182638, Brightness = .72,
-            Saturation = 1.15, CornerRadius = 24, BorderThickness = .7,
-            BorderOpacity = .38, EdgeHighlight = .08, ShadowOpacity = .4,
-            ShadowBlur = 24, ShadowOffset = 5
-        };
-        glass.Apply(material);
-        backdrop.Apply(material);
+        // Keep the desktop visible through the panel and let the GlassDock graph
+        // provide the material depth. The stronger edge/highlight and lower fill
+        // opacity make this read as glass rather than a dark blurred card.
+        UtilityPopupStyle.Apply(glass, backdrop, appearance);
         SystemBackdrop = backdrop;
         root.Children.Add(glass);
         panel = new Grid { Margin = new Thickness(Gutter + 22, Gutter + 22, Gutter + 22, Gutter + 18), RowSpacing = 14 };
-        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(98) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(90) });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(44) });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(44) });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
@@ -136,6 +133,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         AddRow(details, 2, new ScrollViewer { Content = detailItems, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         root.Children.Add(details);
         Content = root;
+        presentation = new UtilityPopupPresentation(this, root, backdrop);
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
@@ -144,18 +142,13 @@ internal sealed class SystemQuickSettingsWindow : Window
         {
             UpdateBackdrop();
             _ = RefreshHardwareAsync();
-            if (!new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
-            var visual = ElementCompositionPreview.GetElementVisual(panel);
-            var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
-            fade.InsertKeyFrame(0, 0); fade.InsertKeyFrame(1, 1);
-            fade.Duration = TimeSpan.FromMilliseconds(180);
-            visual.StartAnimation("Opacity", fade);
+
         };
         refreshTimer = DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromSeconds(1);
         refreshTimer.Tick += (_, _) => { Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); };
         Activated += (_, _) => { if (!closed) refreshTimer.Start(); };
-        root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Close(); } };
+        root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Dismiss(); } };
         Closed += (_, _) => { closed = true; lifetime.Cancel(); detailLifetime?.Cancel(); refreshTimer.Stop(); host.Dispose(); };
     }
 
@@ -163,17 +156,17 @@ internal sealed class SystemQuickSettingsWindow : Window
         Math.Max(0, root.ActualWidth - Gutter * 2), Math.Max(0, root.ActualHeight - Gutter * 2),
         Gutter, root.XamlRoot?.RasterizationScale ?? 1);
 
+    public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
+
+    public void CloseImmediately() => presentation.CloseImmediately();
+    public void Dismiss() => presentation.Dismiss();
+
     public void PositionNear(AppWindow owner, double scale, double anchorX, double dockTop)
     {
-        scale = double.IsFinite(scale) && scale > 0 ? scale : 1;
-        var area = DisplayArea.GetFromWindowId(owner.Id, DisplayAreaFallback.Nearest).WorkArea;
-        var width = Math.Min(area.Width, (int)Math.Round((PanelWidth + Gutter * 2) * scale));
-        var height = Math.Min(area.Height, (int)Math.Round((PanelHeight + Gutter * 2) * scale));
-        var x = owner.Position.X + (int)Math.Round(anchorX * scale) - width / 2;
-        var y = owner.Position.Y + (int)Math.Round(dockTop * scale) - height + (int)Math.Round(6 * scale);
-        AppWindow.MoveAndResize(new RectInt32(Math.Clamp(x, area.X, area.X + area.Width - width),
-            Math.Clamp(y, area.Y, area.Y + area.Height - height), width, height));
+        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, PanelWidth, PanelHeight);
+        presentation.AnchorX = (owner.Position.X + anchorX * scale - AppWindow.Position.X) / scale;
     }
+
 
     public void Refresh()
     {
@@ -201,8 +194,8 @@ internal sealed class SystemQuickSettingsWindow : Window
             if (closed) return;
             networkDetail.Text = wifi.Text;
             bluetoothDetail.Text = bluetooth.Text;
-            networkTile.Background = wifi.IsOn ? Brush(220, 0, 112, 230) : Brush(22);
-            bluetoothTile.Background = bluetooth.IsOn ? Brush(220, 0, 112, 230) : Brush(22);
+            networkTile.Background = wifi.IsOn ? Brush(135, 20, 125, 215) : Brush(22);
+            bluetoothTile.Background = bluetooth.IsOn ? Brush(135, 20, 125, 215) : Brush(22);
             networkTile.IsEnabled = wifi.Available && !radioBusy;
             bluetoothTile.IsEnabled = bluetooth.Available && !radioBusy;
             focusDetail.Text = SystemRadioControls.FocusStatus();
@@ -374,7 +367,7 @@ internal sealed class SystemQuickSettingsWindow : Window
     private static Button AddTile(Grid parent, int column, string glyph, string title, TextBlock detail, Action? action, Action secondary)
     {
         var stack = new StackPanel { Spacing = 5, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var button = Button(Icon(glyph, 25), "Toggle " + title, action ?? (() => { }), 54, 52);
+        var button = Button(Icon(glyph, 21), "Toggle " + title, action ?? (() => { }), 48, 44);
         button.IsEnabled = action is not null;
         button.Background = Brush(22);
         button.CornerRadius = new CornerRadius(15);

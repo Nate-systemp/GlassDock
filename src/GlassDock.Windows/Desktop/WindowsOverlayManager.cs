@@ -15,6 +15,7 @@ public sealed class WindowsOverlayManager : IDisposable
     private NativeMethods.Point[]? lastInteractionPolygon;
     private nint inputRegion;
     private const nuint InputTimer = 0x4744;
+    private const nuint TopmostTimer = 0x4745;
     private bool expandedInput;
     private bool transparentInput;
     private NativeMethods.Point? previousPointer;
@@ -54,6 +55,7 @@ public sealed class WindowsOverlayManager : IDisposable
         foregroundHook = NativeMethods.SetWinEventHook(3, 3, 0, foregroundCallback, 0, 0, 0);
         if (foregroundHook == 0) throw new InvalidOperationException("Cannot monitor foreground changes for the desktop overlay.");
         EnsureTopmost();
+        NativeMethods.SetTimer(hwnd, TopmostTimer, 250, 0);
     }
 
     private void ConfigureTransparency()
@@ -77,6 +79,16 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private nint WindowMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
+        if (message == 0x0113 && wParam == TopmostTimer)
+        {
+            // Foreground notifications can precede an app's final z-order update.
+            // Reassert without activation, but leave our focused utility popup above us.
+            var foreground = NativeMethods.GetForegroundWindow();
+            NativeMethods.GetWindowThreadProcessId(foreground, out var foregroundProcess);
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var dockProcess);
+            if (foreground != 0 && foregroundProcess != dockProcess) EnsureTopmost();
+            return 0;
+        }
         if (message == 0x0084 && inputRegion != 0) // WM_NCHITTEST, signed virtual-desktop coordinates
         {
             var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
@@ -121,6 +133,7 @@ public sealed class WindowsOverlayManager : IDisposable
     public void Dispose()
     {
         NativeMethods.KillTimer(hwnd, InputTimer);
+        NativeMethods.KillTimer(hwnd, TopmostTimer);
         if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
         inputRegion = 0;
         if (foregroundHook != 0) NativeMethods.UnhookWinEvent(foregroundHook);

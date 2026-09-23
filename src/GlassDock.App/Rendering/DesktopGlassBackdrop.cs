@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
+using Microsoft.Graphics.Canvas.Effects;
 using GlassDock.Core.Materials;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -13,6 +14,32 @@ namespace GlassDock.App.Rendering;
 /// <summary>The OS compositor supplies desktop pixels; the laboratory's graph supplies the material.</summary>
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
+    public bool UseInnerEdge { get; set; }
+    private double presentationScale = 1, presentationOffset, presentationX, presentationY, presentationOpacity = 1;
+    public void SetPresentation(double scale, double offsetY, double originX, double originY, double opacity)
+    {
+        presentationScale = scale;
+        presentationOffset = offsetY;
+        presentationX = originX;
+        presentationY = originY;
+        presentationOpacity = opacity;
+        if (visual is null) return;
+        var units = (float)(lastScale * (UseInnerEdge ? 2 : 1));
+        var origin = new Vector3((float)originX * units, (float)originY * units, 0);
+        var matrix = Matrix4x4.CreateTranslation(-origin) *
+            Matrix4x4.CreateScale((float)scale, (float)scale, 1) *
+            Matrix4x4.CreateTranslation(origin + new Vector3(0, (float)offsetY * units, 0));
+        visual.TransformMatrix = matrix;
+        visual.Opacity = (float)(opacity * lastOpacity);
+        if (edgeVisual is not null) edgeVisual.TransformMatrix = matrix;
+    }
+    private W.CompositionEffectFactory? edgeFactory;
+    private W.CompositionEffectBrush? edgeEffect;
+    private W.CompositionSpriteShape? edgeShape;
+    private W.ShapeVisual? edgeVisual;
+    private W.CompositionVisualSurface? edgeSurface;
+    private W.CompositionSurfaceBrush? edgeMask;
+    private W.CompositionColorBrush? edgeFill;
     private W.Compositor? compositor;
     private W.CompositionEffectFactory? factory;
     private W.CompositionEffectBrush? effect;
@@ -65,10 +92,15 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         fill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(255, 255, 255, 255));
         shape.FillBrush = fill;
         visual = compositor.CreateShapeVisual();
+        // These off-tree mask visuals have no XAML parent to supply soft edge
+        // composition. Explicitly request antialiased bitmap/clip boundaries.
+        visual.BorderMode = W.CompositionBorderMode.Soft;
         visual.Shapes.Add(shape);
         maskSurface = compositor.CreateVisualSurface();
         maskSurface.SourceVisual = visual;
         mask = compositor.CreateSurfaceBrush(maskSurface);
+        mask.Stretch = W.CompositionStretch.Fill;
+        mask.BitmapInterpolationMode = W.CompositionBitmapInterpolationMode.Linear;
         output = compositor.CreateMaskBrush();
         output.Mask = mask;
         var stage = "backdrop source";
@@ -86,6 +118,42 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             effect.SetSourceParameter("Backdrop", source);
             effect.SetSourceParameter("BaseBackdrop", source);
             output.Source = effect;
+            if (UseInnerEdge)
+            {
+                // One vector path owns both the body mask and the inner perimeter.
+                // The final outer mask clips the centered stroke to its inner half.
+                edgeShape = compositor.CreateSpriteShape(geometry);
+                edgeFill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
+                edgeShape.StrokeBrush = edgeFill;
+                edgeVisual = compositor.CreateShapeVisual();
+                edgeVisual.BorderMode = W.CompositionBorderMode.Soft;
+                edgeVisual.Shapes.Add(edgeShape);
+                edgeSurface = compositor.CreateVisualSurface();
+                edgeSurface.SourceVisual = edgeVisual;
+                edgeMask = compositor.CreateSurfaceBrush(edgeSurface);
+                edgeMask.Stretch = W.CompositionStretch.Fill;
+                edgeMask.BitmapInterpolationMode = W.CompositionBitmapInterpolationMode.Linear;
+                edgeFactory = compositor.CreateEffectFactory(new CompositeEffect
+                {
+                    Mode = CanvasComposite.SourceOver,
+                    Sources =
+                    {
+                        new W.CompositionEffectSourceParameter("Body"),
+                        new AlphaMaskEffect
+                        {
+                            Source = new ExposureEffect { Exposure = .35f,
+                                Source = new SaturationEffect { Saturation = 1.12f,
+                                    Source = new W.CompositionEffectSourceParameter("BodyEdge") } },
+                            AlphaMask = new W.CompositionEffectSourceParameter("EdgeMask")
+                        }
+                    }
+                });
+                edgeEffect = edgeFactory.CreateBrush();
+                edgeEffect.SetSourceParameter("Body", effect);
+                edgeEffect.SetSourceParameter("BodyEdge", effect);
+                edgeEffect.SetSourceParameter("EdgeMask", edgeMask);
+                output.Source = edgeEffect;
+            }
             RenderingMode = "Native system backdrop · shared glass graph";
             stage = "material parameters";
             Apply(material);
@@ -114,6 +182,11 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     public void Apply(GlassMaterial value)
     {
         material = RefractionLayer.ForNativeBackend(value);
+        if (edgeShape is not null)
+        {
+            edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * lastScale);
+            edgeFill!.Color = global::Windows.UI.Color.FromArgb((byte)(material.BorderOpacity * 100), 255, 255, 255);
+        }
 
         if (effect is not null)
         {
@@ -176,15 +249,26 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
         }
 
-        visual.Opacity = (float)opacity;
+        SetPresentation(presentationScale, presentationOffset, presentationX, presentationY, presentationOpacity);
 
         var size =
             new Vector2(
                 (float)(windowWidth * scale),
                 (float)(windowHeight * scale));
 
-        visual.Size = size;
-        maskSurface.SourceSize = size;
+        // Supersample coverage only, not the desktop image. Linear downsampling
+        // retains subpixel coverage at rounded corners and animated wave crests.
+        var sampling = UseInnerEdge ? 2f : 1f;
+        shape!.Scale = new Vector2(sampling);
+        visual.Size = size * sampling;
+        maskSurface.SourceSize = size * sampling;
+        if (edgeVisual is not null)
+        {
+            edgeShape!.Scale = new Vector2(sampling);
+            edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * scale);
+            edgeVisual.Size = size * sampling;
+            edgeSurface!.SourceSize = size * sampling;
+        }
 
         UpdateMaskPath();
     }
@@ -239,412 +323,21 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             waveHalfWidth, waveRise, waveStrength);
         if (renderedMask == state) return;
 
-        var scale =
-            Math.Max(
-                0.01,
-                lastScale);
-
-        var left =
-            (float)(
-                (lastWindowWidth - lastWidth) /
-                2 *
-                scale);
-
-        var top =
-            (float)(
-                (lastWindowHeight -
-                 lastBottom -
-                 lastHeight) *
-                scale);
-
-        var right =
-            left +
-            (float)(
-                lastWidth *
-                scale);
-
-        var bottom =
-            top +
-            (float)(
-                lastHeight *
-                scale);
-
-        var radius =
-            (float)(
-                Math.Min(
-                    Math.Min(
-                        material.CornerRadius,
-                        lastHeight / 2),
-                    lastWidth / 2) *
-                scale);
-
-        radius =
-            Math.Max(
-                0,
-                Math.Min(
-                    radius,
-                    Math.Min(
-                        (right - left) / 2,
-                        (bottom - top) / 2)));
-
-        var strength =
-            waveEnabled
-                ? Math.Clamp(
-                    waveStrength,
-                    0,
-                    1)
-                : 0;
-
-        var eased =
-            strength *
-            strength *
-            (3 - 2 * strength);
-
-        var rise =
-            (float)(
-                waveRise *
-                eased *
-                scale);
-
-        var availableTop =
-            Math.Max(
-                0,
-                right -
-                left -
-                radius * 2);
-
-        var requestedHalfWidth =
-            (float)Math.Min(
-                waveHalfWidth *
-                scale,
-                Math.Max(
-                    24 * scale,
-                    availableTop * 0.46));
-
-        var topStart =
-            left +
-            radius;
-
-        var topEnd =
-            right -
-            radius;
-
-        var crestInset =
-            (float)(
-                4 *
-                scale);
-
-        var center =
-            (float)(
-                waveCenterX *
-                scale);
-
-        var centerMin = Math.Min(topStart + crestInset, topEnd - crestInset);
-        var centerMax = Math.Max(topStart + crestInset, topEnd - crestInset);
-        center = Math.Clamp(center, centerMin, centerMax);
-
-        var leftRoom =
-            Math.Max(
-                0,
-                center -
-                topStart);
-
-        var rightRoom =
-            Math.Max(
-                0,
-                topEnd -
-                center);
-
-        var edgeMergeThreshold =
-            Math.Min(
-                radius +
-                (float)(12 * scale),
-                requestedHalfWidth * 0.68f);
-
-        var leftEdge =
-            rise > 0.01f &&
-            leftRoom <
-            edgeMergeThreshold;
-
-        var rightEdge =
-            rise > 0.01f &&
-            rightRoom <
-            edgeMergeThreshold;
-
-        if (leftEdge &&
-            rightEdge)
+        var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(
+            (lastWindowWidth - lastWidth) / 2,
+            lastWindowHeight - lastBottom - lastHeight, lastWidth, lastHeight,
+            material.CornerRadius, waveCenterX, waveHalfWidth, waveRise,
+            waveEnabled ? waveStrength : 0);
+        Vector2 Pixel(GlassDock.Core.Desktop.DockWaveGeometry.Point point) =>
+            new((float)(point.X * lastScale), (float)(point.Y * lastScale));
+        using var builder = new CanvasPathBuilder(canvasDevice);
+        builder.BeginFigure(Pixel(outline.Start));
+        foreach (var segment in outline.Segments)
         {
-            leftEdge = false;
-            rightEdge = false;
+            if (segment.IsLine) builder.AddLine(Pixel(segment.End));
+            else builder.AddCubicBezier(Pixel(segment.Control1), Pixel(segment.Control2), Pixel(segment.End));
         }
-
-        var leftSpan =
-            Math.Min(
-                requestedHalfWidth,
-                leftRoom);
-
-        var rightSpan =
-            Math.Min(
-                requestedHalfWidth,
-                rightRoom);
-
-        var waveStart =
-            center -
-            leftSpan;
-
-        var waveEnd =
-            center +
-            rightSpan;
-
-        const float kappa =
-            0.55228475f;
-
-        var cornerMergeY =
-            top +
-            radius;
-
-        using var builder =
-            new CanvasPathBuilder(
-                canvasDevice);
-
-        if (leftEdge)
-        {
-            builder.BeginFigure(
-                new Vector2(
-                    left,
-                    cornerMergeY));
-
-            var outerDistance =
-                Math.Max(
-                    (float)(18 * scale),
-                    center - left);
-
-            builder.AddCubicBezier(
-                new Vector2(
-                    left,
-                    top +
-                    radius * 0.18f),
-
-                new Vector2(
-                    center -
-                    outerDistance * 0.48f,
-                    top - rise),
-
-                new Vector2(
-                    center,
-                    top - rise));
-        }
-        else
-        {
-            builder.BeginFigure(
-                new Vector2(
-                    left + radius,
-                    top));
-
-            if (rise > 0.01f)
-            {
-                builder.AddLine(
-                    new Vector2(
-                        waveStart,
-                        top));
-
-                builder.AddCubicBezier(
-                    new Vector2(
-                        waveStart +
-                        leftSpan * 0.38f,
-                        top),
-
-                    new Vector2(
-                        center -
-                        leftSpan * 0.46f,
-                        top - rise),
-
-                    new Vector2(
-                        center,
-                        top - rise));
-            }
-        }
-
-        //
-        // CREST -> RIGHT SIDE
-        //
-        if (rise > 0.01f)
-        {
-            if (rightEdge)
-            {
-                var outerDistance =
-                    Math.Max(
-                        (float)(18 * scale),
-                        right - center);
-
-                builder.AddCubicBezier(
-                    new Vector2(
-                        center +
-                        outerDistance * 0.48f,
-                        top - rise),
-
-                    new Vector2(
-                        right,
-                        top +
-                        radius * 0.18f),
-
-                    new Vector2(
-                        right,
-                        cornerMergeY));
-            }
-            else
-            {
-                builder.AddCubicBezier(
-                    new Vector2(
-                        center +
-                        rightSpan * 0.46f,
-                        top - rise),
-
-                    new Vector2(
-                        waveEnd -
-                        rightSpan * 0.38f,
-                        top),
-
-                    new Vector2(
-                        waveEnd,
-                        top));
-
-                builder.AddLine(
-                    new Vector2(
-                        right - radius,
-                        top));
-
-                builder.AddCubicBezier(
-                    new Vector2(
-                        right -
-                        radius +
-                        radius * kappa,
-                        top),
-
-                    new Vector2(
-                        right,
-                        top +
-                        radius -
-                        radius * kappa),
-
-                    new Vector2(
-                        right,
-                        top + radius));
-            }
-        }
-        else
-        {
-            builder.AddLine(
-                new Vector2(
-                    right - radius,
-                    top));
-
-            builder.AddCubicBezier(
-                new Vector2(
-                    right -
-                    radius +
-                    radius * kappa,
-                    top),
-
-                new Vector2(
-                    right,
-                    top +
-                    radius -
-                    radius * kappa),
-
-                new Vector2(
-                    right,
-                    top + radius));
-        }
-
-        //
-        // RIGHT SIDE + BOTTOM-RIGHT
-        //
-        builder.AddLine(
-            new Vector2(
-                right,
-                bottom - radius));
-
-        builder.AddCubicBezier(
-            new Vector2(
-                right,
-                bottom -
-                radius +
-                radius * kappa),
-
-            new Vector2(
-                right -
-                radius +
-                radius * kappa,
-                bottom),
-
-            new Vector2(
-                right - radius,
-                bottom));
-
-        //
-        // BOTTOM + BOTTOM-LEFT
-        //
-        builder.AddLine(
-            new Vector2(
-                left + radius,
-                bottom));
-
-        builder.AddCubicBezier(
-            new Vector2(
-                left +
-                radius -
-                radius * kappa,
-                bottom),
-
-            new Vector2(
-                left,
-                bottom -
-                radius +
-                radius * kappa),
-
-            new Vector2(
-                left,
-                bottom - radius));
-
-        //
-        // LEFT SIDE + TOP-LEFT
-        //
-        if (leftEdge)
-        {
-            builder.AddLine(
-                new Vector2(
-                    left,
-                    cornerMergeY));
-        }
-        else
-        {
-            builder.AddLine(
-                new Vector2(
-                    left,
-                    top + radius));
-
-            builder.AddCubicBezier(
-                new Vector2(
-                    left,
-                    top +
-                    radius -
-                    radius * kappa),
-
-                new Vector2(
-                    left +
-                    radius -
-                    radius * kappa,
-                    top),
-
-                new Vector2(
-                    left + radius,
-                    top));
-        }
-
-        builder.EndFigure(
-            CanvasFigureLoop.Closed);
-
+        builder.EndFigure(CanvasFigureLoop.Closed);
         var nextGeometry =
             CanvasGeometry.CreatePath(
                 builder);
@@ -664,6 +357,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
     {
         target.SystemBackdrop = null;
+        edgeEffect?.Dispose(); edgeFactory?.Dispose(); edgeMask?.Dispose();
+        edgeSurface?.Dispose(); edgeVisual?.Dispose(); edgeShape?.Dispose(); edgeFill?.Dispose();
+        edgeEffect = null; edgeFactory = null; edgeMask = null; edgeSurface = null;
+        edgeVisual = null; edgeShape = null; edgeFill = null;
         output?.Dispose();
         mask?.Dispose();
         maskSurface?.Dispose();
