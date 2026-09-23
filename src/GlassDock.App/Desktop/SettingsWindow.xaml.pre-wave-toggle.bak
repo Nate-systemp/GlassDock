@@ -207,31 +207,6 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="150"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Hover wave effect" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="Smoothly deforms the dock glass toward the pointer. Turning it off keeps magnification and all dock interactions working."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <ToggleSwitch
-                                x:Name="HoverWaveToggle"
-                                Grid.Column="1"
-                                Header="Effect"
-                                OnContent="On"
-                                OffContent="Off"
-                                VerticalAlignment="Center"
-                                AutomationProperties.Name="Dock hover wave effect"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
                             <TextBlock Text="Icon spacing" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             <NumberBox x:Name="IconSpacingBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="20"
                                 SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact"

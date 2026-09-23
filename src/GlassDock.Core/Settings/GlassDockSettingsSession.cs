@@ -72,7 +72,8 @@ public sealed class GlassDockSettingsSession
         double dockOpacity,
         double borderThickness,
         double borderOpacity,
-        DockDisplayMode? dockDisplayMode = null) =>
+        DockDisplayMode? dockDisplayMode = null,
+        bool? hoverWaveEnabled = null) =>
         GlassDockSettings.Normalize(Current with
         {
             BottomMargin = bottomMargin,
@@ -86,7 +87,8 @@ public sealed class GlassDockSettingsSession
             DockOpacity = dockOpacity,
             BorderThickness = borderThickness,
             BorderOpacity = borderOpacity,
-            DockDisplayMode = dockDisplayMode ?? Current.DockDisplayMode
+            DockDisplayMode = dockDisplayMode ?? Current.DockDisplayMode,
+            HoverWaveEnabled = hoverWaveEnabled ?? Current.HoverWaveEnabled
         });
 
     public GlassDockSettings CreateAppearanceUpdate(
@@ -124,7 +126,8 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultDockOpacity,
             GlassDockSettings.DefaultBorderThickness,
             GlassDockSettings.DefaultBorderOpacity,
-            GlassDockSettings.DefaultDockDisplayMode);
+            GlassDockSettings.DefaultDockDisplayMode,
+            GlassDockSettings.DefaultHoverWaveEnabled);
 
     public GlassDockSettings CreateDisplayModeUpdate(DockDisplayMode displayMode) =>
         GlassDockSettings.Normalize(Current with

@@ -49,7 +49,6 @@ public sealed partial class SettingsWindow : Window
         DockOpacityBox.Value = settings.DockOpacity * 100;
         BorderThicknessBox.Value = settings.BorderThickness;
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
-        HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
         populating = false;
     }
 
@@ -116,8 +115,7 @@ public sealed partial class SettingsWindow : Window
                 DockOpacityBox.Value / 100,
                 BorderThicknessBox.Value,
                 BorderOpacityBox.Value / 100,
-                SelectedDisplayMode,
-                HoverWaveToggle.IsOn);
+                SelectedDisplayMode);
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closed || shutdown.IsRequested)

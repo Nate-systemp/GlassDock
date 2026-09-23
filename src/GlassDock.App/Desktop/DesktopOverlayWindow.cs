@@ -61,60 +61,24 @@ public sealed class DesktopOverlayWindow : Window
         IsHitTestVisible = false
     };
 
-    // These paths are only the luminous outline. The glass BODY itself is
-    // deformed by DesktopGlassBackdrop.SetDockWave().
+    // Geometry-only XAML paths. They remain available to build the native
+    // hit-test polygon, but they never render. The visible dock edge is owned
+    // exclusively by DesktopGlassBackdrop's compositor mask/inner-edge pass.
+    // Keeping the old XAML rim visible on top of the compositor was the source
+    // of the visibly stair-stepped/pixelated hover wave.
     private readonly XamlPath dockWaveGlow = new()
     {
         IsHitTestVisible = false,
-        StrokeThickness = 3.2,
-        Stroke = new SolidColorBrush(
-            global::Windows.UI.Color.FromArgb(
-                42,
-                80,
-                175,
-                255)),
+        StrokeThickness = 0,
+        Stroke = new SolidColorBrush(Colors.Transparent),
         Opacity = 0
     };
 
     private readonly XamlPath dockWaveRim = new()
     {
         IsHitTestVisible = false,
-        StrokeThickness = 1.05,
-        Stroke = new LinearGradientBrush
-        {
-            StartPoint = new global::Windows.Foundation.Point(0, 0),
-            EndPoint = new global::Windows.Foundation.Point(1, 1),
-            GradientStops =
-            {
-                new GradientStop
-                {
-                    Offset = 0,
-                    Color = global::Windows.UI.Color.FromArgb(
-                        150,
-                        255,
-                        255,
-                        255)
-                },
-                new GradientStop
-                {
-                    Offset = 0.52,
-                    Color = global::Windows.UI.Color.FromArgb(
-                        70,
-                        185,
-                        225,
-                        255)
-                },
-                new GradientStop
-                {
-                    Offset = 1,
-                    Color = global::Windows.UI.Color.FromArgb(
-                        105,
-                        235,
-                        248,
-                        255)
-                }
-            }
-        },
+        StrokeThickness = 0,
+        Stroke = new SolidColorBrush(Colors.Transparent),
         Opacity = 0
     };
     private readonly DockStateMachine state = new();
@@ -202,6 +166,7 @@ public sealed class DesktopOverlayWindow : Window
 
     public double BottomMargin { get; private set; }
     private DockAppearanceSettings Appearance => settingsSession.Appearance;
+    private bool HoverWaveEnabled => settingsSession.Current.HoverWaveEnabled;
     private double ExpandedDockHeight => Math.Max(68, Appearance.ButtonHeight + 24);
     private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
@@ -1772,7 +1737,8 @@ keyboard.RecoveryRequested +=
     private void ShowDockWave(
         double rootX)
     {
-        if (!double.IsFinite(rootX) ||
+        if (!HoverWaveEnabled ||
+            !double.IsFinite(rootX) ||
             state.State != DockState.Expanded)
         {
             return;
@@ -1792,6 +1758,12 @@ keyboard.RecoveryRequested +=
 
     private void HideDockWave()
     {
+        if (!HoverWaveEnabled)
+        {
+            ApplyHoverWaveSetting(false);
+            return;
+        }
+
         dockWaveTargetStrength = 0;
         StartDockWaveTimer();
     }
@@ -1800,6 +1772,12 @@ keyboard.RecoveryRequested +=
         object? sender,
         object args)
     {
+        if (!HoverWaveEnabled)
+        {
+            ApplyHoverWaveSetting(false);
+            return;
+        }
+
         if (previews.ContextMenuOpen || SystemPopupOpen)
         {
             StopDockWaveTimer(clear: false);
@@ -2031,7 +2009,7 @@ keyboard.RecoveryRequested +=
 
     private void StartDockWaveTimer()
     {
-        if (dockWaveTimerRunning)
+        if (!HoverWaveEnabled || dockWaveTimerRunning)
             return;
 
         dockWaveTimerRunning = true;
@@ -2056,6 +2034,30 @@ keyboard.RecoveryRequested +=
         dockWaveGlow.Opacity = 0;
         dockWaveRim.Opacity = 0;
         desktopBackdrop.ClearDockWave();
+    }
+
+    private void ApplyHoverWaveSetting(bool enabled)
+    {
+        if (enabled)
+        {
+            // Do not synthesize a wave when enabling. The next real pointer move
+            // supplies the anchor. Keep the current plain outline/input region valid.
+            dockWaveCurrentStrength = 0;
+            dockWaveTargetStrength = 0;
+            desktopBackdrop.ClearDockWave();
+            UpdateDockWaveOutline();
+            return;
+        }
+
+        StopDockWaveTimer(clear: false);
+        dockWaveCurrentStrength = 0;
+        dockWaveTargetStrength = 0;
+        desktopBackdrop.ClearDockWave();
+
+        // The invisible XAML geometry still feeds the native hit-test polygon,
+        // so disabling the visual deformation never disables pointer handling,
+        // magnification, auto-hide, drag/reorder, or app activation.
+        UpdateDockWaveOutline();
     }
 
     private Task ToggleDockAsync()
@@ -2230,13 +2232,20 @@ keyboard.RecoveryRequested +=
 
         if (state.State is DockState.Expanded or DockState.Expanding)
         {
-            desktopBackdrop.SetDockWave(
-                dockWaveCurrentX > 0
-                    ? dockWaveCurrentX
-                    : root.ActualWidth / 2,
-                DockWaveHalfWidth,
-                DockWaveRise,
-                dockWaveCurrentStrength);
+            if (HoverWaveEnabled)
+            {
+                desktopBackdrop.SetDockWave(
+                    dockWaveCurrentX > 0
+                        ? dockWaveCurrentX
+                        : root.ActualWidth / 2,
+                    DockWaveHalfWidth,
+                    DockWaveRise,
+                    dockWaveCurrentStrength);
+            }
+            else
+            {
+                desktopBackdrop.ClearDockWave();
+            }
 
             UpdateDockWaveOutline();
         }
@@ -2248,6 +2257,7 @@ keyboard.RecoveryRequested +=
     {
         ApplyBottomMargin(eventArgs.Settings.BottomMargin);
         ApplyDisplayMode(eventArgs.Settings.DockDisplayMode);
+        ApplyHoverWaveSetting(eventArgs.Settings.HoverWaveEnabled);
         ApplyAppearance(new DockAppearanceSettings(
             eventArgs.Settings.GlassMaterialMode,
             eventArgs.Settings.IconSize,

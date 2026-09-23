@@ -256,8 +256,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 (float)(windowWidth * scale),
                 (float)(windowHeight * scale));
 
-        // Supersample coverage only, not the desktop image. Linear downsampling
-        // retains subpixel coverage at rounded corners and animated wave crests.
+        // Supersample the vector coverage mask (not the desktop pixels). The
+        // compositor then linearly downsamples the mask, preserving subpixel
+        // coverage on rounded corners and the animated wave crest. The legacy
+        // XAML rim is now geometry-only, so this is the sole visible edge path.
         var sampling = UseInnerEdge ? 2f : 1f;
         shape!.Scale = new Vector2(sampling);
         visual.Size = size * sampling;
