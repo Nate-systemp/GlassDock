@@ -125,6 +125,21 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionVisualSurface? edgeSurface;
     private W.CompositionSurfaceBrush? edgeMask;
     private W.CompositionColorBrush? edgeFill;
+
+    // Partial specular rim highlights. These are deliberately separate from the
+    // continuous refractive inner edge: the full rim stays subtle while only a
+    // few selected edge sections catch brighter "glass glints".
+    private W.CompositionPathGeometry? specularLeftTopGeometry;
+    private W.CompositionPathGeometry? specularRightTopGeometry;
+    private W.CompositionPathGeometry? specularLeftBottomGeometry;
+    private W.CompositionSpriteShape? specularLeftTopShape;
+    private W.CompositionSpriteShape? specularRightTopShape;
+    private W.CompositionSpriteShape? specularLeftBottomShape;
+    private W.CompositionColorBrush? specularFill;
+    private CanvasGeometry? specularLeftTopCanvas;
+    private CanvasGeometry? specularRightTopCanvas;
+    private CanvasGeometry? specularLeftBottomCanvas;
+
     private W.Compositor? compositor;
     private W.CompositionEffectFactory? factory;
     private W.CompositionEffectBrush? effect;
@@ -216,9 +231,29 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 edgeShape = compositor.CreateSpriteShape(geometry);
                 edgeFill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
                 edgeShape.StrokeBrush = edgeFill;
+
+                // Three short highlight paths create the discontinuous white rim
+                // catches seen on real curved glass. They share the same captured
+                // edge surface so there is no extra HWND, timer, or render loop.
+                specularLeftTopGeometry = compositor.CreatePathGeometry();
+                specularRightTopGeometry = compositor.CreatePathGeometry();
+                specularLeftBottomGeometry = compositor.CreatePathGeometry();
+                specularFill = compositor.CreateColorBrush(
+                    global::Windows.UI.Color.FromArgb(90, 255, 255, 255));
+
+                specularLeftTopShape = compositor.CreateSpriteShape(specularLeftTopGeometry);
+                specularRightTopShape = compositor.CreateSpriteShape(specularRightTopGeometry);
+                specularLeftBottomShape = compositor.CreateSpriteShape(specularLeftBottomGeometry);
+                specularLeftTopShape.StrokeBrush = specularFill;
+                specularRightTopShape.StrokeBrush = specularFill;
+                specularLeftBottomShape.StrokeBrush = specularFill;
+
                 edgeVisual = compositor.CreateShapeVisual();
                 edgeVisual.BorderMode = W.CompositionBorderMode.Soft;
                 edgeVisual.Shapes.Add(edgeShape);
+                edgeVisual.Shapes.Add(specularLeftTopShape);
+                edgeVisual.Shapes.Add(specularRightTopShape);
+                edgeVisual.Shapes.Add(specularLeftBottomShape);
                 edgeCaptureRoot = compositor.CreateContainerVisual();
                 edgeCaptureRoot.Children.InsertAtTop(edgeVisual);
                 edgeSurface = compositor.CreateVisualSurface();
@@ -278,7 +313,24 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         if (edgeShape is not null)
         {
             edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * lastScale);
-            edgeFill!.Color = global::Windows.UI.Color.FromArgb((byte)(material.BorderOpacity * 100), 255, 255, 255);
+
+            // Keep the continuous edge quiet. The eye should read the brighter
+            // discontinuous specular catches rather than a white outline.
+            edgeFill!.Color = global::Windows.UI.Color.FromArgb(
+                (byte)Math.Clamp(material.BorderOpacity * 72, 0, 92),
+                255, 255, 255);
+
+            if (specularFill is not null)
+            {
+                specularFill.Color = global::Windows.UI.Color.FromArgb(
+                    (byte)Math.Clamp(38 + material.BorderOpacity * 170, 38, 142),
+                    255, 255, 255);
+            }
+
+            var glintThickness = (float)(material.BorderThickness * 4.2 * lastScale);
+            if (specularLeftTopShape is not null) specularLeftTopShape.StrokeThickness = glintThickness;
+            if (specularRightTopShape is not null) specularRightTopShape.StrokeThickness = glintThickness;
+            if (specularLeftBottomShape is not null) specularLeftBottomShape.StrokeThickness = glintThickness;
         }
 
         if (effect is not null)
@@ -362,6 +414,25 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         {
             edgeShape!.Scale = new Vector2(sampling);
             edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * scale);
+
+            var glintScale = new Vector2(sampling);
+            var glintThickness = (float)(material.BorderThickness * 4.2 * scale);
+            if (specularLeftTopShape is not null)
+            {
+                specularLeftTopShape.Scale = glintScale;
+                specularLeftTopShape.StrokeThickness = glintThickness;
+            }
+            if (specularRightTopShape is not null)
+            {
+                specularRightTopShape.Scale = glintScale;
+                specularRightTopShape.StrokeThickness = glintThickness;
+            }
+            if (specularLeftBottomShape is not null)
+            {
+                specularLeftBottomShape.Scale = glintScale;
+                specularLeftBottomShape.StrokeThickness = glintThickness;
+            }
+
             edgeVisual.Size = size * sampling;
             edgeCaptureRoot!.Size = size * sampling;
             edgeSurface!.SourceSize = size * sampling;
@@ -404,6 +475,101 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         UpdateMaskPath();
     }
 
+    private CanvasGeometry CreateOpenPath(params (Vector2 Point, Vector2? Control1, Vector2? Control2)[] nodes)
+    {
+        using var builder = new CanvasPathBuilder(canvasDevice!);
+
+        if (nodes.Length == 0)
+            return CanvasGeometry.CreatePath(builder);
+
+        builder.BeginFigure(nodes[0].Point);
+        for (var i = 1; i < nodes.Length; i++)
+        {
+            var node = nodes[i];
+            if (node.Control1 is { } c1 && node.Control2 is { } c2)
+                builder.AddCubicBezier(c1, c2, node.Point);
+            else
+                builder.AddLine(node.Point);
+        }
+        builder.EndFigure(CanvasFigureLoop.Open);
+        return CanvasGeometry.CreatePath(builder);
+    }
+
+    private void UpdateSpecularPaths()
+    {
+        if (canvasDevice is null ||
+            specularLeftTopGeometry is null ||
+            specularRightTopGeometry is null ||
+            specularLeftBottomGeometry is null ||
+            !hasBounds)
+        {
+            return;
+        }
+
+        var left = (lastWindowWidth - lastWidth) / 2;
+        var top = lastWindowHeight - lastBottom - lastHeight;
+        var right = left + lastWidth;
+        var bottom = top + lastHeight;
+        var radius = Math.Max(2,
+            Math.Min(material.CornerRadius, Math.Min(lastWidth / 2, lastHeight / 2)));
+
+        // Keep glints short enough that the edge never reads as one continuous
+        // white border. Their positions also avoid the center hover-wave crest.
+        var topLeftStart = left + radius * .78;
+        var topLeftEnd = Math.Min(
+            right - radius - 18,
+            left + Math.Max(radius + 28, lastWidth * .27));
+
+        var topRightStart = Math.Max(
+            left + radius + 18,
+            right - Math.Max(radius + 56, lastWidth * .23));
+
+        var bottomLeftEnd = Math.Min(
+            right - radius - 20,
+            left + Math.Max(radius + 22, lastWidth * .16));
+
+        Vector2 Px(double x, double y) =>
+            new((float)(x * lastScale), (float)(y * lastScale));
+
+        // Top-left: a clean short line.
+        var leftTop = CreateOpenPath(
+            (Px(topLeftStart, top), null, null),
+            (Px(topLeftEnd, top), null, null));
+
+        // Top-right: line into the rounded end-cap so it looks like light
+        // sliding over curved glass rather than a decorative underline.
+        const double k = .5522847498307936;
+        var r = radius;
+        var rightTop = CreateOpenPath(
+            (Px(topRightStart, top), null, null),
+            (Px(right - r, top), null, null),
+            (Px(right, top + r),
+                Px(right - r + k * r, top),
+                Px(right, top + r - k * r)));
+
+        // Bottom-left: deliberately shorter and dimmer-looking by placement;
+        // it balances the composition without enclosing the entire dock.
+        var leftBottom = CreateOpenPath(
+            (Px(left + r, bottom), null, null),
+            (Px(bottomLeftEnd, bottom), null, null));
+
+        specularLeftTopGeometry.Path = new W.CompositionPath(leftTop);
+        specularRightTopGeometry.Path = new W.CompositionPath(rightTop);
+        specularLeftBottomGeometry.Path = new W.CompositionPath(leftBottom);
+
+        var previousLeftTop = specularLeftTopCanvas;
+        var previousRightTop = specularRightTopCanvas;
+        var previousLeftBottom = specularLeftBottomCanvas;
+
+        specularLeftTopCanvas = leftTop;
+        specularRightTopCanvas = rightTop;
+        specularLeftBottomCanvas = leftBottom;
+
+        previousLeftTop?.Dispose();
+        previousRightTop?.Dispose();
+        previousLeftBottom?.Dispose();
+    }
+
     private void UpdateMaskPath()
     {
         if (geometry is null ||
@@ -440,6 +606,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 builder);
 
         geometry.Path = new W.CompositionPath(nextGeometry);
+        UpdateSpecularPaths();
         renderedMask = state;
 
         var previousGeometry =
@@ -459,10 +626,33 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         target.SystemBackdrop = null;
         edgeEffect?.Dispose(); edgeFactory?.Dispose(); edgeMask?.Dispose();
         edgeSurface?.Dispose(); edgeVisual?.Dispose(); edgeShape?.Dispose(); edgeFill?.Dispose();
+
+        specularLeftTopShape?.Dispose();
+        specularRightTopShape?.Dispose();
+        specularLeftBottomShape?.Dispose();
+        specularLeftTopGeometry?.Dispose();
+        specularRightTopGeometry?.Dispose();
+        specularLeftBottomGeometry?.Dispose();
+        specularFill?.Dispose();
+        specularLeftTopCanvas?.Dispose();
+        specularRightTopCanvas?.Dispose();
+        specularLeftBottomCanvas?.Dispose();
+
         edgeCaptureRoot?.Dispose();
         edgeCaptureRoot = null;
         edgeEffect = null; edgeFactory = null; edgeMask = null; edgeSurface = null;
         edgeVisual = null; edgeShape = null; edgeFill = null;
+
+        specularLeftTopShape = null;
+        specularRightTopShape = null;
+        specularLeftBottomShape = null;
+        specularLeftTopGeometry = null;
+        specularRightTopGeometry = null;
+        specularLeftBottomGeometry = null;
+        specularFill = null;
+        specularLeftTopCanvas = null;
+        specularRightTopCanvas = null;
+        specularLeftBottomCanvas = null;
         output?.Dispose();
         mask?.Dispose();
         maskSurface?.Dispose();

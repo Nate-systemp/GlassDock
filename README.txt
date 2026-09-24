@@ -1,37 +1,42 @@
-GlassDock dock expand/collapse animation restore
-================================================
+GlassDock collapse content/shell synchronization patch
+=======================================================
 
-Finding:
-The dock expansion code was NOT removed. The current DockAnimationController
-still animates Width/Height/Opacity, but its motion is inconsistent with the
-new approved utility-popup motion:
-- shell keyframes use CubicEase
-- vertical placement uses smoothstep (ease-in-out)
+Problem fixed:
+When collapsing the expanded dock, the glass body visibly started shrinking
+before the application icons disappeared. The icons looked delayed / left
+behind inside an already-collapsing shell.
 
-This patch makes the dock transition visibly directional and smooth while
-keeping the existing architecture and durations.
+Cause:
+The previous collapse used EaseIn for icon opacity and held full opacity for
+the first 60 ms:
+    60 ms -> still fully visible
+    220 ms -> finally reaches opacity 0
+At the same time the glass width/height had already begun collapsing.
 
-Changes:
-- OPEN / RAISE:
-  - SineEase EaseOut
-  - smooth immediate movement, gentle settle
-- CLOSE / LOWER:
-  - SineEase EaseIn
-  - smooth departure, natural fold back
-- Vertical bottom movement uses the same directional sine behavior instead of
-  smoothstep ease-in-out.
-- Existing Width/Height/Opacity durations remain unchanged.
-- Magnification behavior is unchanged.
-- Utility Tray / Quick Settings / Calendar animation is untouched.
+New choreography:
+- Icons start fading IMMEDIATELY at t=0.
+- Icon fade uses Sine EaseOut so the visual response is immediate but smooth.
+- Icons reach opacity 0 at ~145 ms.
+- Glass width/height hold for only 32 ms, then begin their existing smooth
+  EaseIn collapse.
+- Surface fade and home-indicator timing remain unchanged.
+
+Perceived sequence:
+    click collapse
+      -> icons/content immediately begin receding
+      -> glass shell follows a fraction later
+      -> shell finishes collapsing into the indicator
+
+This is intentional overlap, not a hard "icons vanish first" cut.
 
 Performance:
+- same existing Storyboard
 - no new timer
 - no new render loop
-- no new animation controller
-- no new polling
-- no extra caches
-- no new per-frame allocations
-- existing 16 ms placement timer is reused
+- no polling
+- no additional animation controller
+- no background work
+- no new recurring allocation path
 
 Replace:
   src\GlassDock.App\Desktop\DockAnimationController.cs
@@ -40,11 +45,11 @@ Then:
   dotnet build
   dotnet test
 
-Runtime check:
-1. Collapse dock to the home-indicator/pill.
-2. Hover/click to expand it repeatedly.
-3. Expansion should be visibly smooth instead of appearing instant/flat.
-4. Collapse should smoothly return to the pill.
-5. Verify taskbar suppression, bare-Win behavior, Win+Space and normal Win
-   shortcuts, dock topmost, max-width pinned layout, utility popups and hover
-   wave remain working.
+Runtime validation:
+- Expand/collapse dock at least 20 times.
+- Icons should never appear to lag behind the shrinking glass.
+- Opening animation must remain unchanged.
+- Utility Tray / Quick Settings / Calendar animation must remain unchanged.
+- Verify taskbar suppression, bare Win / Win+Space / normal Win shortcuts,
+  dock topmost, max-width pinned layout, drag/drop, and hover wave.
+- Check repeated collapse/expand does not increase RAM continuously.

@@ -236,11 +236,24 @@ internal sealed class DockAnimationController
         {
             ResetMagnification();
 
+            // Collapse choreography:
+            // content recedes immediately, then the glass shell follows.
+            // This prevents the dock body from shrinking while icons still look
+            // fully present inside it.
+            Add(
+                icons,
+                "Opacity",
+                opacity,
+                EasingMode.EaseOut,
+                (0, opacity),
+                (145, 0));
+
             Add(
                 surface,
                 "Width",
                 width,
                 EasingMode.EaseIn,
+                (32, width),
                 (300, 120));
 
             Add(
@@ -248,15 +261,8 @@ internal sealed class DockAnimationController
                 "Height",
                 height,
                 EasingMode.EaseIn,
+                (32, height),
                 (280, 5));
-
-            Add(
-                icons,
-                "Opacity",
-                opacity,
-                EasingMode.EaseIn,
-                (60, opacity),
-                (220, 0));
 
             Add(
                 surface,
