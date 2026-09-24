@@ -50,7 +50,7 @@ internal sealed class SystemQuickSettingsWindow : Window
     private readonly UtilityPopupPresentation presentation;
     private bool closed;
 
-    public SystemQuickSettingsWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance)
+    public SystemQuickSettingsWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance, Func<bool>? utilityOwnsPointer = null)
     {
         this.controls = controls;
         Title = "GlassDock Quick Settings";
@@ -85,7 +85,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         StyleSlider(volumeSlider, "System volume");
         volumeSlider.ValueChanged += (_, e) =>
         {
-            if (syncing || closed) return;
+            if (syncing || closed || presentation?.IsVisible != true) return;
             if (controls.SetMasterVolume(e.NewValue / 100)) volumeValue.Text = $"{Math.Round(e.NewValue)}%";
             else Refresh();
         };
@@ -133,7 +133,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         AddRow(details, 2, new ScrollViewer { Content = detailItems, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         root.Children.Add(details);
         Content = root;
-        presentation = new UtilityPopupPresentation(this, root, backdrop);
+        presentation = new UtilityPopupPresentation(this, root, backdrop, utilityOwnsPointer);
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
@@ -147,18 +147,24 @@ internal sealed class SystemQuickSettingsWindow : Window
         refreshTimer = DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromSeconds(1);
         refreshTimer.Tick += (_, _) => { Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); };
-        Activated += (_, _) => { if (!closed) refreshTimer.Start(); };
+        presentation.Hidden += (_, _) => { refreshTimer.Stop(); detailRevision++; detailLifetime?.Cancel(); };
         root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Dismiss(); } };
-        Closed += (_, _) => { closed = true; lifetime.Cancel(); detailLifetime?.Cancel(); refreshTimer.Stop(); host.Dispose(); };
+        Closed += (_, _) => { closed = true; lifetime.Cancel(); detailLifetime?.Cancel(); refreshTimer.Stop(); detailLifetime?.Dispose(); lifetime.Dispose(); host.Dispose(); };
     }
 
-    private void UpdateBackdrop() => backdrop.SetBounds(root.ActualWidth, root.ActualHeight,
-        Math.Max(0, root.ActualWidth - Gutter * 2), Math.Max(0, root.ActualHeight - Gutter * 2),
-        Gutter, root.XamlRoot?.RasterizationScale ?? 1);
+    private void UpdateBackdrop() => presentation.UpdateBackdropBounds();
 
     public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
 
-    public void Present() => presentation.Present();
+    public event EventHandler? Dismissed
+    {
+        add => presentation.Dismissed += value;
+        remove => presentation.Dismissed -= value;
+    }
+    public event EventHandler? Hidden { add => presentation.Hidden += value; remove => presentation.Hidden -= value; }
+    public void HideImmediately() => presentation.HideImmediately();
+    public void RetargetClosed() => presentation.RetargetClosed();
+    public void Present() { presentation.Present(); refreshTimer.Start(); Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
@@ -174,12 +180,13 @@ internal sealed class SystemQuickSettingsWindow : Window
             owner.Position.X + anchorX * scale,
             owner.Position.Y + anchorY * scale,
             scale);
+        host.InputHeightPixels = presentation.InputHeightPixels;
     }
 
 
     public void Refresh()
     {
-        if (syncing || closed) return;
+        if (syncing || closed || presentation?.IsVisible != true) return;
         syncing = true;
         try
         {
@@ -193,14 +200,14 @@ internal sealed class SystemQuickSettingsWindow : Window
 
     private async Task RefreshHardwareAsync()
     {
-        if (closed || hardwareBusy) return;
+        if (closed || presentation?.IsVisible != true || hardwareBusy) return;
         hardwareBusy = true;
         try
         {
             var wifi = await radios.ReadAsync(RadioKind.WiFi);
             var bluetooth = await radios.ReadAsync(RadioKind.Bluetooth);
             var level = brightnessBusy ? null : await DisplayBrightnessControl.ReadAsync();
-            if (closed) return;
+            if (closed || presentation?.IsVisible != true) return;
             networkDetail.Text = wifi.Text;
             bluetoothDetail.Text = bluetooth.Text;
             networkTile.Background = wifi.IsOn ? Brush(135, 20, 125, 215) : Brush(22);
@@ -228,9 +235,9 @@ internal sealed class SystemQuickSettingsWindow : Window
         networkTile.IsEnabled = bluetoothTile.IsEnabled = false;
         var message = await radios.ToggleAsync(kind, lifetime.Token);
         radioBusy = false;
-        if (closed) return;
+        if (closed || presentation?.IsVisible != true) return;
         await RefreshHardwareAsync();
-        if (closed) return;
+        if (closed || presentation?.IsVisible != true) return;
         ToolTipService.SetToolTip(kind == RadioKind.WiFi ? networkTile : bluetoothTile, message);
         if (!message.StartsWith("Change requested", StringComparison.Ordinal))
             ShowInformation(kind == RadioKind.WiFi ? "Wi-Fi" : "Bluetooth", message,
@@ -247,7 +254,7 @@ internal sealed class SystemQuickSettingsWindow : Window
             {
                 pendingBrightness = null;
                 var result = await DisplayBrightnessControl.SetAsync(value);
-                if (closed) return;
+                if (closed || presentation?.IsVisible != true) return;
                 if (result is null)
                 {
                     brightness.IsEnabled = false;

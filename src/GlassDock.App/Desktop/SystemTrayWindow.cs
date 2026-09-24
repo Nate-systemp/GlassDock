@@ -43,7 +43,7 @@ internal sealed class SystemTrayWindow : Window
     private bool closed;
     private string[] itemKeys = [];
 
-    public SystemTrayWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance)
+    public SystemTrayWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance, Func<bool>? utilityOwnsPointer = null)
     {
         this.controls = controls;
         Title = "GlassDock Hidden Tray";
@@ -108,7 +108,7 @@ internal sealed class SystemTrayWindow : Window
 
         root.Children.Add(content);
         Content = root;
-        presentation = new UtilityPopupPresentation(this, root, backdrop);
+        presentation = new UtilityPopupPresentation(this, root, backdrop, utilityOwnsPointer);
 
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
         try { host.Configure(); }
@@ -129,7 +129,15 @@ internal sealed class SystemTrayWindow : Window
 
     public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
 
-    public void Present() => presentation.Present();
+    public event EventHandler? Dismissed
+    {
+        add => presentation.Dismissed += value;
+        remove => presentation.Dismissed -= value;
+    }
+    public event EventHandler? Hidden { add => presentation.Hidden += value; remove => presentation.Hidden -= value; }
+    public void HideImmediately() => presentation.HideImmediately();
+    public void RetargetClosed() => presentation.RetargetClosed();
+    public void Present() { presentation.Present(); Refresh(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
@@ -145,12 +153,13 @@ internal sealed class SystemTrayWindow : Window
             owner.Position.X + anchorX * scale,
             owner.Position.Y + anchorY * scale,
             scale);
+        host.InputHeightPixels = presentation.InputHeightPixels;
     }
 
 
     public void Refresh()
     {
-        if (closed) return;
+        if (closed || !presentation.IsVisible) return;
         var items = WindowsTrayAccessibility.ReadItems();
         var nextKeys = items.Select(item => item.Name + "\n" + item.DefaultAction).ToArray();
         if (itemKeys.SequenceEqual(nextKeys) && trayGrid.Children.Count > 0)
@@ -265,13 +274,7 @@ internal sealed class SystemTrayWindow : Window
         return button;
     }
 
-    private void UpdateBackdrop() => backdrop.SetBounds(
-        root.ActualWidth,
-        root.ActualHeight,
-        Math.Max(0, root.ActualWidth - Gutter * 2),
-        Math.Max(0, root.ActualHeight - Gutter * 2),
-        Gutter,
-        root.XamlRoot?.RasterizationScale ?? 1);
+    private void UpdateBackdrop() => presentation.UpdateBackdropBounds();
 
     private static Button IconButton(string glyph, string tooltip, Action action)
     {

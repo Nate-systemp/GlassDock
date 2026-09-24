@@ -709,9 +709,9 @@ keyboard.RecoveryRequested +=
         ToolTipService.SetToolTip(utilityCluster.Children[3], snapshot.Muted ? "Muted" : $"Volume {snapshot.VolumePercent}%");
         ToolTipService.SetToolTip(utilityCluster.Children[4], snapshot.HasBattery ? $"Battery {snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power");
 
-        quickSettings?.Refresh();
-        trayWindow?.Refresh();
-        calendarWindow?.Refresh();
+
+
+
     }
 
     private void PrepareSystemPopup()
@@ -788,28 +788,16 @@ keyboard.RecoveryRequested +=
         }
     }
 
-    private async void ToggleQuickSettings()
+    private void OpenQuickSettings(FrameworkElement? source)
     {
-        if (utilityTransitionPending)
-            return;
-
-        if (quickSettingsOpen)
-        {
-            CloseQuickSettings(animate: true);
-            return;
-        }
-
-        var source = utilitySource;
-        await CloseOtherSystemPopupsAsync(keepQuickSettings: true);
-        if (closing)
-            return;
-
+        if (closing) return;
         PrepareSystemPopup();
         quickSettingsSource = source;
         SetActiveUtilitySource(quickSettingsSource);
+        var created = cachedSystemQuickSettingsWindow is null;
         try
         {
-            quickSettings = new SystemQuickSettingsWindow(systemControls, Appearance);
+            quickSettings = cachedSystemQuickSettingsWindow ??= new SystemQuickSettingsWindow(systemControls, Appearance, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -820,21 +808,23 @@ keyboard.RecoveryRequested +=
             return;
         }
 
-        quickSettings.Closed += (_, _) =>
+        if (created) quickSettings.Hidden += (_, _) =>
         {
             quickSettingsOpen = false;
             quickSettings = null;
             quickSettingsSource = null;
-            SystemPopupClosed();
+            UtilityClosed();
         };
 
+        if (created) quickSettings.Dismissed += (_, _) => utilityRequests.ClosingExternally();
         quickSettingsOpen = true;
         var anchor = UtilityAnchor(quickSettingsSource);
         quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        quickSettings.AppWindow.Show();
         quickSettings.Activate();
         quickSettings.Present();
-        quickSettings.Refresh();
+
     }
 
     private void CloseQuickSettings(bool animate = false)
@@ -854,31 +844,19 @@ keyboard.RecoveryRequested +=
 
         quickSettings = null;
         quickSettingsOpen = false;
-        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+        try { window.HideImmediately(); } catch (InvalidOperationException) { }
     }
 
-    private async void ToggleSystemTray()
+    private void OpenSystemTray(FrameworkElement? source)
     {
-        if (utilityTransitionPending)
-            return;
-
-        if (trayWindowOpen)
-        {
-            CloseSystemTray(animate: true);
-            return;
-        }
-
-        var source = utilitySource;
-        await CloseOtherSystemPopupsAsync(keepSystemTray: true);
-        if (closing)
-            return;
-
+        if (closing) return;
         PrepareSystemPopup();
         trayWindowSource = source;
         SetActiveUtilitySource(trayWindowSource);
+        var created = cachedSystemTrayWindow is null;
         try
         {
-            trayWindow = new SystemTrayWindow(systemControls, Appearance);
+            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, Appearance, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -889,21 +867,23 @@ keyboard.RecoveryRequested +=
             return;
         }
 
-        trayWindow.Closed += (_, _) =>
+        if (created) trayWindow.Hidden += (_, _) =>
         {
             trayWindowOpen = false;
             trayWindow = null;
             trayWindowSource = null;
-            SystemPopupClosed();
+            UtilityClosed();
         };
 
+        if (created) trayWindow.Dismissed += (_, _) => utilityRequests.ClosingExternally();
         trayWindowOpen = true;
         var anchor = UtilityAnchor(trayWindowSource);
         trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        trayWindow.AppWindow.Show();
         trayWindow.Activate();
         trayWindow.Present();
-        trayWindow.Refresh();
+
     }
 
     private void CloseSystemTray(bool animate = false)
@@ -923,31 +903,19 @@ keyboard.RecoveryRequested +=
 
         trayWindow = null;
         trayWindowOpen = false;
-        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+        try { window.HideImmediately(); } catch (InvalidOperationException) { }
     }
 
-    private async void ToggleCalendar()
+    private void OpenCalendar(FrameworkElement? source)
     {
-        if (utilityTransitionPending)
-            return;
-
-        if (calendarWindowOpen)
-        {
-            CloseCalendar(animate: true);
-            return;
-        }
-
-        var source = utilitySource;
-        await CloseOtherSystemPopupsAsync(keepCalendar: true);
-        if (closing)
-            return;
-
+        if (closing) return;
         PrepareSystemPopup();
         calendarWindowSource = source;
         SetActiveUtilitySource(calendarWindowSource);
+        var created = cachedCalendarPopoverWindow is null;
         try
         {
-            calendarWindow = new CalendarPopoverWindow(Appearance);
+            calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(Appearance, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -958,21 +926,23 @@ keyboard.RecoveryRequested +=
             return;
         }
 
-        calendarWindow.Closed += (_, _) =>
+        if (created) calendarWindow.Hidden += (_, _) =>
         {
             calendarWindowOpen = false;
             calendarWindow = null;
             calendarWindowSource = null;
-            SystemPopupClosed();
+            UtilityClosed();
         };
 
+        if (created) calendarWindow.Dismissed += (_, _) => utilityRequests.ClosingExternally();
         calendarWindowOpen = true;
         var anchor = UtilityAnchor(calendarWindowSource);
         calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        calendarWindow.AppWindow.Show();
         calendarWindow.Activate();
         calendarWindow.Present();
-        calendarWindow.Refresh();
+
     }
 
     private void CloseCalendar(bool animate = false)
@@ -992,66 +962,70 @@ keyboard.RecoveryRequested +=
 
         calendarWindow = null;
         calendarWindowOpen = false;
-        try { window.CloseImmediately(); } catch (InvalidOperationException) { }
+        try { window.HideImmediately(); } catch (InvalidOperationException) { }
     }
 
-    private async Task CloseOtherSystemPopupsAsync(
-        bool keepQuickSettings = false,
-        bool keepSystemTray = false,
-        bool keepCalendar = false)
+    private SystemQuickSettingsWindow? cachedSystemQuickSettingsWindow;
+    private SystemTrayWindow? cachedSystemTrayWindow;
+    private CalendarPopoverWindow? cachedCalendarPopoverWindow;
+    private readonly GlassDock.Core.Desktop.UtilityPopupRequests utilityRequests = new();
+    private bool UtilityOwnsPointer()
     {
-        var hasOutgoing =
-            (!keepQuickSettings && quickSettings is not null) ||
-            (!keepSystemTray && trayWindow is not null) ||
-            (!keepCalendar && calendarWindow is not null);
+        if (!windowManager.TryGetPointerPosition(out var x, out var y)) return false;
+        foreach (var child in utilityCluster.Children)
+        {
+            if (child is not Button button || !button.IsEnabled || button.Visibility != Visibility.Visible) continue;
+            var bounds = button.TransformToVisual(root).TransformBounds(
+                new global::Windows.Foundation.Rect(0, 0, button.ActualWidth, button.ActualHeight));
+            if (bounds.Contains(new global::Windows.Foundation.Point(x, y))) return true;
+        }
+        return false;
+    }
 
-        if (!hasOutgoing)
+    private void ToggleQuickSettings() => RequestUtility();
+    private void ToggleSystemTray() => RequestUtility();
+    private void ToggleCalendar() => RequestUtility();
+
+    private void RequestUtility()
+    {
+        if (closing || utilitySource is null) return;
+        var key = utilityCluster.Children.IndexOf(utilitySource);
+        if (key < 1) return;
+        utilityRequests.Click(key);
+        utilityTransitionPending = utilityRequests.Pending.HasValue;
+        if (quickSettings is null && trayWindow is null && calendarWindow is null)
+        {
+            OpenRequestedUtility();
             return;
-
-        // Set this before Dismiss(): with Windows animations disabled a popup may
-        // close synchronously, and its Closed handler must not restart hover/collapse.
-        utilityTransitionPending = true;
-        try
-        {
-            var pending = new List<Task>(2);
-
-            if (!keepQuickSettings && quickSettings is { } quick)
-                pending.Add(DismissAndWaitAsync(quick, quick.Dismiss));
-
-            if (!keepSystemTray && trayWindow is { } tray)
-                pending.Add(DismissAndWaitAsync(tray, tray.Dismiss));
-
-            if (!keepCalendar && calendarWindow is { } calendar)
-                pending.Add(DismissAndWaitAsync(calendar, calendar.Dismiss));
-
-            await Task.WhenAll(pending);
         }
-        finally
+        if (utilityRequests.TargetOpen)
         {
-            utilityTransitionPending = false;
+            quickSettings?.Present(); trayWindow?.Present(); calendarWindow?.Present();
+        }
+        else
+        {
+            quickSettings?.RetargetClosed(); trayWindow?.RetargetClosed(); calendarWindow?.RetargetClosed();
         }
     }
 
-    private static async Task DismissAndWaitAsync(Window window, Action dismiss)
+    private void OpenRequestedUtility()
     {
-        var completion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        window.Closed += (_, _) => completion.TrySetResult(true);
-
-        try
-        {
-            dismiss();
-        }
-        catch (InvalidOperationException)
-        {
-            completion.TrySetResult(true);
-        }
-
-        // Never wedge utility switching if Windows destroys a popup without raising
-        // the expected managed close path. Normal animation completes well before this.
-        await Task.WhenAny(completion.Task, Task.Delay(500));
+        if (closing || utilityRequests.Active is not { } key) return;
+        var source = utilityCluster.Children[key] as FrameworkElement;
+        if (key == 1) OpenSystemTray(source);
+        else if (key == 5) OpenCalendar(source);
+        else OpenQuickSettings(source);
+        if (quickSettings is null && trayWindow is null && calendarWindow is null)
+            utilityRequests.Reset();
     }
 
+    private void UtilityClosed()
+    {
+        utilityRequests.Closed();
+        utilityTransitionPending = false;
+        if (!closing) OpenRequestedUtility();
+        SystemPopupClosed();
+    }
     private void BeginReorderCandidate(
         Button button,
         DockApplicationItem item,
@@ -2258,6 +2232,8 @@ keyboard.RecoveryRequested +=
 
         if (SystemPopupOpen)
         {
+            utilityRequests.Reset();
+            utilityTransitionPending = false;
             CloseQuickSettings();
             CloseSystemTray();
             CloseCalendar();
@@ -2462,9 +2438,9 @@ keyboard.RecoveryRequested +=
 
     private void ApplyAppearance(DockAppearanceSettings appearance)
     {
-        quickSettings?.ApplyAppearance(appearance);
-        trayWindow?.ApplyAppearance(appearance);
-        calendarWindow?.ApplyAppearance(appearance);
+        cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance);
+        cachedSystemTrayWindow?.ApplyAppearance(appearance);
+        cachedCalendarPopoverWindow?.ApplyAppearance(appearance);
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
@@ -2721,10 +2697,16 @@ keyboard.RecoveryRequested +=
         heartbeat.Stop();
         displayTimer.Stop();
         utilityTimer.Stop();
+        utilityRequests.Reset();
+        utilityTransitionPending = false;
         CloseQuickSettings();
         CloseSystemTray();
         CloseCalendar();
 
+        cachedSystemQuickSettingsWindow?.CloseImmediately();
+        cachedSystemTrayWindow?.CloseImmediately();
+        cachedCalendarPopoverWindow?.CloseImmediately();
+        cachedSystemQuickSettingsWindow = null; cachedSystemTrayWindow = null; cachedCalendarPopoverWindow = null;
         StopDockWaveTimer(clear: true);
         CompositionTarget.Rendering -= TickDockWave;
 

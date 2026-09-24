@@ -1,368 +1,218 @@
 using System.Diagnostics;
+using System.Numerics;
 using GlassDock.App.Rendering;
+using GlassDock.Core.Desktop;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Composition;
 using Windows.Graphics;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>
-/// Animates the utility popup as one physical window toward/from the exact dock
-/// control that owns it. The HWND bounds, XAML content and desktop-glass mask
-/// change together so the content cannot disappear before the glass rectangle.
-/// </summary>
+/// <summary>One rendering clock transforms the stable layout and native glass together.</summary>
 internal sealed class UtilityPopupPresentation
 {
-    private const double OpenDurationMilliseconds = 320;
-    private const double CloseDurationMilliseconds = 280;
-    private const double FirstFrameHoldMilliseconds = 24;
-
-    // The collapsed window remains large enough for DWM/WinUI to keep presenting
-    // reliable frames, but small enough to read as terminating at the utility icon.
-    private const double CollapsedWidthDips = 34;
-    private const double CollapsedHeightDips = 18;
-
     private readonly Window window;
     private readonly FrameworkElement root;
     private readonly DesktopGlassBackdrop backdrop;
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer timer;
-    private readonly CompositeTransform transform = new();
     private readonly Stopwatch clock = new();
-
     private RectInt32 finalBounds;
-    private bool hasFinalBounds;
-    private double rasterScale = 1;
-    private double anchorScreenX;
-    private double anchorScreenY;
+    private RectInt32 hostBounds;
+    private double rasterScale = 1, sourceX, sourceY, progress, from;
+    private bool positioned, requested, started, hiding, finished, activated;
+    private bool openingQueued;
+    private int revision;
+    public event EventHandler? Dismissed;
+    public event EventHandler? Hidden;
+    public bool IsVisible => requested && !finished;
+    private PopupCompositionTrack? track;
+    private CompositionScopedBatch? batch;
+    private readonly PopupCompositionFrame[] frames = new PopupCompositionFrame[33];
+    public int InputHeightPixels => finalBounds.Height;
 
-    private double progress;
-    private double from;
-    private double durationMilliseconds = OpenDurationMilliseconds;
-    private bool hiding;
-    private bool finished;
-    private bool hasActivated;
-    private bool presentRequested;
-    private bool openingStarted;
-
-    public UtilityPopupPresentation(
-        Window window,
-        FrameworkElement root,
-        DesktopGlassBackdrop backdrop)
+    public UtilityPopupPresentation(Window window, FrameworkElement root, DesktopGlassBackdrop backdrop,
+        Func<bool>? utilityOwnsPointer = null)
     {
         this.window = window;
         this.root = root;
         this.backdrop = backdrop;
-
-        // Keep the popup's content arranged at its final size. During the transition
-        // we scale that stable layout to the current HWND size. This prevents grids,
-        // labels, sliders and calendar cells from reflowing/disappearing before the
-        // outer glass window has finished its motion.
-        root.RenderTransform = transform;
-        root.RenderTransformOrigin = new global::Windows.Foundation.Point(0, 0);
-        root.Opacity = 0;
+        root.HorizontalAlignment = HorizontalAlignment.Left;
+        root.VerticalAlignment = VerticalAlignment.Top;
+        ElementCompositionPreview.GetElementVisual(root).Opacity = 0;
         root.IsHitTestVisible = false;
-        backdrop.SetPresentation(1, 1, 0, 0, 0, 0, 0);
-
-        timer = root.DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(8);
-        timer.Tick += (_, _) => Tick();
-
-        root.Loaded += (_, _) => TryStartOpening();
-
+        backdrop.SetPresentation(0, 0, 0, 0, 0, 0, 0);
+        root.Loaded += (_, _) => TryStart();
         window.Activated += (_, args) =>
         {
-            if (finished)
-                return;
-
+            if (finished) return;
             if (args.WindowActivationState == WindowActivationState.Deactivated)
             {
-                if (hasActivated && openingStarted && !hiding)
-                    Dismiss();
-                return;
+                // Pointer-down activates the dock before Button.Click (pointer-up).
+                // That interaction belongs to the utility toggle, not outside-dismiss.
+                if (activated && started)
+                {
+                    var observedRevision = revision;
+                    var utilityInteraction = utilityOwnsPointer?.Invoke() == true;
+                    if (utilityInteraction) return;
+                    root.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                        () =>
+                        {
+                            if (!finished && UtilityPopupRequests.ShouldDismissOnDeactivation(
+                                utilityInteraction, observedRevision, revision)) Dismiss();
+                        });
+                }
             }
-
-            hasActivated = true;
-            TryStartOpening();
+            else { activated = true; TryStart(); }
         };
-
         window.AppWindow.Closing += (_, e) =>
         {
-            if (finished)
-                return;
-
+            if (finished) return;
             e.Cancel = true;
-            if (!openingStarted)
-            {
-                CloseImmediately();
-                return;
-            }
-
-            if (!hiding)
-                Start(close: true);
+            Dismiss();
         };
-
-        window.Closed += (_, _) =>
-        {
-            finished = true;
-            timer.Stop();
-        };
+        window.Closed += (_, _) => { finished = true; StopTransition(); track?.Dispose(); track = null; window.SystemBackdrop = null; };
     }
 
-    /// <summary>
-    /// Captures the popup's final on-screen rectangle after UtilityPopupStyle has
-    /// positioned it, then parks the not-yet-presented HWND at the source icon.
-    /// Coordinates are physical screen pixels; scale converts the stable XAML layout
-    /// back to DIPs.
-    /// </summary>
-    public void SetTargetWindowGeometry(
-        double sourceScreenX,
-        double sourceScreenY,
-        double scale)
+    public void SetTargetWindowGeometry(double screenX, double screenY, double scale)
     {
-        if (finished)
-            return;
-
+        if (finished) return;
         rasterScale = double.IsFinite(scale) && scale > 0 ? scale : 1;
-        anchorScreenX = double.IsFinite(sourceScreenX)
-            ? sourceScreenX
-            : window.AppWindow.Position.X + window.AppWindow.Size.Width / 2d;
-        anchorScreenY = double.IsFinite(sourceScreenY)
-            ? sourceScreenY
-            : window.AppWindow.Position.Y + window.AppWindow.Size.Height;
-
-        finalBounds = new RectInt32(
-            window.AppWindow.Position.X,
-            window.AppWindow.Position.Y,
-            Math.Max(1, window.AppWindow.Size.Width),
-            Math.Max(1, window.AppWindow.Size.Height));
-        hasFinalBounds = true;
-
-        // Freeze layout at the final dimensions. The actual HWND is what shrinks;
-        // the XAML tree scales as one unit instead of independently reflowing.
+        finalBounds = new(window.AppWindow.Position.X, window.AppWindow.Position.Y,
+            window.AppWindow.Size.Width, window.AppWindow.Size.Height);
+        sourceX = (screenX - finalBounds.X) / rasterScale;
+        sourceY = (screenY - finalBounds.Y) / rasterScale;
+        // Reserve transparent travel space once. HWND dimensions never animate.
+        hostBounds = finalBounds;
+        hostBounds.Height = Math.Max(finalBounds.Height,
+            (int)Math.Ceiling(screenY - finalBounds.Y + UtilityPopupStyle.Gutter * rasterScale));
+        window.AppWindow.MoveAndResize(hostBounds);
         root.Width = finalBounds.Width / rasterScale;
         root.Height = finalBounds.Height / rasterScale;
+        positioned = true;
+        UpdateBackdropBounds();
+        ApplyFrame();
+    }
 
-        if (!openingStarted)
-        {
-            progress = 0;
-            ApplyFrame(0);
-            return;
-        }
-
-        // Repositioning while visible (monitor/DPI changes) keeps the current
-        // transition progress instead of flashing the window at full size.
-        ApplyFrame(progress);
+    public void UpdateBackdropBounds()
+    {
+        if (!positioned) return;
+        backdrop.SetBounds(hostBounds.Width / rasterScale, hostBounds.Height / rasterScale,
+            Math.Max(0, root.Width - UtilityPopupStyle.Gutter * 2),
+            Math.Max(0, root.Height - UtilityPopupStyle.Gutter * 2),
+            (hostBounds.Height - finalBounds.Height) / rasterScale + UtilityPopupStyle.Gutter,
+            rasterScale, 1);
     }
 
     public void Present()
     {
-        if (finished || hiding || openingStarted)
-            return;
-
-        presentRequested = true;
-        TryStartOpening();
+        if (finished) return;
+        requested = true;
+        if (started) { if (hiding) Start(false); else revision++; }
+        else TryStart();
     }
-
-    public void CloseImmediately()
+    private void TryStart()
     {
-        if (finished)
-            return;
-
-        finished = true;
-        presentRequested = false;
-        timer.Stop();
-        window.Close();
+        if (!requested || !positioned || root.XamlRoot is null || started || finished || hiding || openingQueued) return;
+        openingQueued = true;
+        // Wait until synchronous tray/hardware initialization has completed.
+        root.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            openingQueued = false;
+            if (started || finished || hiding || !requested) return;
+            started = true;
+            Start(false);
+        });
     }
-
     public void Dismiss()
     {
-        if (finished || hiding)
-            return;
-
-        if (!openingStarted)
-        {
-            CloseImmediately();
-            return;
-        }
-
-        Start(close: true);
+        if (finished || hiding) return;
+        Dismissed?.Invoke(this, EventArgs.Empty);
+        RetargetClosed();
     }
-
-    private void TryStartOpening()
+    public void RetargetClosed()
     {
-        if (!presentRequested || finished || hiding || openingStarted)
-            return;
-
-        if (!hasFinalBounds || root.XamlRoot is null)
-            return;
-
-        presentRequested = false;
-        openingStarted = true;
-        Start(close: false);
+        if (finished || hiding) return;
+        if (!started) { HideImmediately(); return; }
+        Start(true);
     }
-
+    public void HideImmediately()
+    {
+        if (finished || !requested) return;
+        requested = false;
+        started = hiding = activated = false;
+        revision++;
+        StopTransition();
+        progress = 0;
+        ApplyFrame();
+        window.AppWindow.Hide();
+        Hidden?.Invoke(this, EventArgs.Empty);
+    }
+    public void CloseImmediately()
+    {
+        if (finished) return;
+        finished = true;
+        revision++;
+        StopTransition();
+        window.Close();
+    }
     private void Start(bool close)
     {
-        if (finished || !hasFinalBounds)
-            return;
-
+        // Sampling is only needed on input, never on a managed frame callback.
+        if (clock.IsRunning) progress = PopupMorph.Progress(clock.Elapsed.TotalSeconds, hiding, from);
+        StopTransition();
         hiding = close;
-        root.IsHitTestVisible = false;
+        revision++;
         from = progress;
-        durationMilliseconds = close
-            ? CloseDurationMilliseconds
-            : OpenDurationMilliseconds;
-
+        root.IsHitTestVisible = false;
+        var duration = TimeSpan.FromSeconds(close ? .21 : .25);
+        for (var i = 0; i < frames.Length; i++)
+        {
+            var p = PopupMorph.Progress(duration.TotalSeconds * i / (frames.Length - 1), close, from);
+            frames[i] = new(PopupMorph.Funnel(p, root.Width, root.Height, sourceX, sourceY, UtilityPopupStyle.Gutter),
+                (float)PopupMorph.Frame(p).Opacity);
+        }
+        var visual = ElementCompositionPreview.GetElementVisual(root);
+        track ??= new PopupCompositionTrack(visual);
+        track.Bind();
+        batch = visual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        track.Start(frames, duration);
+        backdrop.AnimatePresentation(frames, duration);
+        batch.Completed += Complete;
         clock.Restart();
-        ApplyFrame(progress);
-        timer.Start();
+        batch.End();
     }
-
-    private void Tick()
+    private void StopTransition()
     {
-        if (finished)
+        clock.Stop();
+        if (batch is not null)
         {
-            timer.Stop();
-            return;
+            batch.Completed -= Complete;
+            batch.Dispose();
+            batch = null;
         }
-
-        var elapsed = clock.Elapsed.TotalMilliseconds;
-
-        // Guarantee at least one collapsed frame after activation. Otherwise DWM can
-        // coalesce the initial MoveAndResize and the first expansion into one frame.
-        if (!hiding && elapsed < FirstFrameHoldMilliseconds)
-        {
-            ApplyFrame(0);
-            return;
-        }
-
-        var effectiveElapsed = hiding
-            ? elapsed
-            : Math.Max(0, elapsed - FirstFrameHoldMilliseconds);
-        var t = Math.Clamp(
-            effectiveElapsed / Math.Max(1, durationMilliseconds),
-            0,
-            1);
-
-        // SmootherStep has zero velocity at both ends. That matters here because the
-        // physical HWND edges are moving; abrupt endpoint velocity is much easier to
-        // notice than it is on an ordinary opacity/scale animation.
-        var eased = SmootherStep(t);
-        var target = hiding ? 0d : 1d;
-        progress = from + (target - from) * eased;
-        ApplyFrame(progress);
-
-        if (t < 1)
-            return;
-
-        timer.Stop();
-        progress = target;
-        ApplyFrame(progress);
-
-        if (hiding)
-        {
-            CloseImmediately();
-            return;
-        }
-
-        root.IsHitTestVisible = true;
+        track?.Stop();
+        backdrop.StopPresentationAnimation();
     }
-
-    private void ApplyFrame(double value)
+    private void Complete(object sender, CompositionBatchCompletedEventArgs args)
     {
-        if (!hasFinalBounds)
-            return;
-
-        var p = Math.Clamp(value, 0, 1);
-        var bounds = InterpolateWindowBounds(p);
-
-        if (window.AppWindow.Position.X != bounds.X ||
-            window.AppWindow.Position.Y != bounds.Y ||
-            window.AppWindow.Size.Width != bounds.Width ||
-            window.AppWindow.Size.Height != bounds.Height)
-        {
-            window.AppWindow.MoveAndResize(bounds);
-        }
-
-        // Stable final-size layout -> scale exactly to the physical HWND currently
-        // on screen. The content, glass-surface chrome and controls therefore remain
-        // locked to the same rectangle for every frame.
-        var scaleX = bounds.Width / (double)Math.Max(1, finalBounds.Width);
-        var scaleY = bounds.Height / (double)Math.Max(1, finalBounds.Height);
-        transform.CenterX = 0;
-        transform.CenterY = 0;
-        transform.ScaleX = scaleX;
-        transform.ScaleY = scaleY;
-        transform.TranslateX = 0;
-        transform.TranslateY = 0;
-
-        // Do not fade content early. It remains fully visible for almost the entire
-        // collapse and only fades when the whole HWND is already icon-sized.
-        var opacity = SmoothRamp(p, 0.06, 0.18);
-        root.Opacity = opacity;
-
-        // SystemBackdrop is window-level, so the physical HWND provides the main
-        // shrink. Rebuild its glass mask for the CURRENT window rectangle so the
-        // visible glass body and refractive inner edge shrink with the same bounds,
-        // instead of leaving a full-size rectangle behind the scaled content.
-        var currentWidthDips = bounds.Width / rasterScale;
-        var currentHeightDips = bounds.Height / rasterScale;
-        backdrop.SetPresentation(1, 1, 0, 0, 0, 0, opacity);
-        backdrop.SetBounds(
-            currentWidthDips,
-            currentHeightDips,
-            Math.Max(0, currentWidthDips - UtilityPopupStyle.Gutter * 2),
-            Math.Max(0, currentHeightDips - UtilityPopupStyle.Gutter * 2),
-            UtilityPopupStyle.Gutter,
-            rasterScale,
-            opacity);
+        if (finished || !ReferenceEquals(sender, batch)) return;
+        progress = hiding ? 0 : 1;
+        StopTransition();
+        ApplyFrame();
+        if (hiding) HideImmediately();
+        else root.IsHitTestVisible = true;
     }
-
-    private RectInt32 InterpolateWindowBounds(double progressValue)
+    private void ApplyFrame()
     {
-        var collapsedWidth = Math.Max(1, (int)Math.Round(CollapsedWidthDips * rasterScale));
-        var collapsedHeight = Math.Max(1, (int)Math.Round(CollapsedHeightDips * rasterScale));
-
-        var collapsedLeft = anchorScreenX - collapsedWidth / 2d;
-        var collapsedTop = anchorScreenY - collapsedHeight / 2d;
-        var collapsedRight = collapsedLeft + collapsedWidth;
-        var collapsedBottom = collapsedTop + collapsedHeight;
-
-        var finalLeft = (double)finalBounds.X;
-        var finalTop = (double)finalBounds.Y;
-        var finalRight = finalBounds.X + (double)finalBounds.Width;
-        var finalBottom = finalBounds.Y + (double)finalBounds.Height;
-
-        // Interpolating all four edges independently makes the complete window
-        // converge on the exact clicked source point. It is not just a scale inside
-        // a stationary rectangle; the outer glass rectangle itself physically moves.
-        var left = Lerp(collapsedLeft, finalLeft, progressValue);
-        var top = Lerp(collapsedTop, finalTop, progressValue);
-        var right = Lerp(collapsedRight, finalRight, progressValue);
-        var bottom = Lerp(collapsedBottom, finalBottom, progressValue);
-
-        var x = (int)Math.Round(left);
-        var y = (int)Math.Round(top);
-        var width = Math.Max(1, (int)Math.Round(right - left));
-        var height = Math.Max(1, (int)Math.Round(bottom - top));
-        return new RectInt32(x, y, width, height);
+        if (!positioned) return;
+        var frame = PopupMorph.Frame(progress);
+        var visual = ElementCompositionPreview.GetElementVisual(root);
+        // Composition coordinates of the XAML visual are DIPs. The backdrop
+        // converts the same values to its physical coverage-mask coordinates.
+        var matrix = PopupMorph.Funnel(progress, root.Width, root.Height,
+            sourceX, sourceY, UtilityPopupStyle.Gutter);
+        visual.TransformMatrix = matrix;
+        visual.Opacity = (float)frame.Opacity;
+        backdrop.SetPresentationTransform(matrix, frame.Opacity);
     }
-
-    private static double SmootherStep(double value)
-    {
-        var t = Math.Clamp(value, 0, 1);
-        return t * t * t * (t * (t * 6 - 15) + 10);
-    }
-
-    private static double SmoothRamp(double value, double fromValue, double toValue)
-    {
-        if (toValue <= fromValue)
-            return value >= toValue ? 1 : 0;
-
-        var t = Math.Clamp((value - fromValue) / (toValue - fromValue), 0, 1);
-        return t * t * (3 - 2 * t);
-    }
-
-    private static double Lerp(double fromValue, double toValue, double amount) =>
-        fromValue + (toValue - fromValue) * amount;
 }

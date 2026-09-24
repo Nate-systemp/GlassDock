@@ -22,6 +22,36 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private double presentationX;
     private double presentationY;
     private double presentationOpacity = 1;
+    private Matrix4x4? presentationTransform;
+    private BackdropCompositionTrack? bodyTrack, rimTrack;
+
+    public void AnimatePresentation(PopupCompositionFrame[] frames, TimeSpan duration)
+    {
+        if (visual is null) return;
+        bodyTrack ??= new BackdropCompositionTrack(visual);
+        bodyTrack.Bind();
+        var units = (float)(lastScale * (UseInnerEdge ? 2 : 1));
+        bodyTrack.Start(frames, duration, units);
+        if (edgeVisual is not null)
+        {
+            rimTrack ??= new BackdropCompositionTrack(edgeVisual, animateOpacity: false);
+            rimTrack.Bind();
+            rimTrack.Start(frames, duration, units);
+        }
+    }
+
+    public void StopPresentationAnimation()
+    {
+        bodyTrack?.Stop();
+        rimTrack?.Stop();
+    }
+
+    public void SetPresentationTransform(Matrix4x4 transform, double opacity)
+    {
+        presentationTransform = transform;
+        presentationOpacity = Math.Clamp(opacity, 0, 1);
+        ApplyPresentation();
+    }
 
     // Backward-compatible uniform transform used by existing callers.
     public void SetPresentation(double scale, double offsetY, double originX, double originY, double opacity) =>
@@ -40,14 +70,19 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         double originY,
         double opacity)
     {
-        presentationScaleX = double.IsFinite(scaleX) ? Math.Max(0.01, scaleX) : 1;
-        presentationScaleY = double.IsFinite(scaleY) ? Math.Max(0.01, scaleY) : 1;
+        presentationTransform = null;
+        presentationScaleX = double.IsFinite(scaleX) ? Math.Max(0, scaleX) : 1;
+        presentationScaleY = double.IsFinite(scaleY) ? Math.Max(0, scaleY) : 1;
         presentationOffsetX = double.IsFinite(offsetX) ? offsetX : 0;
         presentationOffsetY = double.IsFinite(offsetY) ? offsetY : 0;
         presentationX = double.IsFinite(originX) ? originX : 0;
         presentationY = double.IsFinite(originY) ? originY : 0;
         presentationOpacity = double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
+        ApplyPresentation();
+    }
 
+    private void ApplyPresentation()
+    {
         if (visual is null)
             return;
 
@@ -68,6 +103,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 1) *
             Matrix4x4.CreateTranslation(origin + translation);
 
+        if (presentationTransform is { } transform)
+        {
+            // Conjugate the complete projective matrix, including perspective,
+            // from DIPs into the mask's supersampled physical coordinates.
+            matrix = Matrix4x4.CreateScale(1 / units, 1 / units, 1) * transform *
+                Matrix4x4.CreateScale(units, units, 1);
+        }
+
         visual.TransformMatrix = matrix;
         visual.Opacity = (float)(presentationOpacity * lastOpacity);
 
@@ -78,6 +121,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionEffectBrush? edgeEffect;
     private W.CompositionSpriteShape? edgeShape;
     private W.ShapeVisual? edgeVisual;
+    private W.ContainerVisual? edgeCaptureRoot;
     private W.CompositionVisualSurface? edgeSurface;
     private W.CompositionSurfaceBrush? edgeMask;
     private W.CompositionColorBrush? edgeFill;
@@ -95,6 +139,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private MaskState? renderedMask;
     private W.CompositionColorBrush? fill;
     private W.ShapeVisual? visual;
+    private W.ContainerVisual? maskCaptureRoot;
     private W.CompositionVisualSurface? maskSurface;
     private W.CompositionSurfaceBrush? mask;
     private W.CompositionMaskBrush? output;
@@ -137,8 +182,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         // composition. Explicitly request antialiased bitmap/clip boundaries.
         visual.BorderMode = W.CompositionBorderMode.Soft;
         visual.Shapes.Add(shape);
+        // Capture in a stationary parent's coordinate space. The animated visual
+        // must be a child: transforming the capture root changes its outer-space
+        // placement, rather than the pixels sampled in its own local space.
+        maskCaptureRoot = compositor.CreateContainerVisual();
+        maskCaptureRoot.Children.InsertAtTop(visual);
         maskSurface = compositor.CreateVisualSurface();
-        maskSurface.SourceVisual = visual;
+        maskSurface.SourceVisual = maskCaptureRoot;
         mask = compositor.CreateSurfaceBrush(maskSurface);
         mask.Stretch = W.CompositionStretch.Fill;
         mask.BitmapInterpolationMode = W.CompositionBitmapInterpolationMode.Linear;
@@ -169,8 +219,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 edgeVisual = compositor.CreateShapeVisual();
                 edgeVisual.BorderMode = W.CompositionBorderMode.Soft;
                 edgeVisual.Shapes.Add(edgeShape);
+                edgeCaptureRoot = compositor.CreateContainerVisual();
+                edgeCaptureRoot.Children.InsertAtTop(edgeVisual);
                 edgeSurface = compositor.CreateVisualSurface();
-                edgeSurface.SourceVisual = edgeVisual;
+                edgeSurface.SourceVisual = edgeCaptureRoot;
                 edgeMask = compositor.CreateSurfaceBrush(edgeSurface);
                 edgeMask.Stretch = W.CompositionStretch.Fill;
                 edgeMask.BitmapInterpolationMode = W.CompositionBitmapInterpolationMode.Linear;
@@ -290,14 +342,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
         }
 
-        SetPresentation(
-            presentationScaleX,
-            presentationScaleY,
-            presentationOffsetX,
-            presentationOffsetY,
-            presentationX,
-            presentationY,
-            presentationOpacity);
+        ApplyPresentation();
 
         var size =
             new Vector2(
@@ -311,12 +356,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var sampling = UseInnerEdge ? 2f : 1f;
         shape!.Scale = new Vector2(sampling);
         visual.Size = size * sampling;
+        maskCaptureRoot!.Size = size * sampling;
         maskSurface.SourceSize = size * sampling;
         if (edgeVisual is not null)
         {
             edgeShape!.Scale = new Vector2(sampling);
             edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * scale);
             edgeVisual.Size = size * sampling;
+            edgeCaptureRoot!.Size = size * sampling;
             edgeSurface!.SourceSize = size * sampling;
         }
 
@@ -406,15 +453,22 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
     {
+        StopPresentationAnimation();
+        bodyTrack?.Dispose(); bodyTrack = null;
+        rimTrack?.Dispose(); rimTrack = null;
         target.SystemBackdrop = null;
         edgeEffect?.Dispose(); edgeFactory?.Dispose(); edgeMask?.Dispose();
         edgeSurface?.Dispose(); edgeVisual?.Dispose(); edgeShape?.Dispose(); edgeFill?.Dispose();
+        edgeCaptureRoot?.Dispose();
+        edgeCaptureRoot = null;
         edgeEffect = null; edgeFactory = null; edgeMask = null; edgeSurface = null;
         edgeVisual = null; edgeShape = null; edgeFill = null;
         output?.Dispose();
         mask?.Dispose();
         maskSurface?.Dispose();
         visual?.Dispose();
+        maskCaptureRoot?.Dispose();
+        maskCaptureRoot = null;
         shape?.Dispose();
         fill?.Dispose();
         geometry?.Dispose();

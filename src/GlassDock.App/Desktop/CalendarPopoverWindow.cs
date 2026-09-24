@@ -45,7 +45,7 @@ internal sealed class CalendarPopoverWindow : Window
     private readonly UtilityPopupPresentation presentation;
     private bool closed;
 
-    public CalendarPopoverWindow(DockAppearanceSettings appearance)
+    public CalendarPopoverWindow(DockAppearanceSettings appearance, Func<bool>? utilityOwnsPointer = null)
     {
         Title = "GlassDock Calendar";
         AppWindow.IsShownInSwitchers = false;
@@ -118,7 +118,7 @@ internal sealed class CalendarPopoverWindow : Window
 
         root.Children.Add(panel);
         Content = root;
-        presentation = new UtilityPopupPresentation(this, root, backdrop);
+        presentation = new UtilityPopupPresentation(this, root, backdrop, utilityOwnsPointer);
 
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
         try { host.Configure(); }
@@ -138,13 +138,13 @@ internal sealed class CalendarPopoverWindow : Window
         timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(1);
         timer.Tick += (_, _) => Refresh();
-        Activated += (_, _) => { if (!closed) timer.Start(); };
+        presentation.Hidden += (_, _) => timer.Stop();
         Closed += (_, _) => { closed = true; timer.Stop(); host.Dispose(); };
     }
 
     public void Refresh()
     {
-        if (closed) return;
+        if (closed || !presentation.IsVisible) return;
         var now = DateTimeOffset.Now;
         day.Text = now.ToString("dddd, MMMM d");
         time.Text = now.ToString("t");
@@ -154,7 +154,15 @@ internal sealed class CalendarPopoverWindow : Window
 
     public void ApplyAppearance(DockAppearanceSettings appearance) => UtilityPopupStyle.Apply(glass, backdrop, appearance);
 
-    public void Present() => presentation.Present();
+    public event EventHandler? Dismissed
+    {
+        add => presentation.Dismissed += value;
+        remove => presentation.Dismissed -= value;
+    }
+    public event EventHandler? Hidden { add => presentation.Hidden += value; remove => presentation.Hidden -= value; }
+    public void HideImmediately() => presentation.HideImmediately();
+    public void RetargetClosed() => presentation.RetargetClosed();
+    public void Present() { presentation.Present(); timer.Start(); Refresh(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
@@ -170,16 +178,11 @@ internal sealed class CalendarPopoverWindow : Window
             owner.Position.X + anchorX * scale,
             owner.Position.Y + anchorY * scale,
             scale);
+        host.InputHeightPixels = presentation.InputHeightPixels;
     }
 
 
-    private void UpdateBackdrop() => backdrop.SetBounds(
-        root.ActualWidth,
-        root.ActualHeight,
-        Math.Max(0, root.ActualWidth - Gutter * 2),
-        Math.Max(0, root.ActualHeight - Gutter * 2),
-        Gutter,
-        root.XamlRoot?.RasterizationScale ?? 1);
+    private void UpdateBackdrop() => presentation.UpdateBackdropBounds();
 
     private static SolidColorBrush Brush(byte alpha, byte r = 255, byte g = 255, byte b = 255) =>
         new(global::Windows.UI.Color.FromArgb(alpha, r, g, b));

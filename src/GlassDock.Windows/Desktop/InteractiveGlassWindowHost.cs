@@ -16,6 +16,9 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     private readonly NativeMethods.SubclassProc callback;
 
     private bool configured;
+    // Optional transparent travel space below a utility popup. The dock belongs
+    // to the same UI thread, so HTTRANSPARENT forwards clicks to its controls.
+    public int? InputHeightPixels { get; set; }
     private bool disposed;
 
     public InteractiveGlassWindowHost(nint hwnd)
@@ -203,6 +206,12 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         nuint id,
         nuint data)
     {
+        if (message == 0x0084 && InputHeightPixels is { } height &&
+            NativeMethods.GetWindowRect(hwnd, out var bounds))
+        {
+            var screenY = (short)((lParam.ToInt64() >> 16) & 0xffff);
+            if (screenY - bounds.Top >= height) return -1; // HTTRANSPARENT
+        }
         //
         // WM_ERASEBKGND:
         // prevent the default opaque WinUI/native client background
