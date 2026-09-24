@@ -57,7 +57,15 @@ internal sealed class DockAnimationController
         {
             var t = Math.Clamp((Environment.TickCount64 - placementStarted) / placementDuration, 0, 1);
             if (t == 1) { placementTimer.Stop(); IsPlacementAnimating = false; }
-            ApplyBottom(placementFrom + (placementTarget - placementFrom) * t * t * (3 - 2 * t));
+
+            // Directional easing, deliberately not ease-in-out:
+            // raising/opening settles with sine ease-out;
+            // lowering/closing folds away with sine ease-in.
+            var eased = placementTarget >= placementFrom
+                ? Math.Sin(t * Math.PI / 2)
+                : 1 - Math.Cos(t * Math.PI / 2);
+
+            ApplyBottom(placementFrom + (placementTarget - placementFrom) * eased);
         };
     }
 
@@ -190,6 +198,7 @@ internal sealed class DockAnimationController
                 indicator,
                 "Opacity",
                 indicatorOpacity,
+                EasingMode.EaseOut,
                 (100, indicatorOpacity),
                 (220, 0));
 
@@ -197,18 +206,21 @@ internal sealed class DockAnimationController
                 surface,
                 "Width",
                 width,
+                EasingMode.EaseOut,
                 (320, targetWidth));
 
             Add(
                 surface,
                 "Height",
                 height,
+                EasingMode.EaseOut,
                 (320, targetHeight));
 
             Add(
                 surface,
                 "Opacity",
                 surfaceOpacity,
+                EasingMode.EaseOut,
                 (90, surfaceOpacity),
                 (320, 1));
 
@@ -216,6 +228,7 @@ internal sealed class DockAnimationController
                 icons,
                 "Opacity",
                 opacity,
+                EasingMode.EaseOut,
                 (220, opacity),
                 (380, 1));
         }
@@ -227,18 +240,21 @@ internal sealed class DockAnimationController
                 surface,
                 "Width",
                 width,
+                EasingMode.EaseIn,
                 (300, 120));
 
             Add(
                 surface,
                 "Height",
                 height,
+                EasingMode.EaseIn,
                 (280, 5));
 
             Add(
                 icons,
                 "Opacity",
                 opacity,
+                EasingMode.EaseIn,
                 (60, opacity),
                 (220, 0));
 
@@ -246,6 +262,7 @@ internal sealed class DockAnimationController
                 surface,
                 "Opacity",
                 surfaceOpacity,
+                EasingMode.EaseIn,
                 (180, surfaceOpacity),
                 (300, 0));
 
@@ -253,6 +270,7 @@ internal sealed class DockAnimationController
                 indicator,
                 "Width",
                 indicatorWidth,
+                EasingMode.EaseIn,
                 (180, indicatorWidth),
                 (300, 120));
 
@@ -260,6 +278,7 @@ internal sealed class DockAnimationController
                 indicator,
                 "Opacity",
                 indicatorOpacity,
+                EasingMode.EaseIn,
                 (200, indicatorOpacity),
                 (300, 1));
         }
@@ -554,6 +573,7 @@ internal sealed class DockAnimationController
         DependencyObject target,
         string property,
         double from,
+        EasingMode easingMode,
         params (int Milliseconds, double Value)[] frames)
     {
         var animation =
@@ -582,10 +602,10 @@ internal sealed class DockAnimationController
                                 milliseconds)),
                     Value = value,
                     EasingFunction =
-                        new CubicEase
+                        new SineEase
                         {
                             EasingMode =
-                                EasingMode.EaseOut
+                                easingMode
                         }
                 });
         }

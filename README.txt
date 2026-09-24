@@ -1,60 +1,50 @@
-GlassDock smooth directional easing patch
-==========================================
+GlassDock dock expand/collapse animation restore
+================================================
 
-This replaces the earlier snappy utility-popup easing.
+Finding:
+The dock expansion code was NOT removed. The current DockAnimationController
+still animates Width/Height/Opacity, but its motion is inconsistent with the
+new approved utility-popup motion:
+- shell keyframes use CubicEase
+- vertical placement uses smoothstep (ease-in-out)
 
-OPEN
-- 220 ms
-- gentle sine ease-out
-- immediate but soft movement
-- smooth settle
-- no aggressive snap
+This patch makes the dock transition visibly directional and smooth while
+keeping the existing architecture and durations.
 
-CLOSE
-- 210 ms
-- gentle sine ease-in
-- smooth departure
-- naturally accelerates back into the clicked source
-
-Important fix:
-The previous patch had presentation duration constants that did not match the
-duration still hard-coded inside PopupMorph.Progress(). That could cause the
-composition track to finish before progress mathematically reached 1.0, followed
-by a visible final correction/snap.
-
-This patch makes PopupMorph.Progress() use the same OpenDurationSeconds /
-CloseDurationSeconds constants as UtilityPopupPresentation, so the visual track
-and progress math stay synchronized.
-
-No changes to:
-- V/funnel geometry
-- popup state machine
-- taskbar/watchdog
-- Win-key handling
+Changes:
+- OPEN / RAISE:
+  - SineEase EaseOut
+  - smooth immediate movement, gentle settle
+- CLOSE / LOWER:
+  - SineEase EaseIn
+  - smooth departure, natural fold back
+- Vertical bottom movement uses the same directional sine behavior instead of
+  smoothstep ease-in-out.
+- Existing Width/Height/Opacity durations remain unchanged.
+- Magnification behavior is unchanged.
+- Utility Tray / Quick Settings / Calendar animation is untouched.
 
 Performance:
-- no new timers
+- no new timer
+- no new render loop
 - no new animation controller
 - no new polling
-- no new geometry rebuilding
-- no additional per-frame managed work
-- no intentional increase in RAM/CPU/GPU usage
+- no extra caches
+- no new per-frame allocations
+- existing 16 ms placement timer is reused
 
 Replace:
-- src\GlassDock.Core\Desktop\PopupMorph.cs
-- src\GlassDock.App\Desktop\UtilityPopupPresentation.cs
+  src\GlassDock.App\Desktop\DockAnimationController.cs
 
 Then:
   dotnet build
   dotnet test
 
-Runtime checks:
-- Tray open/close repeatedly
-- Quick Settings open/close repeatedly
-- Calendar open/close repeatedly
-- spam-toggle the same utility
-- switch utilities rapidly
-- verify no final snap
-- verify no lag buildup / RAM growth
-- verify taskbar suppression, bare-Win behavior, normal Win shortcuts,
-  dock topmost, max-width pinned layout, and hover-wave behavior
+Runtime check:
+1. Collapse dock to the home-indicator/pill.
+2. Hover/click to expand it repeatedly.
+3. Expansion should be visibly smooth instead of appearing instant/flat.
+4. Collapse should smoothly return to the pill.
+5. Verify taskbar suppression, bare-Win behavior, Win+Space and normal Win
+   shortcuts, dock topmost, max-width pinned layout, utility popups and hover
+   wave remain working.

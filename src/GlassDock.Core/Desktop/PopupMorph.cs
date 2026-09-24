@@ -74,6 +74,14 @@ public static class PopupMorph
         var duration = closing ? CloseDurationSeconds : OpenDurationSeconds;
         var t = Math.Clamp(elapsed / duration, 0, 1);
 
+        // Preserve exact endpoints. Trigonometric easing can otherwise leave
+        // tiny floating-point residues such as 5.55E-17 at the end of a close,
+        // which is visually irrelevant but breaks exact state/reversal tests.
+        if (t <= 0)
+            return from;
+        if (t >= 1)
+            return closing ? 0 : 1;
+
         // Separate directional curves:
         // OPEN  -> sine ease-out: immediate but gentle movement, smooth settle.
         // CLOSE -> sine ease-in: gentle departure, then folds naturally inward.
