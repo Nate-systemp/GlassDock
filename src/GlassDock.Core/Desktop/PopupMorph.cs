@@ -6,6 +6,11 @@ public readonly record struct PopupMorphFrame(double ScaleX, double ScaleY, doub
 
 public static class PopupMorph
 {
+    // Smooth directional timing. Opening and closing intentionally use
+    // separate one-way curves rather than a single ease-in-out curve.
+    public const double OpenDurationSeconds = .22;
+    public const double CloseDurationSeconds = .21;
+
     public static Matrix4x4 Funnel(double progress, double width, double height,
         double sourceX, double sourceY, double gutter)
     {
@@ -66,8 +71,17 @@ public static class PopupMorph
 
     public static double Progress(double elapsed, bool closing, double from)
     {
-        var t = Math.Clamp(elapsed / (closing ? .21 : .25), 0, 1);
-        var eased = closing ? t * t * t : 1 - Math.Pow(1 - t, 3);
+        var duration = closing ? CloseDurationSeconds : OpenDurationSeconds;
+        var t = Math.Clamp(elapsed / duration, 0, 1);
+
+        // Separate directional curves:
+        // OPEN  -> sine ease-out: immediate but gentle movement, smooth settle.
+        // CLOSE -> sine ease-in: gentle departure, then folds naturally inward.
+        // This is deliberately NOT an ease-in-out curve.
+        var eased = closing
+            ? 1 - Math.Cos(t * Math.PI / 2)
+            : Math.Sin(t * Math.PI / 2);
+
         return from + ((closing ? 0 : 1) - from) * eased;
     }
 

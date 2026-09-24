@@ -45,6 +45,7 @@ try
     var clock = Stopwatch.StartNew();
     var deadline = new TaskbarLease(args[0] == "--watch-active");
     TimeSpan? hiddenAt = null;
+    var consecutiveMaintenanceFailures = 0;
     var read = Task.Run(Console.ReadLine);
     while (!parent.HasExited && !emergency.WaitOne(0))
     {
@@ -65,8 +66,28 @@ try
             deadline.Heartbeat(clock.Elapsed);
             read = Task.Run(Console.ReadLine);
         }
-        if (hiddenAt is not null && !controller.MaintainHidden()) break;
-        Thread.Sleep(250); // Only while the explicit development lease is alive.
+        if (hiddenAt is not null)
+        {
+            if (controller.MaintainHidden())
+            {
+                consecutiveMaintenanceFailures = 0;
+            }
+            else
+            {
+                // A shell/foreground transition is NOT a reason to terminate the
+                // safety lease. Terminating here immediately runs Restore() and is
+                // exactly what makes the Windows taskbar reappear when Task Manager
+                // or another shell transition temporarily defeats one maintenance
+                // pass. Keep the watchdog alive and retry on the normal 250 ms
+                // cadence; parent death, heartbeat expiry, emergency restore, EOF,
+                // or explicit RESTORE still end the lease normally.
+                consecutiveMaintenanceFailures++;
+            }
+        }
+
+        // Pump the WinEvent hooks while waiting. This remains the same 250 ms
+        // maintenance cadence and adds no extra worker thread.
+        controller.WaitAndPumpEvents(250);
     }
 }
 catch (Exception exception)

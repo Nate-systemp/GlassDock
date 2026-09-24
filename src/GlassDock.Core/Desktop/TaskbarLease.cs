@@ -9,7 +9,9 @@ public sealed class TaskbarLease(bool whileAppActive)
     public void Heartbeat(TimeSpan now) => lastHeartbeat = now;
     public void Hidden(TimeSpan now) => hiddenAt ??= now;
 
+    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(10);
+
     public bool IsExpired(TimeSpan now) =>
-        now - lastHeartbeat >= TimeSpan.FromSeconds(5) ||
+        now - lastHeartbeat >= HeartbeatTimeout ||
         (!whileAppActive && hiddenAt is { } start && now - start >= TimeSpan.FromSeconds(60));
 }

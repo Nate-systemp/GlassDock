@@ -125,6 +125,42 @@ internal static class NativeMethods
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnhookWinEvent(nint hook);
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Message
+    {
+        public nint Hwnd;
+        public uint MessageId;
+        public nuint WParam;
+        public nint LParam;
+        public uint Time;
+        public Point Position;
+        public uint Private;
+    }
+
+    [DllImport("user32.dll")]
+    internal static extern uint MsgWaitForMultipleObjectsEx(
+        uint count,
+        nint handles,
+        uint milliseconds,
+        uint wakeMask,
+        uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "PeekMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PeekMessage(
+        out Message message,
+        nint hwnd,
+        uint minimum,
+        uint maximum,
+        uint remove);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool TranslateMessage(ref Message message);
+
+    [DllImport("user32.dll", EntryPoint = "DispatchMessageW")]
+    internal static extern nint DispatchMessage(ref Message message);
+
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnableWindow(nint hwnd, [MarshalAs(UnmanagedType.Bool)] bool enable);
 

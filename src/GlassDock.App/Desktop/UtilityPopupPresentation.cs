@@ -164,7 +164,9 @@ internal sealed class UtilityPopupPresentation
         revision++;
         from = progress;
         root.IsHitTestVisible = false;
-        var duration = TimeSpan.FromSeconds(close ? .21 : .25);
+        var duration = TimeSpan.FromSeconds(close
+            ? PopupMorph.CloseDurationSeconds
+            : PopupMorph.OpenDurationSeconds);
         for (var i = 0; i < frames.Length; i++)
         {
             var p = PopupMorph.Progress(duration.TotalSeconds * i / (frames.Length - 1), close, from);

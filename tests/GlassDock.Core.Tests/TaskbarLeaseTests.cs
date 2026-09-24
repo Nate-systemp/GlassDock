@@ -11,8 +11,8 @@ public sealed class TaskbarLeaseTests
     public void Missing_heartbeat_expires_even_before_hide(bool active)
     {
         var lease = new TaskbarLease(active);
-        Assert.False(lease.IsExpired(TimeSpan.FromSeconds(4.9)));
-        Assert.True(lease.IsExpired(TimeSpan.FromSeconds(5)));
+        Assert.False(lease.IsExpired(TimeSpan.FromSeconds(9.9)));
+        Assert.True(lease.IsExpired(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public sealed class TaskbarLeaseTests
             lease.Heartbeat(TimeSpan.FromSeconds(seconds));
             Assert.False(lease.IsExpired(TimeSpan.FromSeconds(seconds)));
         }
-        Assert.True(lease.IsExpired(TimeSpan.FromSeconds(125)));
+        Assert.True(lease.IsExpired(TimeSpan.FromSeconds(130)));
     }
 
     [Fact]
