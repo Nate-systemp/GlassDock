@@ -5,6 +5,7 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
 
     <UseWinUI>true</UseWinUI>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 
@@ -18,6 +19,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageReference Include="Velopack" Version="1.2.158" />
 
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />
     <ProjectReference Include="../GlassDock.Windows/GlassDock.Windows.csproj" />
@@ -27,9 +29,7 @@
   <Target Name="CopyBuiltRecoveryHelper" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
     <!-- ProjectReference builds the helper, but does not copy an executable reference.
          Resolve its real output path so VS/CLI launches cannot use an old Recovery payload. -->
-    <MSBuild Projects="../GlassDock.Watchdog/GlassDock.Watchdog.csproj"
-             Targets="GetTargetPath" Properties="Configuration=$(Configuration)"
-             RemoveProperties="RuntimeIdentifier;SelfContained">
+    <MSBuild Projects="../GlassDock.Watchdog/GlassDock.Watchdog.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;SelfContained">
       <Output TaskParameter="TargetOutputs" ItemName="BuiltRecoveryTarget" />
     </MSBuild>
     <PropertyGroup>
@@ -39,14 +39,9 @@
       <BuiltRecoveryFiles Include="$(BuiltRecoveryDirectory)/*" />
       <BuiltRecoveryRuntimeFiles Include="$(BuiltRecoveryDirectory)/runtimes/**/*" />
     </ItemGroup>
-    <Error Condition="!Exists('$(BuiltRecoveryDirectory)/GlassDock.Watchdog.exe')"
-           Text="The current watchdog build is missing; refusing to leave a stale Recovery helper." />
-    <Copy SourceFiles="@(BuiltRecoveryFiles)"
-          DestinationFiles="@(BuiltRecoveryFiles->'$(TargetDir)Recovery/%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(BuiltRecoveryRuntimeFiles)"
-          DestinationFiles="@(BuiltRecoveryRuntimeFiles->'$(TargetDir)Recovery/runtimes/%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(BuiltRecoveryDirectory)/GlassDock.Watchdog.exe')" Text="The current watchdog build is missing; refusing to leave a stale Recovery helper." />
+    <Copy SourceFiles="@(BuiltRecoveryFiles)" DestinationFiles="@(BuiltRecoveryFiles->'$(TargetDir)Recovery/%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(BuiltRecoveryRuntimeFiles)" DestinationFiles="@(BuiltRecoveryRuntimeFiles->'$(TargetDir)Recovery/runtimes/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyRecoveryHelper" AfterTargets="Publish">
@@ -54,18 +49,10 @@
       <RecoveryFiles Include="../GlassDock.Watchdog/bin/$(Configuration)/net10.0-windows10.0.26100.0/$(RuntimeIdentifier)/**/*" />
     </ItemGroup>
 
-    <Copy
-      SourceFiles="@(RecoveryFiles)"
-      DestinationFiles="@(RecoveryFiles->'$(PublishDir)Recovery/%(RecursiveDir)%(Filename)%(Extension)')"
-      SkipUnchangedFiles="true"
-      Condition="'@(RecoveryFiles)' != ''" />
+    <Copy SourceFiles="@(RecoveryFiles)" DestinationFiles="@(RecoveryFiles->'$(PublishDir)Recovery/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(RecoveryFiles)' != ''" />
   </Target>
 
   <Target Name="CopyAppPriToPublish" AfterTargets="Publish">
-    <Copy
-      SourceFiles="$(TargetDir)GlassDock.App.pri"
-      DestinationFiles="$(PublishDir)GlassDock.App.pri"
-      SkipUnchangedFiles="true"
-      Condition="Exists('$(TargetDir)GlassDock.App.pri')" />
+    <Copy SourceFiles="$(TargetDir)GlassDock.App.pri" DestinationFiles="$(PublishDir)GlassDock.App.pri" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)GlassDock.App.pri')" />
   </Target>
 </Project>
