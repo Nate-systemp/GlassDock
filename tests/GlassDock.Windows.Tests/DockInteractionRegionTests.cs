@@ -47,9 +47,10 @@ public sealed class DockInteractionRegionTests
                 var sx = -640 + (int)Math.Round(x * scale);
                 var sy = -144 + (int)Math.Round(y * scale);
                 var packed = (nint)((ushort)sx | ((long)(ushort)sy << 16));
+                var transparent = GetWindowLongPtrW(window, -20).ToInt64() & 0x20;
                 var result = SendMessageW(window, 0x84, 0, packed);
                 Assert.Equal(!inside, result == -1);
-                Assert.Equal(!inside, (GetWindowLongPtrW(window, -20).ToInt64() & 0x20) != 0);
+                Assert.Equal(transparent, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
             }
             for (var i = 0; i < 100; i++)
             {
@@ -116,6 +117,11 @@ public sealed class DockInteractionRegionTests
             manager.SetPeekInteraction(24);
             SendMessageW(window, 0x113, 0x4744, 0);
             Assert.True(manager.IsPointerInsideInput());
+            Assert.Equal(0, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
+            // An OLE/window-discovery probe outside the dock must not make the
+            // HWND transparent while the real cursor is inside the drop target.
+            var outside = (nint)((ushort)(cursor.X - hostWidth) | ((long)(ushort)cursor.Y << 16));
+            Assert.Equal(-1, SendMessageW(window, 0x84, 0, outside));
             Assert.Equal(0, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
             manager.SetPeekInteraction(-2);
             SendMessageW(window, 0x113, 0x4744, 0);

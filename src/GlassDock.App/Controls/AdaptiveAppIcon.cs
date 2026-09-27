@@ -33,11 +33,12 @@ internal sealed class AdaptiveAppIcon : Grid
     private ApplicationIcon? original;
     private int rasterWidth, rasterHeight;
 
-    public AdaptiveAppIcon(double size, double maximumHoverScale)
+    public AdaptiveAppIcon(double size, double maximumHoverScale, bool showTile = true)
     {
         Configure(size, maximumHoverScale);
         HorizontalAlignment = HorizontalAlignment.Center;
         VerticalAlignment = VerticalAlignment.Center;
+        tile.Visibility = showTile ? Visibility.Visible : Visibility.Collapsed;
         Children.Add(tile);
         // Siblings: the rounded tile never clips or masks the image's alpha edges.
         Children.Add(artwork);

@@ -93,7 +93,9 @@ public sealed class WindowsOverlayManager : IDisposable
         {
             var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
             var inside = ContainsScreenPoint(point);
-            SetInputTransparent(!inside);
+            // Hit-test callers can probe points other than the physical cursor.
+            // Do not let such a probe disable the entire HWND for OLE drops.
+            // The existing cursor sampler owns cross-process click-through.
             return inside ? 1 : -1; // HTCLIENT / HTTRANSPARENT; layered style passes to other processes.
         }
         if (message == 0x0113 && wParam == InputTimer) { UpdateInputTransparency(); return 0; }

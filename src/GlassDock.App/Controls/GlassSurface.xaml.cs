@@ -1,6 +1,7 @@
 using System.Numerics;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Materials;
+using GlassDock.Core.Settings;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
@@ -23,9 +24,13 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     private CompositionSpriteShape? maskShape;
     private CompositionColorBrush? maskFill;
     private GlassMaterial material = new();
+    private DockAppearanceMode plainAppearance = DockAppearanceMode.Dark;
+    private double plainOpacity = 1;
+    private double plainCornerRadius = 28;
 
     public string RenderingMode => UseDesktopBackdrop ? "Desktop system backdrop · shared material graph" : brush.RenderingMode;
     public bool UseDesktopBackdrop { get; set; }
+    public bool UsePlainSurface { get; set; }
     public event EventHandler? RenderingModeChanged;
     public UIElement? PreviewContent { get => SurfaceContent.Content as UIElement; set => SurfaceContent.Content = value; }
 
@@ -41,6 +46,14 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (UsePlainSurface)
+        {
+            // The solid SystemBackdrop is below XAML. A filled XAML shadow
+            // mask would darken its interior; the plain dock needs no overlay.
+            MaterialShape.Fill = new SolidColorBrush(Colors.Transparent);
+            ApplyPlain(plainAppearance, plainOpacity, plainCornerRadius);
+            return;
+        }
         var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
         if (UseDesktopBackdrop) MaterialShape.Fill = new SolidColorBrush(Colors.Transparent);
         else brush.Connect(compositor);
@@ -91,6 +104,56 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
             shadow.BlurRadius = (float)material.ShadowBlur;
             shadow.Offset = new Vector3(0, (float)material.ShadowOffset, 0);
         }
+        ResizeShadow();
+    }
+
+    /// <summary>
+    /// Configures the main dock's plain surface and layout. Popup surfaces continue to use
+    /// <see cref="Apply(GlassMaterial, bool)"/> and the glass graph.
+    /// </summary>
+    public void ApplyPlain(
+        DockAppearanceMode appearance,
+        double opacity = 1,
+        double cornerRadius = 28)
+    {
+        plainAppearance = Enum.IsDefined(appearance)
+            ? appearance
+            : DockAppearanceMode.Dark;
+        plainOpacity = double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
+        plainCornerRadius = double.IsFinite(cornerRadius) ? Math.Clamp(cornerRadius, 0, 100) : 28;
+
+        material = material with
+        {
+            Opacity = plainOpacity,
+            CornerRadius = plainCornerRadius,
+            BorderOpacity = 0,
+            BorderThickness = 0,
+            EdgeHighlight = 0,
+            ShadowOpacity = 0
+        };
+
+        MaterialShape.RadiusX = MaterialShape.RadiusY = plainCornerRadius;
+        LightingShape.RadiusX = LightingShape.RadiusY = plainCornerRadius;
+        LightingShape.Fill = new SolidColorBrush(Colors.Transparent);
+        Rim.CornerRadius = new CornerRadius(plainCornerRadius);
+        Rim.BorderThickness = new Thickness(0);
+        Rim.Opacity = 0;
+
+        if (!UseDesktopBackdrop)
+        {
+            var color = plainAppearance == DockAppearanceMode.Light
+                ? Color.FromArgb((byte)(plainOpacity * 255), 243, 243, 243)
+                : Color.FromArgb((byte)(plainOpacity * 255), 36, 36, 36);
+            MaterialShape.Fill = new SolidColorBrush(color);
+        }
+
+        if (shadow is not null)
+        {
+            shadow.Opacity = (float)material.ShadowOpacity;
+            shadow.BlurRadius = (float)material.ShadowBlur;
+            shadow.Offset = new Vector3(0, (float)material.ShadowOffset, 0);
+        }
+
         ResizeShadow();
     }
 

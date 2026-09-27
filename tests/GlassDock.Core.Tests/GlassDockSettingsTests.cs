@@ -6,6 +6,45 @@ namespace GlassDock.Core.Tests;
 
 public sealed class GlassDockSettingsTests
 {
+    [Theory]
+    [InlineData(DockAppearanceMode.Dark, null)]
+    [InlineData(DockAppearanceMode.Light, null)]
+    [InlineData(DockAppearanceMode.Frosted, GlassMaterialMode.Frosted)]
+    [InlineData(DockAppearanceMode.Acrylic, GlassMaterialMode.Acrylic)]
+    [InlineData(DockAppearanceMode.Clear, GlassMaterialMode.Clear)]
+    public void Dock_surface_choices_select_existing_glass_styles(DockAppearanceMode mode, GlassMaterialMode? expected)
+    {
+        var session = new GlassDockSettingsSession(new());
+        session.Replace(session.CreateDockAppearanceUpdate(mode));
+        Assert.Equal(mode, session.Current.DockAppearanceMode);
+        Assert.Equal(expected, session.Current.DockAppearanceMode.GlassStyle());
+    }
+
+    [Fact]
+    public void Plain_appearance_normalizes_and_live_update_preserves_other_preferences()
+    {
+        Assert.Equal(DockAppearanceMode.Dark, new GlassDockSettings().DockAppearanceMode);
+        Assert.Equal(DockAppearanceMode.Dark, GlassDockSettings.Normalize(new()
+        {
+            DockAppearanceMode = (DockAppearanceMode)99
+        }).DockAppearanceMode);
+        var original = new GlassDockSettings { IconSize = 36, LaunchAtStartup = true,
+            GlassMaterialMode = GlassMaterialMode.Clear, DockOpacity = .4 };
+        var session = new GlassDockSettingsSession(original);
+        var changes = 0;
+        session.Changed += (_, _) => changes++;
+        var edited = session.CreateDockAppearanceUpdate(DockAppearanceMode.Light);
+        Assert.Equal(original, session.Current);
+        Assert.True(session.Replace(edited));
+        Assert.Equal(original with { DockAppearanceMode = DockAppearanceMode.Light }, session.Current);
+        Assert.Equal(1, changes);
+        Assert.False(session.Replace(edited));
+        var reset = session.CreateDefaultEditableSettings();
+        Assert.Equal(DockAppearanceMode.Dark, reset.DockAppearanceMode);
+        Assert.Equal(DockAppearanceMode.Light, session.Current.DockAppearanceMode);
+        Assert.True(reset.LaunchAtStartup);
+    }
+
     [Fact]
     public void Defaults_match_current_dock_behavior()
     {

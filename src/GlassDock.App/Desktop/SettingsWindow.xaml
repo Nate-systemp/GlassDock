@@ -6,317 +6,322 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="#10141C" RequestedTheme="Dark">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Padding="36,30,36,28" Spacing="22">
-                <StackPanel Spacing="6">
-                    <TextBlock
-                        Text="GlassDock Settings"
-                        FontSize="30"
-                        FontWeight="SemiBold"/>
-                    <TextBlock
-                        Text="Adjust how the dock rests and responds when the pointer leaves."
-                        FontSize="14"
-                        Foreground="#AEB7C6"
-                        TextWrapping="Wrap"/>
+    <Grid Background="#FFF6F6F6" RequestedTheme="Light">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#FFFBFBFB" BorderBrush="#FFE4E4E4" BorderThickness="0,0,0,1">
+            <Grid Height="64" Padding="22,0">
+                <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Width="32" Height="32" CornerRadius="8" Background="#FFE8F2FF">
+                        <TextBlock Text="G" FontSize="18" FontWeight="SemiBold" Foreground="#FF0067C0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                        <TextBlock Text="GlassDock Settings" FontSize="18" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Customize how GlassDock looks and behaves." FontSize="12" Foreground="#FF6B6B6B"/>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Sidebar -->
+        <Border Grid.Row="1" Grid.Column="0" Background="#FFFBFBFB" BorderBrush="#FFE4E4E4" BorderThickness="0,0,1,0">
+            <StackPanel Padding="14,18" Spacing="6">
+                <TextBlock Text="SETTINGS" FontSize="11" FontWeight="SemiBold" Foreground="#FF7A7A7A" Margin="10,0,0,7"/>
+
+                <Button x:Name="AppearanceNavButton" Content="Appearance" Tag="Appearance" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="#FFE7F1FF" Foreground="#FF0F5FA8" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="BehaviorNavButton" Content="Behavior" Tag="Behavior" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="DisplayNavButton" Content="Display" Tag="Display" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="AdvancedNavButton" Content="Advanced" Tag="Advanced" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+
+                <Rectangle Height="1" Fill="#FFE6E6E6" Margin="8,10"/>
+
+                <Button x:Name="AboutNavButton" Content="About" Tag="About" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Page host -->
+        <ScrollViewer Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Padding="32,28,36,28" MaxWidth="860" HorizontalAlignment="Stretch">
+
+                <!-- Appearance -->
+                <StackPanel x:Name="AppearancePage" Spacing="18">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Appearance" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Choose the dock surface and tune how app icons feel." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="16">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Dock appearance" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Switch between solid Light/Dark surfaces or the original glass materials." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="240"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Surface style" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock x:Name="DockAppearanceDescription" Text="Choose the material used by the main dock." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <ComboBox x:Name="DockAppearanceModeBox"
+                                          Grid.Column="1"
+                                          HorizontalAlignment="Stretch"
+                                          SelectionChanged="DockAppearanceChanged"
+                                          AutomationProperties.Name="Main dock appearance style">
+                                    <ComboBoxItem Content="Dark"/>
+                                    <ComboBoxItem Content="Light"/>
+                                    <ComboBoxItem Content="Frosted"/>
+                                    <ComboBoxItem Content="Acrylic"/>
+                                    <ComboBoxItem Content="Clear"/>
+                                </ComboBox>
+                            </Grid>
+
+                            <Border Padding="14" CornerRadius="10" Background="#FFF7F7F7" BorderBrush="#FFE7E7E7" BorderThickness="1">
+                                <TextBlock Text="Light and Dark are solid surfaces. Frosted, Acrylic, and Clear use GlassDock's glass renderer and the glass controls under Advanced." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="18">
+                            <TextBlock Text="App icons" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Icon size" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Base icon size before hover magnification." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="IconSizeBox" Grid.Column="1" Header="DIP" Minimum="24" Maximum="80" SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Dock icon size"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Magnification" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="How much icons grow near the pointer." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="MagnificationScaleBox" Grid.Column="1" Header="Scale" Minimum="1" Maximum="2.5" SmallChange="0.05" LargeChange="0.1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Dock icon magnification scale"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Icon spacing" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Space between dock applications." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="IconSpacingBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="20" SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Spacing between dock icons in device-independent pixels"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
-                <Border
-                    Padding="24,22"
-                    CornerRadius="18"
-                    Background="#C91A202B"
-                    BorderBrush="#344052"
-                    BorderThickness="1">
-                    <StackPanel Spacing="22">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Dock behavior" FontSize="19" FontWeight="SemiBold"/>
-                            <TextBlock
-                                Text="Changes apply to the running dock after you select Apply."
-                                Foreground="#99A5B7"
-                                FontSize="12"/>
-                        </StackPanel>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Material" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="GlassMaterialModeBox" Grid.Column="1" Header="Style"
-                                SelectionChanged="MaterialModeChanged"
-                                AutomationProperties.Name="Main dock material style">
-                                <ComboBoxItem Content="Frosted"/>
-                                <ComboBoxItem Content="Acrylic"/>
-                                <ComboBoxItem Content="Clear"/>
-                            </ComboBox>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="190"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Display" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="Choose which monitor hosts the dock."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <ComboBox
-                                x:Name="DockDisplayModeBox"
-                                Grid.Column="1"
-                                Header="Monitor behavior"
-                                AutomationProperties.Name="Dock monitor behavior">
-                                <ComboBoxItem Content="Primary display"/>
-                                <ComboBoxItem Content="Follow pointer"/>
-                                <ComboBoxItem Content="Follow active window"/>
-                            </ComboBox>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Bottom spacing" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="How far the expanded dock sits above the screen edge."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <NumberBox
-                                x:Name="BottomMarginBox"
-                                Grid.Column="1"
-                                Header="DIP"
-                                Minimum="16"
-                                Maximum="100"
-                                SmallChange="1"
-                                LargeChange="8"
-                                SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Bottom spacing in device-independent pixels"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Auto-hide delay" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="Wait time before the expanded dock starts collapsing."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <NumberBox
-                                x:Name="AutoHideDelayBox"
-                                Grid.Column="1"
-                                Header="Seconds"
-                                Minimum="0"
-                                Maximum="10"
-                                SmallChange="0.1"
-                                LargeChange="1"
-                                SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Auto-hide delay in seconds"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Peek delay" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="How long the raised indicator waits before lowering near the edge."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <NumberBox
-                                x:Name="PeekDelayBox"
-                                Grid.Column="1"
-                                Header="Seconds"
-                                Minimum="0"
-                                Maximum="30"
-                                SmallChange="0.1"
-                                LargeChange="1"
-                                SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Peek delay in seconds"/>
-                        </Grid>
+                <!-- Behavior -->
+                <StackPanel x:Name="BehaviorPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Behavior" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Control how GlassDock responds to your pointer." FontSize="13" Foreground="#FF6B6B6B"/>
                     </StackPanel>
-                </Border>
 
-                <Border
-                    Padding="24,22"
-                    CornerRadius="18"
-                    Background="#C91A202B"
-                    BorderBrush="#344052"
-                    BorderThickness="1">
-                    <StackPanel Spacing="18">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Appearance" FontSize="19" FontWeight="SemiBold"/>
-                            <TextBlock
-                                Text="Tune the expanded dock while preserving its existing interaction and glass pipeline."
-                                Foreground="#99A5B7"
-                                FontSize="12"
-                                TextWrapping="Wrap"/>
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="18">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Hover wave" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Smoothly deforms the dock toward the pointer. Magnification, input, and auto-hide stay available when this is off." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <ToggleSwitch x:Name="HoverWaveToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" AutomationProperties.Name="Dock hover wave effect"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Auto-hide delay" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Wait before the expanded dock starts collapsing." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="AutoHideDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Auto-hide delay in seconds"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Peek delay" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="How long the raised indicator waits before lowering near the edge." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="PeekDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="30" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Peek delay in seconds"/>
+                            </Grid>
                         </StackPanel>
+                    </Border>
+                </StackPanel>
 
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Icon size" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="IconSizeBox" Grid.Column="1" Header="DIP" Minimum="20" Maximum="40"
-                                SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Dock icon size in device-independent pixels"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Magnification" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="MagnificationScaleBox" Grid.Column="1" Header="Scale" Minimum="1" Maximum="1.6"
-                                SmallChange="0.05" LargeChange="0.1" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Maximum dock icon magnification scale"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="Hover wave effect" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock
-                                    Text="Smoothly deforms the dock glass toward the pointer. Turning it off keeps magnification and all dock interactions working."
-                                    Foreground="#A7B0BF"
-                                    FontSize="12"
-                                    TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <ToggleSwitch
-                                x:Name="HoverWaveToggle"
-                                Grid.Column="1"
-                                Header="Effect"
-                                OnContent="On"
-                                OffContent="Off"
-                                VerticalAlignment="Center"
-                                AutomationProperties.Name="Dock hover wave effect"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Icon spacing" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="IconSpacingBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="20"
-                                SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Spacing between dock icons in device-independent pixels"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Glass blur" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="GlassBlurAmountBox" Grid.Column="1" Header="Amount" Minimum="0" Maximum="60"
-                                SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Main dock glass blur amount"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Dock opacity" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="DockOpacityBox" Grid.Column="1" Header="Percent" Minimum="35" Maximum="100"
-                                SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Expanded dock glass opacity percentage"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Border thickness" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="BorderThicknessBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="2"
-                                SmallChange="0.1" LargeChange="0.5" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Expanded dock border thickness in device-independent pixels"/>
-                        </Grid>
-
-                        <Rectangle Height="1" Fill="#293342"/>
-
-                        <Grid ColumnSpacing="28">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="150"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Border opacity" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            <NumberBox x:Name="BorderOpacityBox" Grid.Column="1" Header="Percent" Minimum="0" Maximum="100"
-                                SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact"
-                                AutomationProperties.Name="Expanded dock border opacity percentage"/>
-                        </Grid>
+                <!-- Display -->
+                <StackPanel x:Name="DisplayPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Display" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Choose where the dock appears and its distance from the screen edge." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                     </StackPanel>
-                </Border>
 
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="StatusText"
-                        VerticalAlignment="Center"
-                        Foreground="#9EABBC"
-                        FontSize="12"
-                        TextWrapping="Wrap"/>
-                    <Button
-                        Grid.Column="1"
-                        Content="Reset to Defaults"
-                        Click="ResetClick"
-                        Padding="16,9"/>
-                    <Button
-                        x:Name="ApplyButton"
-                        Grid.Column="2"
-                        Content="Apply"
-                        Click="ApplyClick"
-                        Padding="22,9"/>
-                </Grid>
-            </StackPanel>
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="18">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Dock display" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Choose which monitor hosts GlassDock." FontSize="12" Foreground="#FF6B6B6B"/>
+                                </StackPanel>
+                                <ComboBox x:Name="DockDisplayModeBox" Grid.Column="1" HorizontalAlignment="Stretch" AutomationProperties.Name="Dock monitor behavior">
+                                    <ComboBoxItem Content="Primary display"/>
+                                    <ComboBoxItem Content="Follow pointer"/>
+                                    <ComboBoxItem Content="Follow active window"/>
+                                </ComboBox>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Bottom spacing" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Distance between the expanded dock and the bottom edge of the screen." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <NumberBox x:Name="BottomMarginBox" Grid.Column="1" Header="DIP" Minimum="16" Maximum="100" SmallChange="1" LargeChange="8" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Bottom spacing in device-independent pixels"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Advanced -->
+                <StackPanel x:Name="AdvancedPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Advanced" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Less frequently used visual controls for utility popups." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="18">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Utility popup appearance" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="These existing controls affect Hidden Tray, Quick Settings, and Calendar popup glass. They do not turn the main dock into glass." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="Material" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Choose the utility popup glass style." FontSize="12" Foreground="#FF6B6B6B"/>
+                                </StackPanel>
+                                <ComboBox x:Name="UtilityGlassMaterialModeBox" Grid.Column="1" Header="Style" AutomationProperties.Name="Utility popup glass material style">
+                                    <ComboBoxItem Content="Frosted"/>
+                                    <ComboBoxItem Content="Acrylic"/>
+                                    <ComboBoxItem Content="Clear"/>
+                                </ComboBox>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="Blur" FontWeight="SemiBold" Foreground="#FF222222" VerticalAlignment="Center"/>
+                                <NumberBox x:Name="GlassBlurAmountBox" Grid.Column="1" Header="Amount" Minimum="0" Maximum="60" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Utility popup glass blur amount"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="Opacity" FontWeight="SemiBold" Foreground="#FF222222" VerticalAlignment="Center"/>
+                                <NumberBox x:Name="DockOpacityBox" Grid.Column="1" Header="Percent" Minimum="35" Maximum="100" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Utility popup glass opacity percentage"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="Border thickness" FontWeight="SemiBold" Foreground="#FF222222" VerticalAlignment="Center"/>
+                                <NumberBox x:Name="BorderThicknessBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="2" SmallChange="0.1" LargeChange="0.5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Utility popup glass border thickness"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="Border opacity" FontWeight="SemiBold" Foreground="#FF222222" VerticalAlignment="Center"/>
+                                <NumberBox x:Name="BorderOpacityBox" Grid.Column="1" Header="Percent" Minimum="0" Maximum="100" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Utility popup glass border opacity percentage"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- About -->
+                <StackPanel x:Name="AboutPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="About" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="GlassDock information and local configuration." FontSize="13" Foreground="#FF6B6B6B"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="GlassDock" FontSize="22" FontWeight="SemiBold" Foreground="#FF222222"/>
+                            <TextBlock Text="A clean, modern dock for Windows 11." FontSize="13" Foreground="#FF6B6B6B"/>
+                            <TextBlock x:Name="VersionText" Margin="0,4,0,0" FontSize="12" Foreground="#FF6B6B6B"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Settings file" FontWeight="SemiBold" Foreground="#FF222222"/>
+                            <TextBlock x:Name="SettingsPathText" FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
         </ScrollViewer>
+
+        <!-- Bottom command bar -->
+        <Border Grid.Row="2" Grid.Column="1" Background="#FFFBFBFB" BorderBrush="#FFE4E4E4" BorderThickness="0,1,0,0" Padding="24,12">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#FF6B6B6B" FontSize="12" TextWrapping="Wrap"/>
+                <Button Grid.Column="1" Content="Reset to defaults" Click="ResetClick" Padding="16,9"/>
+                <Button x:Name="ApplyButton" Grid.Column="2" Content="Apply" Click="ApplyClick" Padding="22,9"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2" Grid.Column="0" Background="#FFFBFBFB" BorderBrush="#FFE4E4E4" BorderThickness="0,1,1,0"/>
     </Grid>
 </Window>

@@ -29,7 +29,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
     private readonly GlassSurface surface = new()
     {
-        UseDesktopBackdrop = true, Width = 120, Height = 5, Opacity = 0,
+        UseDesktopBackdrop = true, UsePlainSurface = true, Width = 120, Height = 5, Opacity = 0,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 16)
     };
@@ -88,7 +88,11 @@ public sealed class DesktopOverlayWindow : Window
     private readonly WindowPreviewCoordinator previews;
     private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
-    private readonly DesktopGlassBackdrop desktopBackdrop = new() { UseInnerEdge = true };
+    private readonly DesktopGlassBackdrop desktopBackdrop = new()
+    {
+        UseInnerEdge = false,
+        UseSolidSurface = true
+    };
     private readonly WindowsOverlayManager windowManager;
     private readonly WindowsKeyboardService keyboard;
     private readonly DockAnimationController animation;
@@ -464,14 +468,14 @@ keyboard.RecoveryRequested +=
 
     private Button CreateApplicationButton(DockApplicationItem item)
     {
-    var image = new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale);
+    var image = new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale, showTile: false);
 
     var running = new Border
     {
         Width = 4,
         Height = 3,
         CornerRadius = new CornerRadius(1.5),
-        Background = new SolidColorBrush(Colors.White),
+        Background = DockForegroundBrush(),
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 1)
@@ -495,8 +499,8 @@ keyboard.RecoveryRequested +=
         Content = content
     };
         ApplyIconLayout(button, content, image, Appearance);
-        button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(32, 255, 255, 255));
-        button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(global::Windows.UI.Color.FromArgb(56, 255, 255, 255));
+        button.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
+        button.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Colors.Transparent);
         button.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Colors.Transparent);
         button.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Colors.Transparent);
 
@@ -666,16 +670,22 @@ keyboard.RecoveryRequested +=
         return button;
     }
 
-    private static void SetUtilityButtonSelected(Button button, bool selected)
+    private SolidColorBrush DockForegroundBrush() => new(
+        settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light
+            ? global::Windows.UI.Color.FromArgb(255, 40, 40, 40)
+            : global::Windows.UI.Color.FromArgb(255, 240, 240, 240));
+
+    private void SetUtilityButtonSelected(Button button, bool selected)
     {
+        var shade = (byte)(settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light ? 0 : 255);
         var normal = new SolidColorBrush(
             selected
-                ? global::Windows.UI.Color.FromArgb(34, 255, 255, 255)
+                ? global::Windows.UI.Color.FromArgb(24, shade, shade, shade)
                 : Colors.Transparent);
         var hover = new SolidColorBrush(
-            global::Windows.UI.Color.FromArgb((byte)(selected ? 46 : 30), 255, 255, 255));
+            global::Windows.UI.Color.FromArgb((byte)(selected ? 34 : 20), shade, shade, shade));
         var pressed = new SolidColorBrush(
-            global::Windows.UI.Color.FromArgb((byte)(selected ? 60 : 50), 255, 255, 255));
+            global::Windows.UI.Color.FromArgb((byte)(selected ? 44 : 30), shade, shade, shade));
 
         button.Background = normal;
         button.Resources["ButtonBackground"] = normal;
@@ -1546,6 +1556,7 @@ keyboard.RecoveryRequested +=
         e.AcceptedOperation = DataPackageOperation.Copy;
         e.Handled = true;
 
+        var deferral = e.GetDeferral();
         try
         {
             var storageItems = await e.DataView.GetStorageItemsAsync();
@@ -1561,6 +1572,30 @@ keyboard.RecoveryRequested +=
                 return;
             }
 
+            // Application buttons also accept file drops ("Open with ..."). That
+            // must not steal executable/shortcut drags that are intended to pin a
+            // new application to GlassDock. If every dropped target looks like a
+            // launchable app/shortcut, preserve the dock-level pin behavior even
+            // when the pointer happens to be over an existing app button.
+            if (paths.All(IsDockPinTarget))
+            {
+                var added = 0;
+
+                foreach (var path in paths)
+                {
+                    if (applicationService.PinExternalTarget(path))
+                        added++;
+                }
+
+                SetStatus(added switch
+                {
+                    0 => "Nothing was pinned.",
+                    1 => "Pinned 1 item to GlassDock.",
+                    _ => $"Pinned {added} items to GlassDock."
+                });
+                return;
+            }
+
             if (dropLauncher.OpenWith(item.Application, paths))
                 SetStatus(paths.Length == 1 ? $"Opened dropped item with {item.Name}." : $"Opened {paths.Length} dropped items with {item.Name}.");
             else
@@ -1573,6 +1608,7 @@ keyboard.RecoveryRequested +=
         finally
         {
             SetApplicationDropTarget(button, false);
+            deferral.Complete();
         }
     }
 
@@ -1602,7 +1638,28 @@ keyboard.RecoveryRequested +=
         if (!ReferenceEquals(externalDropTargetButton, button)) return;
         RestoreApplicationDropTarget(button);
         externalDropTargetButton = null;
-        externalDragActive = true;
+        externalDragActive = false;
+
+        if (!closing)
+        {
+            pointerInsideDock = windowManager.IsPointerInsideInput();
+            RefreshHoverVisuals();
+        }
+    }
+
+    private static bool IsDockPinTarget(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || Directory.Exists(path))
+            return false;
+
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".exe", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".appref-ms", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".url", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".com", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void RestoreApplicationDropTarget(Button button)
@@ -1728,6 +1785,8 @@ keyboard.RecoveryRequested +=
             return;
         }
 
+        e.Handled = true;
+        var deferral = e.GetDeferral();
         try
         {
             var items = await e.DataView.GetStorageItemsAsync();
@@ -1762,6 +1821,7 @@ keyboard.RecoveryRequested +=
         finally
         {
             SetExternalDropVisual(false);
+            deferral.Complete();
         }
     }
 
@@ -2358,32 +2418,48 @@ keyboard.RecoveryRequested +=
         finally { if (ReferenceEquals(collapseDelay, delay)) collapseDelay = null; delay.Dispose(); }
     }
 
-    private void ApplyMaterial(bool expanded)
+    private void ApplyMaterial(bool expanded, DockAppearanceMode? dockAppearance = null)
     {
-        var material = Appearance.ApplyTo(
-            DockMaterialStylePresets.Create(Appearance.GlassMaterialMode) with
+        var mode = dockAppearance ?? settingsSession.Current.DockAppearanceMode;
+        var cornerRadius = expanded ? 34 : 2.5;
+        const double opacity = 1;
+
+        // The main dock is a plain solid surface. DesktopGlassBackdrop still
+        // owns the vector mask so the hover wave, DPI scaling, and native hit
+        // geometry remain unchanged. Utility popups keep their glass material.
+        surface.ApplyPlain(mode, opacity, cornerRadius);
+        var glassStyle = mode.GlassStyle();
+        var solid = glassStyle is null;
+        var reconnect = desktopBackdrop.UseSolidSurface != solid;
+        // Reconnect only when crossing between solid and glass. Disconnect
+        // disposes the previous effects; plain modes do no hidden glass work.
+        if (reconnect) SystemBackdrop = null;
+        desktopBackdrop.UseSolidSurface = solid;
+        desktopBackdrop.UseInnerEdge = !solid;
+        if (glassStyle is { } style)
         {
-            // Keep the dock's current frosted character, but round the
-            // expanded shell so it visually belongs with Glass Home.
-            BlurAmount = 20,
-            Opacity = 0.78,
-            CornerRadius = expanded ? 34 : 2.5,
-
-            // Slightly softer depth and a restrained luminous edge.
-            ShadowOpacity = expanded ? 0.24 : 0.28,
-            ShadowBlur = expanded ? 26 : 20,
-            ShadowOffset = expanded ? 7 : 6,
-            // Expanded mode uses the continuously deformed outline below,
-            // so disable GlassSurface's static rounded-rectangle rim.
-            EdgeHighlight = expanded ? 0 : 0,
-            BorderOpacity = expanded ? 0 : 0.18,
-            BorderThickness = expanded ? Appearance.BorderThickness : 1
-        },
-            expanded);
-
-        surface.Apply(material);
-        desktopBackdrop.Apply(material with { BorderOpacity = expanded ? Appearance.BorderOpacity : 0 });
+            desktopBackdrop.Apply(Appearance.ApplyTo(DockMaterialStylePresets.Create(style), true) with
+            {
+                CornerRadius = cornerRadius,
+                BorderThickness = Appearance.BorderThickness,
+                BorderOpacity = expanded ? Appearance.BorderOpacity : 0
+            });
+        }
+        else
+        {
+            desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);
+        }
+        if (reconnect) SystemBackdrop = desktopBackdrop;
+        ApplyIndicatorAppearance(mode);
         UpdateBackdropBounds();
+    }
+
+    private void ApplyIndicatorAppearance(DockAppearanceMode mode)
+    {
+        indicator.Background = new SolidColorBrush(
+            mode != DockAppearanceMode.Dark
+                ? global::Windows.UI.Color.FromArgb(255, 243, 243, 243)
+                : global::Windows.UI.Color.FromArgb(255, 36, 36, 36));
     }
 
     private void UpdateBackdropBounds()
@@ -2433,10 +2509,16 @@ keyboard.RecoveryRequested +=
             eventArgs.Settings.GlassBlurAmount,
             eventArgs.Settings.DockOpacity,
             eventArgs.Settings.BorderThickness,
-            eventArgs.Settings.BorderOpacity));
+            eventArgs.Settings.BorderOpacity),
+            eventArgs.Settings.DockAppearanceMode);
     }
 
-    private void ApplyAppearance(DockAppearanceSettings appearance)
+    private void ApplyAppearance(DockAppearanceSettings appearance) =>
+        ApplyAppearance(appearance, settingsSession.Current.DockAppearanceMode);
+
+    private void ApplyAppearance(
+        DockAppearanceSettings appearance,
+        DockAppearanceMode dockAppearance)
     {
         cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance);
         cachedSystemTrayWindow?.ApplyAppearance(appearance);
@@ -2444,9 +2526,27 @@ keyboard.RecoveryRequested +=
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
-        dockWaveRim.StrokeThickness = appearance.BorderThickness;
-        if (state.State == DockState.Expanded)
-            dockWaveRim.Opacity = appearance.BorderOpacity;
+        dockWaveRim.StrokeThickness = 0;
+        dockWaveRim.Opacity = 0;
+        var foreground = DockForegroundBrush();
+        icons.RequestedTheme = dockAppearance == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
+        utilityClock.Foreground = foreground;
+        foreach (var child in utilityCluster.Children)
+        {
+            if (child is Border divider)
+            {
+                divider.Background = foreground;
+                divider.Opacity = .2;
+            }
+            if (child is Button utilityButton)
+            {
+                if (utilityButton.Content is FontIcon glyph) glyph.Foreground = foreground;
+                utilityButton.Foreground = foreground;
+                utilityButton.Resources["ButtonForegroundPointerOver"] = foreground;
+                utilityButton.Resources["ButtonForegroundPressed"] = foreground;
+                SetUtilityButtonSelected(utilityButton, ReferenceEquals(utilityButton, activeUtilityButton));
+            }
+        }
 
         foreach (var button in applicationButtons.Values)
         {
@@ -2455,17 +2555,18 @@ keyboard.RecoveryRequested +=
                 continue;
 
             ApplyIconLayout(button, content, icon, appearance);
+            foreach (var running in content.Children.OfType<Border>()) running.Background = foreground;
         }
 
         if (state.State is DockState.Expanded)
         {
             surface.Width = CalculateTargetDockWidth();
             surface.Height = ExpandedDockHeight;
-            ApplyMaterial(expanded: true);
+            ApplyMaterial(expanded: true, dockAppearance: dockAppearance);
         }
         else
         {
-            ApplyMaterial(expanded: false);
+            ApplyMaterial(expanded: false, dockAppearance: dockAppearance);
         }
 
         UpdateBackdropBounds();

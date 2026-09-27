@@ -4,6 +4,7 @@ using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Effects;
 using GlassDock.Core.Materials;
+using GlassDock.Core.Settings;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
@@ -15,6 +16,12 @@ namespace GlassDock.App.Rendering;
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
     public bool UseInnerEdge { get; set; }
+    /// <summary>
+    /// Uses the existing vector mask and wave geometry with a solid color
+    /// source. This is used only by the main dock; utility popups retain the
+    /// desktop backdrop/material graph.
+    /// </summary>
+    public bool UseSolidSurface { get; set; }
     private double presentationScaleX = 1;
     private double presentationScaleY = 1;
     private double presentationOffsetX;
@@ -30,7 +37,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         if (visual is null) return;
         bodyTrack ??= new BackdropCompositionTrack(visual);
         bodyTrack.Bind();
-        var units = (float)(lastScale * (UseInnerEdge ? 2 : 1));
+        var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
         bodyTrack.Start(frames, duration, units);
         if (edgeVisual is not null)
         {
@@ -86,7 +93,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         if (visual is null)
             return;
 
-        var units = (float)(lastScale * (UseInnerEdge ? 2 : 1));
+        var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
         var origin = new Vector3(
             (float)presentationX * units,
             (float)presentationY * units,
@@ -144,6 +151,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionEffectFactory? factory;
     private W.CompositionEffectBrush? effect;
     private W.CompositionBackdropBrush? source;
+    private W.CompositionColorBrush? solidSurface;
     private W.CompositionPathGeometry? geometry;
     private W.CompositionSpriteShape? shape;
     private CanvasDevice? canvasDevice;
@@ -160,6 +168,9 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionMaskBrush? output;
     private W.CompositionBrush? fallback;
     private GlassMaterial material = new();
+    private DockAppearanceMode solidAppearance = DockAppearanceMode.Dark;
+    private double solidOpacity = 1;
+    private double solidCornerRadius = 28;
 
     // Retain the latest mask geometry because AppWindow.Hide()/Show()
     // can disconnect and reconnect the SystemBackdrop.
@@ -209,6 +220,34 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         mask.BitmapInterpolationMode = W.CompositionBitmapInterpolationMode.Linear;
         output = compositor.CreateMaskBrush();
         output.Mask = mask;
+
+        if (UseSolidSurface)
+        {
+            solidSurface = compositor.CreateColorBrush(SolidColor(solidAppearance, solidOpacity));
+            output.Source = solidSurface;
+            material = material with
+            {
+                CornerRadius = solidCornerRadius,
+                BorderOpacity = 0,
+                BorderThickness = 0,
+                EdgeHighlight = 0
+            };
+            RenderingMode = "Solid dock surface";
+            if (hasBounds)
+                ApplyBounds(
+                    lastWindowWidth,
+                    lastWindowHeight,
+                    lastWidth,
+                    lastHeight,
+                    lastBottom,
+                    lastScale,
+                    lastOpacity);
+
+            target.SystemBackdrop = output;
+            RenderingModeChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         var stage = "backdrop source";
         try
         {
@@ -350,6 +389,38 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         UpdateMaskPath();
     }
 
+    public void SetSolidAppearance(
+        DockAppearanceMode appearance,
+        double opacity,
+        double cornerRadius)
+    {
+        solidAppearance = Enum.IsDefined(appearance)
+            ? appearance
+            : DockAppearanceMode.Dark;
+        solidOpacity = double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
+        solidCornerRadius = double.IsFinite(cornerRadius) ? Math.Clamp(cornerRadius, 0, 100) : 28;
+        material = material with
+        {
+            CornerRadius = solidCornerRadius,
+            BorderOpacity = 0,
+            BorderThickness = 0,
+            EdgeHighlight = 0
+        };
+
+        if (solidSurface is not null)
+            solidSurface.Color = SolidColor(solidAppearance, solidOpacity);
+
+        UpdateMaskPath();
+    }
+
+    private static global::Windows.UI.Color SolidColor(DockAppearanceMode appearance, double opacity)
+    {
+        var alpha = (byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255);
+        return appearance == DockAppearanceMode.Light
+            ? global::Windows.UI.Color.FromArgb(alpha, 243, 243, 243)
+            : global::Windows.UI.Color.FromArgb(alpha, 36, 36, 36);
+    }
+
     public void SetBounds(
         double windowWidth,
         double windowHeight,
@@ -405,7 +476,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         // compositor then linearly downsamples the mask, preserving subpixel
         // coverage on rounded corners and the animated wave crest. The legacy
         // XAML rim is now geometry-only, so this is the sole visible edge path.
-        var sampling = UseInnerEdge ? 2f : 1f;
+        var sampling = UseInnerEdge || UseSolidSurface ? 2f : 1f;
         shape!.Scale = new Vector2(sampling);
         visual.Size = size * sampling;
         maskCaptureRoot!.Size = size * sampling;
@@ -667,6 +738,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         effect?.Dispose();
         factory?.Dispose();
         source?.Dispose();
+        solidSurface?.Dispose();
         compositor?.Dispose();
         output = null;
         mask = null;
@@ -682,6 +754,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         effect = null;
         factory = null;
         source = null;
+        solidSurface = null;
         compositor = null;
         base.OnTargetDisconnected(target);
     }

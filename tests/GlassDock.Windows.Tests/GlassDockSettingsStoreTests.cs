@@ -8,6 +8,25 @@ namespace GlassDock.Windows.Tests;
 public sealed class GlassDockSettingsStoreTests
 {
     [Theory]
+    [InlineData(DockAppearanceMode.Light)]
+    [InlineData(DockAppearanceMode.Dark)]
+    [InlineData(DockAppearanceMode.Frosted)]
+    [InlineData(DockAppearanceMode.Acrylic)]
+    [InlineData(DockAppearanceMode.Clear)]
+    public async Task Legacy_material_loads_with_plain_default_and_appearance_survives_restart(DockAppearanceMode mode)
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, "{\"GlassMaterialMode\":2,\"IconSize\":32}");
+        var old = await store.LoadAsync();
+        Assert.Equal(DockAppearanceMode.Dark, old.DockAppearanceMode);
+        Assert.Equal(GlassMaterialMode.Clear, old.GlassMaterialMode);
+        var updated = old with { DockAppearanceMode = mode };
+        await store.SaveAsync(updated);
+        Assert.Equal(updated, await location.CreateStore().LoadAsync());
+    }
+
+    [Theory]
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{\"IconSize\":\"obsolete\"}")]

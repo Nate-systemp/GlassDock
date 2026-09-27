@@ -5,7 +5,7 @@ namespace GlassDock.Windows.Tests;
 public sealed class DockAppearanceRuntimeWiringTests
 {
     [Fact]
-    public void Applied_appearance_reconfigures_layout_magnification_and_main_glass_material()
+    public void Applied_appearance_reconfigures_layout_and_uses_opaque_plain_dock()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "GlassDock.sln")))
@@ -32,14 +32,14 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("Math.Max(0, count - 1) * Appearance.IconSpacing", dock, StringComparison.Ordinal);
         Assert.Contains("windowManager.CurrentHostWidthDips", dock, StringComparison.Ordinal);
         Assert.Contains("applicationWidth + UtilityClusterWidth", dock, StringComparison.Ordinal);
-        Assert.Contains("new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale)", dock, StringComparison.Ordinal);
+        Assert.Contains("new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale, showTile: false)", dock, StringComparison.Ordinal);
         Assert.Contains("icon.Configure(appearance.IconSize, appearance.MagnificationScale);", dock, StringComparison.Ordinal);
         Assert.Contains("animation.SetMaximumMagnificationScale(appearance.MagnificationScale);", dock, StringComparison.Ordinal);
-        Assert.Contains("Appearance.ApplyTo(", dock, StringComparison.Ordinal);
-        Assert.Contains("DockMaterialStylePresets.Create(Appearance.GlassMaterialMode)", dock, StringComparison.Ordinal);
-        Assert.Contains("BorderThickness = expanded ? Appearance.BorderThickness : 1", dock, StringComparison.Ordinal);
-        Assert.Contains("dockWaveRim.StrokeThickness = appearance.BorderThickness;", dock, StringComparison.Ordinal);
-        Assert.Contains("dockWaveRim.Opacity = appearance.BorderOpacity;", dock, StringComparison.Ordinal);
+        Assert.Contains("UseSolidSurface = true", dock, StringComparison.Ordinal);
+        Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
+        Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
+        Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance);", dock, StringComparison.Ordinal);
         Assert.Contains("double targetHeight = 68", animation, StringComparison.Ordinal);
         Assert.Contains("maximumMagnificationScale - 1", animation, StringComparison.Ordinal);
     }

@@ -26,6 +26,7 @@ public sealed record GlassDockSettings
     public const double DefaultBorderOpacity = 0.78;
     public const bool DefaultHoverWaveEnabled = true;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
+    public const DockAppearanceMode DefaultDockAppearanceMode = DockAppearanceMode.Dark;
     public const DockDisplayMode DefaultDockDisplayMode = DockDisplayMode.Primary;
 
     public const double MinimumBottomMargin = 16;
@@ -64,6 +65,7 @@ public sealed record GlassDockSettings
     public double BorderOpacity { get; init; } = DefaultBorderOpacity;
     public bool HoverWaveEnabled { get; init; } = DefaultHoverWaveEnabled;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
+    public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
 
     /// <summary>
@@ -126,6 +128,9 @@ public sealed record GlassDockSettings
                 MaximumBorderOpacity,
                 DefaultBorderOpacity),
             GlassMaterialMode = DockMaterialStylePresets.Normalize(settings.GlassMaterialMode),
+            DockAppearanceMode = Enum.IsDefined(settings.DockAppearanceMode)
+                ? settings.DockAppearanceMode
+                : DefaultDockAppearanceMode,
             DockDisplayMode = Enum.IsDefined(settings.DockDisplayMode)
                 ? settings.DockDisplayMode
                 : DefaultDockDisplayMode

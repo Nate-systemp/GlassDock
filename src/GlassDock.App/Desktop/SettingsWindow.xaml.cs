@@ -27,9 +27,13 @@ public sealed partial class SettingsWindow : Window
         this.shutdown = shutdown;
 
         InitializeComponent();
+        UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
         Title = "GlassDock Settings";
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(720, 820));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
+
+        ShowSettingsPage("Appearance");
         Populate(settingsSession.Current);
+        PopulateAbout();
         SetStatus("Settings loaded.", success: true);
         Closed += (_, _) => closed = true;
     }
@@ -37,7 +41,10 @@ public sealed partial class SettingsWindow : Window
     private void Populate(GlassDockSettings settings)
     {
         populating = true;
-        GlassMaterialModeBox.SelectedIndex = (int)settings.GlassMaterialMode;
+
+        DockAppearanceModeBox.SelectedIndex = (int)settings.DockAppearanceMode;
+        UpdateDockAppearanceDescription(settings.DockAppearanceMode);
+
         DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
         BottomMarginBox.Value = settings.BottomMargin;
         AutoHideDelayBox.Value = settings.AutoHideDelayMilliseconds / 1000d;
@@ -45,6 +52,7 @@ public sealed partial class SettingsWindow : Window
         IconSizeBox.Value = settings.IconSize;
         MagnificationScaleBox.Value = settings.MagnificationScale;
         IconSpacingBox.Value = settings.IconSpacing;
+        UtilityGlassMaterialModeBox.SelectedIndex = (int)settings.GlassMaterialMode;
         GlassBlurAmountBox.Value = settings.GlassBlurAmount;
         DockOpacityBox.Value = settings.DockOpacity * 100;
         BorderThicknessBox.Value = settings.BorderThickness;
@@ -53,25 +61,72 @@ public sealed partial class SettingsWindow : Window
         populating = false;
     }
 
-    private void MaterialModeChanged(object sender, SelectionChangedEventArgs e)
+    private GlassMaterialMode SelectedGlassMaterialMode =>
+        Enum.IsDefined((GlassMaterialMode)UtilityGlassMaterialModeBox.SelectedIndex)
+            ? (GlassMaterialMode)UtilityGlassMaterialModeBox.SelectedIndex
+            : GlassMaterialMode.Frosted;
+
+    private void UtilityGlassMaterialChanged(object sender, SelectionChangedEventArgs e)
     {
         if (populating)
             return;
 
-        var material = DockMaterialStylePresets.Create(SelectedMaterialMode);
-        GlassBlurAmountBox.Value = material.BlurAmount;
-        DockOpacityBox.Value = material.Opacity * 100;
-        BorderThicknessBox.Value = material.BorderThickness;
-        BorderOpacityBox.Value = material.BorderOpacity * 100;
+        var preset = DockMaterialStylePresets.Create(SelectedGlassMaterialMode);
+        GlassBlurAmountBox.Value = preset.BlurAmount;
+        DockOpacityBox.Value = preset.Opacity * 100;
+        BorderThicknessBox.Value = preset.BorderThickness;
+        BorderOpacityBox.Value = preset.BorderOpacity * 100;
     }
 
-    private GlassMaterialMode SelectedMaterialMode =>
-        GlassMaterialModeBox.SelectedIndex switch
+    private void PopulateAbout()
+    {
+        var version = typeof(SettingsWindow).Assembly.GetName().Version;
+        VersionText.Text = version is null
+            ? "Version unavailable"
+            : $"Version {version.Major}.{version.Minor}.{version.Build}";
+        SettingsPathText.Text = settingsStore.SettingsFilePath;
+    }
+
+    private DockAppearanceMode SelectedDockAppearance =>
+        Enum.IsDefined((DockAppearanceMode)DockAppearanceModeBox.SelectedIndex)
+            ? (DockAppearanceMode)DockAppearanceModeBox.SelectedIndex
+            : DockAppearanceMode.Dark;
+
+    private void DockAppearanceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (populating)
+            return;
+
+        var mode = SelectedDockAppearance;
+        UpdateDockAppearanceDescription(mode);
+
+        // Selecting one of the main-dock glass styles restores that style's
+        // material preset into the editable glass controls. The dock itself
+        // changes after Apply, matching the rest of this settings window.
+        if (mode.GlassStyle() is not { } style)
+            return;
+
+        UtilityGlassMaterialModeBox.SelectedIndex = (int)style;
+        var preset = DockMaterialStylePresets.Create(style);
+        GlassBlurAmountBox.Value = preset.BlurAmount;
+        DockOpacityBox.Value = preset.Opacity * 100;
+        BorderThicknessBox.Value = preset.BorderThickness;
+        BorderOpacityBox.Value = preset.BorderOpacity * 100;
+        SetStatus($"{mode} selected. Select Apply to use it on the dock.", success: true);
+    }
+
+    private void UpdateDockAppearanceDescription(DockAppearanceMode mode)
+    {
+        DockAppearanceDescription.Text = mode switch
         {
-            (int)GlassMaterialMode.Acrylic => GlassMaterialMode.Acrylic,
-            (int)GlassMaterialMode.Clear => GlassMaterialMode.Clear,
-            _ => GlassMaterialMode.Frosted
+            DockAppearanceMode.Light => "Soft off-white solid surface with no glass effect.",
+            DockAppearanceMode.Dark => "Deep charcoal solid surface with no glass effect.",
+            DockAppearanceMode.Frosted => "Soft blurred glass with stronger diffusion and an opaque feel.",
+            DockAppearanceMode.Acrylic => "Lighter acrylic-style glass with more background visibility.",
+            DockAppearanceMode.Clear => "The clearest glass preset with minimal blur and higher transparency.",
+            _ => "Choose the material used by the main dock."
         };
+    }
 
     private DockDisplayMode SelectedDisplayMode =>
         DockDisplayModeBox.SelectedIndex switch
@@ -81,10 +136,42 @@ public sealed partial class SettingsWindow : Window
             _ => DockDisplayMode.Primary
         };
 
+    private void NavigationClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string page)
+            ShowSettingsPage(page);
+    }
+
+    private void ShowSettingsPage(string page)
+    {
+        AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        BehaviorPage.Visibility = page == "Behavior" ? Visibility.Visible : Visibility.Collapsed;
+        DisplayPage.Visibility = page == "Display" ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedPage.Visibility = page == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
+        AboutPage.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
+
+        SetNavigationState(AppearanceNavButton, page == "Appearance");
+        SetNavigationState(BehaviorNavButton, page == "Behavior");
+        SetNavigationState(DisplayNavButton, page == "Display");
+        SetNavigationState(AdvancedNavButton, page == "Advanced");
+        SetNavigationState(AboutNavButton, page == "About");
+    }
+
+    private static void SetNavigationState(Button button, bool selected)
+    {
+        button.Background = new SolidColorBrush(selected
+            ? ColorHelper.FromArgb(255, 231, 241, 255)
+            : Colors.Transparent);
+        button.Foreground = new SolidColorBrush(selected
+            ? ColorHelper.FromArgb(255, 15, 95, 168)
+            : ColorHelper.FromArgb(255, 51, 51, 51));
+    }
+
     private void ResetClick(object sender, RoutedEventArgs e)
     {
         var defaults = settingsSession.CreateDefaultEditableSettings();
         Populate(defaults);
+        ShowSettingsPage("Appearance");
         SetStatus("Defaults are ready. Select Apply to save them.", success: true);
     }
 
@@ -108,7 +195,7 @@ public sealed partial class SettingsWindow : Window
                 ToMilliseconds(
                     PeekDelayBox.Value,
                     current.PeekDelayMilliseconds),
-                SelectedMaterialMode,
+                SelectedDockAppearance.GlassStyle() ?? SelectedGlassMaterialMode,
                 IconSizeBox.Value,
                 MagnificationScaleBox.Value,
                 IconSpacingBox.Value,
@@ -117,7 +204,10 @@ public sealed partial class SettingsWindow : Window
                 BorderThicknessBox.Value,
                 BorderOpacityBox.Value / 100,
                 SelectedDisplayMode,
-                HoverWaveToggle.IsOn);
+                HoverWaveToggle.IsOn) with
+            {
+                DockAppearanceMode = SelectedDockAppearance
+            };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closed || shutdown.IsRequested)
@@ -160,7 +250,7 @@ public sealed partial class SettingsWindow : Window
     {
         StatusText.Text = message;
         StatusText.Foreground = new SolidColorBrush(success
-            ? ColorHelper.FromArgb(255, 151, 208, 192)
+            ? ColorHelper.FromArgb(255, 55, 120, 98)
             : Colors.IndianRed);
     }
 }
