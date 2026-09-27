@@ -32,6 +32,9 @@ public sealed class WindowsOverlayManager : IDisposable
     public const double Width = 1600;
     public const double Height = 144;
     public double CurrentHostWidthDips { get; private set; } = 960;
+    // Keep a remembered expanded dock width so an external OLE drag can be
+    // acquired before WinUI receives DragEnter and expands the dock.
+    private double dropAcquisitionWidthDips = 560;
     public double Scale => NativeMethods.GetDpiForWindow(hwnd) is var dpi && dpi > 0 ? dpi / 96d : 1;
 
     public void Configure(bool inspection = false)
@@ -55,7 +58,9 @@ public sealed class WindowsOverlayManager : IDisposable
         foregroundHook = NativeMethods.SetWinEventHook(3, 3, 0, foregroundCallback, 0, 0, 0);
         if (foregroundHook == 0) throw new InvalidOperationException("Cannot monitor foreground changes for the desktop overlay.");
         EnsureTopmost();
-        NativeMethods.SetTimer(hwnd, TopmostTimer, 250, 0);
+        // WinUI can perform one final z-order update after the HWND is first shown.
+        // Reassert once after startup settles; foreground WinEvents handle later changes.
+        NativeMethods.SetTimer(hwnd, TopmostTimer, 350, 0);
     }
 
     private void ConfigureTransparency()
@@ -81,22 +86,21 @@ public sealed class WindowsOverlayManager : IDisposable
     {
         if (message == 0x0113 && wParam == TopmostTimer)
         {
-            // Foreground notifications can precede an app's final z-order update.
-            // Reassert without activation, but leave our focused utility popup above us.
-            var foreground = NativeMethods.GetForegroundWindow();
-            NativeMethods.GetWindowThreadProcessId(foreground, out var foregroundProcess);
-            NativeMethods.GetWindowThreadProcessId(hwnd, out var dockProcess);
-            if (foreground != 0 && foregroundProcess != dockProcess) EnsureTopmost();
+            // One-shot startup settle. Do not keep a permanent z-order polling timer.
+            NativeMethods.KillTimer(hwnd, TopmostTimer);
+            EnsureTopmost();
             return 0;
         }
         if (message == 0x0084 && inputRegion != 0) // WM_NCHITTEST, signed virtual-desktop coordinates
         {
             var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
             var inside = ContainsScreenPoint(point);
-            // Hit-test callers can probe points other than the physical cursor.
-            // Do not let such a probe disable the entire HWND for OLE drops.
-            // The existing cursor sampler owns cross-process click-through.
-            return inside ? 1 : -1; // HTCLIENT / HTTRANSPARENT; layered style passes to other processes.
+            var acquiringExternalDrag = IsLeftButtonDown() && ContainsDropAcquisitionPoint(point);
+            // OLE asks Windows which HWND owns the current drag point. A fully
+            // click-through layered host can otherwise never receive DragEnter,
+            // so admit a small acquisition band around the visible dock while
+            // the left button is held. Normal pointer hit-testing remains exact.
+            return inside || acquiringExternalDrag ? 1 : -1; // HTCLIENT / HTTRANSPARENT
         }
         if (message == 0x0113 && wParam == InputTimer) { UpdateInputTransparency(); return 0; }
         if (message == 0x0014 && ClearBackground((nint)wParam)) return 1;
@@ -300,14 +304,18 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public void SetInteractionRegion(bool expanded, double bottomMargin = 24)
     {
-        expandedInput = false;
         NativeMethods.KillTimer(hwnd, InputTimer);
         SetInputTransparent(false);
         if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
         inputRegion = 0;
         lastInteractionPolygon = null;
         var scale = Scale;
-        // The idle hit target surrounds the pill and reaches through its lower margin.
+        // Keep the HWND itself full-size and store the interactive shape separately.
+        // OLE drag/drop resolves a target HWND before WinUI raises DragEnter; clipping
+        // the actual HWND down to the tiny collapsed pill makes external drops miss
+        // GlassDock entirely. Normal mouse input still passes through via
+        // HTTRANSPARENT / WS_EX_TRANSPARENT outside this region.
+        NativeMethods.SetWindowRgn(hwnd, 0, true);
         var hostWidth = NativeMethods.GetClientRect(hwnd, out var client) ? (client.Right - client.Left) / scale : Width;
         var x = expanded ? 0 : (hostWidth - 200) / 2;
         var y = expanded ? 0 : Math.Max(0, Height - bottomMargin - 28);
@@ -316,12 +324,15 @@ public sealed class WindowsOverlayManager : IDisposable
         var region = NativeMethods.CreateRoundRectRgn((int)(x * scale), (int)(y * scale),
             (int)((x + width) * scale) + 1, (int)((y + height) * scale) + 1, (int)(16 * scale), (int)(16 * scale));
         if (region == 0) throw new Win32Exception();
-        if (NativeMethods.SetWindowRgn(hwnd, region, true) == 0)
-        {
-            NativeMethods.DeleteObject(region);
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        // Windows owns the region after a successful SetWindowRgn.
+
+        inputRegion = region;
+        expandedInput = true;
+        if (NativeMethods.GetCursorPos(out var current)) previousPointer = current;
+        // Reuse the existing sampler while collapsed too. It is required to remove
+        // WS_EX_TRANSPARENT as an OLE drag enters the acquisition corridor; no new
+        // timer or background worker is introduced.
+        NativeMethods.SetTimer(hwnd, InputTimer, 50, 0);
+        UpdateInputTransparency();
     }
 
     /// <summary>
@@ -379,6 +390,15 @@ public sealed class WindowsOverlayManager : IDisposable
         {
             X = (int)Math.Round(p.X * scale), Y = (int)Math.Round(p.Y * scale)
         }).ToArray();
+
+        // Remember the real expanded dock width. While the dock is collapsed,
+        // Explorer/OLE still needs a reasonable pre-DragEnter acquisition target;
+        // otherwise the click-through host can never become the drop target.
+        var polygonWidthPixels = points.Max(p => p.X) - points.Min(p => p.X);
+        var polygonWidthDips = polygonWidthPixels / Math.Max(scale, 0.001);
+        if (polygonWidthDips > 240)
+            dropAcquisitionWidthDips = Math.Clamp(polygonWidthDips, 320, CurrentHostWidthDips);
+
         if (lastInteractionPolygon is { } previous && points.SequenceEqual(previous)) return;
         var region = NativeMethods.CreatePolygonRgn(points, points.Length, 2 /* WINDING */);
         if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -406,7 +426,8 @@ public sealed class WindowsOverlayManager : IDisposable
     {
         if (inputRegion == 0 || !NativeMethods.GetCursorPos(out var point)) return;
         var inside = ContainsScreenPoint(point);
-        SetInputTransparent(!inside);
+        var acquiringExternalDrag = IsLeftButtonDown() && ContainsDropAcquisitionPoint(point);
+        SetInputTransparent(!(inside || acquiringExternalDrag));
         var moved = previousPointer is { } previous && (previous.X != point.X || previous.Y != point.Y);
         previousPointer = point;
         // Geometry movement alone must not cause a raised pill to oscillate.
@@ -415,6 +436,40 @@ public sealed class WindowsOverlayManager : IDisposable
             if (inside) PointerMovedInsideInput?.Invoke(this, EventArgs.Empty);
             else PointerMovedOutsideInput?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private static bool IsLeftButtonDown() =>
+        (NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
+
+    private bool ContainsDropAcquisitionPoint(NativeMethods.Point point)
+    {
+        if (!NativeMethods.GetWindowRect(hwnd, out var bounds))
+            return false;
+
+        var scale = Math.Max(Scale, 0.001);
+        var hostWidthPixels = bounds.Right - bounds.Left;
+        var hostHeightPixels = bounds.Bottom - bounds.Top;
+        if (hostWidthPixels <= 0 || hostHeightPixels <= 0)
+            return false;
+
+        var localX = point.X - bounds.Left;
+        var localY = point.Y - bounds.Top;
+
+        // OLE resolves the target HWND before XAML can raise DragEnter. When the
+        // dock is collapsed, its normal input polygon is only the tiny home pill,
+        // which makes application drags miss GlassDock entirely. During a real
+        // left-button drag only, expose a centered acquisition corridor sized to
+        // the last expanded dock width (with a little breathing room). Once
+        // DragEnter fires, the existing dock logic expands and normal hit-testing
+        // takes over. No permanent input area or polling is added.
+        var requestedWidthPixels = (int)Math.Round(
+            Math.Clamp(dropAcquisitionWidthDips + 112, 360, CurrentHostWidthDips) * scale);
+        var acquisitionWidthPixels = Math.Min(hostWidthPixels, requestedWidthPixels);
+        var minX = (hostWidthPixels - acquisitionWidthPixels) / 2;
+        var maxX = minX + acquisitionWidthPixels;
+
+        return localX >= minX && localX <= maxX &&
+               localY >= 0 && localY < hostHeightPixels;
     }
 
     private void SetInputTransparent(bool transparent)

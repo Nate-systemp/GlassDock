@@ -13,6 +13,13 @@ public sealed partial class SettingsWindow : Window
     private readonly GlassDockSettingsSession settingsSession;
     private readonly GlassDockSettingsStore settingsStore;
     private readonly ApplicationShutdownState shutdown;
+    private readonly WindowsStartupService startupService = new();
+    private readonly bool safeMode;
+    private readonly Action restoreTaskbar;
+    private readonly Action resumeTaskbar;
+    private readonly Action restartGlassDock;
+    private readonly Action restartSafeMode;
+    private readonly Action exitGlassDock;
     private bool saving;
     private bool closed;
     private bool populating;
@@ -20,11 +27,23 @@ public sealed partial class SettingsWindow : Window
     public SettingsWindow(
         GlassDockSettingsSession settingsSession,
         GlassDockSettingsStore settingsStore,
-        ApplicationShutdownState shutdown)
+        ApplicationShutdownState shutdown,
+        bool safeMode,
+        Action restoreTaskbar,
+        Action resumeTaskbar,
+        Action restartGlassDock,
+        Action restartSafeMode,
+        Action exitGlassDock)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
         this.shutdown = shutdown;
+        this.safeMode = safeMode;
+        this.restoreTaskbar = restoreTaskbar;
+        this.resumeTaskbar = resumeTaskbar;
+        this.restartGlassDock = restartGlassDock;
+        this.restartSafeMode = restartSafeMode;
+        this.exitGlassDock = exitGlassDock;
 
         InitializeComponent();
         UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
@@ -32,8 +51,13 @@ public sealed partial class SettingsWindow : Window
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
 
         ShowSettingsPage("Appearance");
-        Populate(settingsSession.Current);
+        var startupEnabled = startupService.IsEnabled();
+        Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         PopulateAbout();
+        RecoveryModeStatusText.Text = safeMode
+            ? "Safe Mode is active. Taskbar suppression, GlassDock Win-key interception, and Hover Wave are disabled for this session."
+            : "Normal mode is active.";
+        ResumeTaskbarButton.IsEnabled = !safeMode;
         SetStatus("Settings loaded.", success: true);
         Closed += (_, _) => closed = true;
     }
@@ -58,6 +82,7 @@ public sealed partial class SettingsWindow : Window
         BorderThicknessBox.Value = settings.BorderThickness;
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
+        LaunchAtStartupToggle.IsOn = settings.LaunchAtStartup;
         populating = false;
     }
 
@@ -147,13 +172,17 @@ public sealed partial class SettingsWindow : Window
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPage.Visibility = page == "Behavior" ? Visibility.Visible : Visibility.Collapsed;
         DisplayPage.Visibility = page == "Display" ? Visibility.Visible : Visibility.Collapsed;
+        StartupPage.Visibility = page == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         AdvancedPage.Visibility = page == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
+        RecoveryPage.Visibility = page == "Recovery" ? Visibility.Visible : Visibility.Collapsed;
         AboutPage.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
 
         SetNavigationState(AppearanceNavButton, page == "Appearance");
         SetNavigationState(BehaviorNavButton, page == "Behavior");
         SetNavigationState(DisplayNavButton, page == "Display");
+        SetNavigationState(StartupNavButton, page == "Startup");
         SetNavigationState(AdvancedNavButton, page == "Advanced");
+        SetNavigationState(RecoveryNavButton, page == "Recovery");
         SetNavigationState(AboutNavButton, page == "About");
     }
 
@@ -184,9 +213,21 @@ public sealed partial class SettingsWindow : Window
         ApplyButton.IsEnabled = false;
         SetStatus("Saving…", success: true);
 
+        var startupRegistrationChanged = false;
+        var previousStartupRegistration = false;
+
         try
         {
             var current = settingsSession.Current;
+            var desiredStartup = LaunchAtStartupToggle.IsOn;
+            previousStartupRegistration = startupService.IsEnabled();
+
+            if (previousStartupRegistration != desiredStartup)
+            {
+                startupService.SetEnabled(desiredStartup);
+                startupRegistrationChanged = true;
+            }
+
             var edited = settingsSession.CreateDockSettingsUpdate(
                 BottomMarginBox.Value,
                 ToMilliseconds(
@@ -206,7 +247,8 @@ public sealed partial class SettingsWindow : Window
                 SelectedDisplayMode,
                 HoverWaveToggle.IsOn) with
             {
-                DockAppearanceMode = SelectedDockAppearance
+                DockAppearanceMode = SelectedDockAppearance,
+                LaunchAtStartup = desiredStartup
             };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
@@ -216,6 +258,140 @@ public sealed partial class SettingsWindow : Window
             settingsSession.Replace(edited);
             Populate(settingsSession.Current);
             SetStatus("Saved. Changes are active now.", success: true);
+        }
+        catch (OperationCanceledException) when (shutdown.IsRequested)
+        {
+            if (startupRegistrationChanged)
+                TryRestoreStartupRegistration(previousStartupRegistration);
+        }
+        catch (Exception error)
+        {
+            if (startupRegistrationChanged)
+                TryRestoreStartupRegistration(previousStartupRegistration);
+
+            if (!closed)
+                SetStatus($"Settings could not be saved: {error.Message}", success: false);
+        }
+        finally
+        {
+            saving = false;
+            if (!closed && !shutdown.IsRequested)
+                ApplyButton.IsEnabled = true;
+        }
+    }
+
+    private void TryRestoreStartupRegistration(bool enabled)
+    {
+        try { startupService.SetEnabled(enabled); }
+        catch (Exception error) when (
+            error is UnauthorizedAccessException or
+            IOException or
+            InvalidOperationException or
+            System.Security.SecurityException)
+        {
+        }
+    }
+
+    private void RestoreTaskbarClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested)
+            return;
+
+        restoreTaskbar();
+        SetStatus("Windows taskbar restore requested. Suppression is paused for this session.", success: true);
+    }
+
+    private void ResumeTaskbarClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested)
+            return;
+
+        if (safeMode)
+        {
+            SetStatus("Safe Mode keeps taskbar suppression disabled.", success: false);
+            return;
+        }
+
+        resumeTaskbar();
+        SetStatus("Taskbar suppression resume requested.", success: true);
+    }
+
+    private void RestartClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested)
+            return;
+
+        restartGlassDock();
+    }
+
+    private void SafeModeClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested)
+            return;
+
+        restartSafeMode();
+    }
+
+    private async void ResetAppearanceClick(object sender, RoutedEventArgs e)
+    {
+        if (saving || closed || shutdown.IsRequested)
+            return;
+
+        var current = settingsSession.Current;
+        var edited = GlassDockSettings.Normalize(current with
+        {
+            DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode,
+            GlassMaterialMode = GlassDockSettings.DefaultGlassMaterialMode,
+            IconSize = GlassDockSettings.DefaultIconSize,
+            MagnificationScale = GlassDockSettings.DefaultMagnificationScale,
+            IconSpacing = GlassDockSettings.DefaultIconSpacing,
+            GlassBlurAmount = GlassDockSettings.DefaultGlassBlurAmount,
+            DockOpacity = GlassDockSettings.DefaultDockOpacity,
+            BorderThickness = GlassDockSettings.DefaultBorderThickness,
+            BorderOpacity = GlassDockSettings.DefaultBorderOpacity
+        });
+
+        await SaveRecoverySettingsAsync(edited, "Appearance reset to defaults.");
+    }
+
+    private async void ResetPlacementClick(object sender, RoutedEventArgs e)
+    {
+        if (saving || closed || shutdown.IsRequested)
+            return;
+
+        var current = settingsSession.Current;
+        var edited = GlassDockSettings.Normalize(current with
+        {
+            DockDisplayMode = GlassDockSettings.DefaultDockDisplayMode,
+            BottomMargin = GlassDockSettings.DefaultBottomMargin
+        });
+
+        await SaveRecoverySettingsAsync(edited, "Dock placement reset to the primary display defaults.");
+    }
+
+    private void ExitClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested)
+            return;
+
+        exitGlassDock();
+    }
+
+    private async Task SaveRecoverySettingsAsync(GlassDockSettings edited, string successMessage)
+    {
+        saving = true;
+        ApplyButton.IsEnabled = false;
+        SetStatus("Saving…", success: true);
+
+        try
+        {
+            await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
+            if (closed || shutdown.IsRequested)
+                return;
+
+            settingsSession.Replace(edited);
+            Populate(settingsSession.Current);
+            SetStatus(successMessage, success: true);
         }
         catch (OperationCanceledException) when (shutdown.IsRequested)
         {

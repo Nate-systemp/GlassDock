@@ -46,7 +46,13 @@
                 <Button x:Name="DisplayNavButton" Content="Display" Tag="Display" Click="NavigationClick"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
                         Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="StartupNavButton" Content="Startup" Tag="Startup" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
                 <Button x:Name="AdvancedNavButton" Content="Advanced" Tag="Advanced" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="RecoveryNavButton" Content="Recovery" Tag="Recovery" Click="NavigationClick"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
                         Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
 
@@ -221,6 +227,31 @@
                     </Border>
                 </StackPanel>
 
+                <!-- Startup -->
+                <StackPanel x:Name="StartupPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Startup" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Control how GlassDock starts when you sign in to Windows." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <Grid ColumnSpacing="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Text="Start GlassDock when I sign in" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Uses your Windows user startup registration. GlassDock also prevents duplicate dock instances." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ToggleSwitch x:Name="LaunchAtStartupToggle"
+                                          Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          AutomationProperties.Name="Start GlassDock when I sign in"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
                 <!-- Advanced -->
                 <StackPanel x:Name="AdvancedPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
@@ -280,6 +311,75 @@
                                 <NumberBox x:Name="BorderOpacityBox" Grid.Column="1" Header="Percent" Minimum="0" Maximum="100" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Utility popup glass border opacity percentage"/>
                             </Grid>
                         </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Recovery -->
+                <StackPanel x:Name="RecoveryPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Recovery" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Restore Windows shell behavior or restart GlassDock in a safer mode." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Taskbar safety" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock x:Name="RecoveryModeStatusText" FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Content="Restore Windows taskbar" Click="RestoreTaskbarClick" Padding="14,8"/>
+                                <Button x:Name="ResumeTaskbarButton" Grid.Column="1" Content="Resume suppression" Click="ResumeTaskbarClick" Padding="14,8"/>
+                            </Grid>
+
+                            <TextBlock Text="Restoring the taskbar pauses suppression for this GlassDock session. Restart GlassDock or choose Resume suppression to turn it back on." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Restart and Safe Mode" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Safe Mode keeps the Windows taskbar visible, disables GlassDock Win-key interception, and disables Hover Wave for that session." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="Restart GlassDock" Click="RestartClick" Padding="14,8"/>
+                                <Button Content="Restart in Safe Mode" Click="SafeModeClick" Padding="14,8"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Reset" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Reset only the selected area. Startup registration and unrelated settings are left alone." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="Reset appearance" Click="ResetAppearanceClick" Padding="14,8"/>
+                                <Button Content="Reset dock placement" Click="ResetPlacementClick" Padding="14,8"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="#FFFFF4F4" BorderBrush="#FFF0CACA" BorderThickness="1">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Text="Exit GlassDock" FontWeight="SemiBold" Foreground="#FF7A1F1F"/>
+                                <TextBlock Text="GlassDock restores the Windows taskbar before it exits." FontSize="12" Foreground="#FF7A5A5A"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Exit" Click="ExitClick" Padding="16,8"/>
+                        </Grid>
                     </Border>
                 </StackPanel>
 

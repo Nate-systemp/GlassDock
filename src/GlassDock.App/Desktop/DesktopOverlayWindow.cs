@@ -100,6 +100,9 @@ public sealed class DesktopOverlayWindow : Window
     private readonly GlassDockSettingsStore settingsStore;
     private readonly ApplicationShutdownState shutdown;
     private readonly Action shutdownCompleted;
+    private readonly bool safeMode;
+    private readonly Action<bool>? prepareRestart;
+    private bool taskbarSuppressionPaused;
     private readonly RetainedWindowSlot<SettingsWindow> settingsWindow = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer heartbeat;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer displayTimer;
@@ -175,7 +178,7 @@ public sealed class DesktopOverlayWindow : Window
 
     public double BottomMargin { get; private set; }
     private DockAppearanceSettings Appearance => settingsSession.Appearance;
-    private bool HoverWaveEnabled => settingsSession.Current.HoverWaveEnabled;
+    private bool HoverWaveEnabled => !safeMode && settingsSession.Current.HoverWaveEnabled;
     private double ExpandedDockHeight => Math.Max(68, Appearance.ButtonHeight + 24);
     private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
@@ -189,12 +192,16 @@ public sealed class DesktopOverlayWindow : Window
         GlassDockSettingsStore settingsStore,
         ApplicationShutdownState shutdown,
         Action shutdownCompleted,
-        bool inspection = false)
+        bool inspection = false,
+        bool safeMode = false,
+        Action<bool>? prepareRestart = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
         this.shutdown = shutdown;
         this.shutdownCompleted = shutdownCompleted;
+        this.safeMode = safeMode;
+        this.prepareRestart = prepareRestart;
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
         settingsSession.Changed += SettingsChanged;
 
@@ -313,7 +320,7 @@ public sealed class DesktopOverlayWindow : Window
 
 
 
-        keyboard = new WindowsKeyboardService(hwnd);
+        keyboard = new WindowsKeyboardService(hwnd, enableDockShortcuts: !safeMode);
 
 keyboard.HomeRequested +=
     async (_, _) =>
@@ -397,7 +404,23 @@ keyboard.RecoveryRequested +=
         applicationService.Start();
         RefreshUtilityStatus();
         utilityTimer.Start();
-        await StartTaskbarTestAsync(whileAppActive: true);
+
+        if (safeMode)
+        {
+            taskbarSuppressionPaused = true;
+            TaskbarRecovery.RestoreNow();
+            SetStatus("Safe Mode · Windows taskbar is restored · Win-key interception and Hover Wave are disabled.");
+        }
+        else if (settingsSession.Current.SuppressWindowsTaskbar)
+        {
+            await StartTaskbarTestAsync(whileAppActive: true);
+        }
+        else
+        {
+            taskbarSuppressionPaused = true;
+            TaskbarRecovery.RestoreNow();
+            SetStatus("Windows taskbar suppression is disabled.");
+        }
     }
 
     private static void MenuItem(MenuFlyout menu, string text, Action action)
@@ -866,7 +889,7 @@ keyboard.RecoveryRequested +=
         var created = cachedSystemTrayWindow is null;
         try
         {
-            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, Appearance, UtilityOwnsPointer);
+            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, applicationService, Appearance, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -2636,7 +2659,16 @@ keyboard.RecoveryRequested +=
         if (closing || shutdown.IsRequested || settingsWindow.IsShutdown) return;
         var window = settingsWindow.GetOrCreate(() =>
         {
-            var created = new SettingsWindow(settingsSession, settingsStore, shutdown);
+            var created = new SettingsWindow(
+                settingsSession,
+                settingsStore,
+                shutdown,
+                safeMode,
+                RestoreTaskbar,
+                ResumeTaskbarSuppression,
+                () => RestartGlassDock(inSafeMode: false),
+                () => RestartGlassDock(inSafeMode: true),
+                RequestShutdown);
             created.Closed += (_, _) => settingsWindow.Release(created);
             return created;
         });
@@ -2691,8 +2723,14 @@ keyboard.RecoveryRequested +=
 
     public Task StartTaskbarTestAsync(bool whileAppActive = false)
     {
-        if (closing || shutdown.IsRequested)
+        if (closing ||
+            shutdown.IsRequested ||
+            safeMode ||
+            taskbarSuppressionPaused ||
+            !settingsSession.Current.SuppressWindowsTaskbar)
+        {
             return Task.CompletedTask;
+        }
         if (taskbarOperation is { IsCompleted: false })
             return taskbarOperation;
 
@@ -2750,7 +2788,44 @@ keyboard.RecoveryRequested +=
         if (closing || shutdown.IsRequested || taskbarRestoreOperation is { IsCompleted: false })
             return;
 
+        taskbarSuppressionPaused = true;
         taskbarRestoreOperation = RestoreTaskbarAsync();
+    }
+
+    public void ResumeTaskbarSuppression()
+    {
+        if (closing || shutdown.IsRequested)
+            return;
+
+        if (safeMode)
+        {
+            SetStatus("Safe Mode keeps Windows taskbar suppression disabled.");
+            return;
+        }
+
+        if (!settingsSession.Current.SuppressWindowsTaskbar)
+        {
+            SetStatus("Windows taskbar suppression is disabled in settings.");
+            return;
+        }
+
+        taskbarSuppressionPaused = false;
+        _ = StartTaskbarTestAsync(whileAppActive: true);
+    }
+
+    private void RestartGlassDock(bool inSafeMode)
+    {
+        if (closing || shutdown.IsRequested)
+            return;
+
+        if (prepareRestart is null)
+        {
+            SetStatus("Restart is unavailable in this build.");
+            return;
+        }
+
+        prepareRestart(inSafeMode);
+        BeginShutdown(closeMainWindow: true);
     }
 
     private async Task RestoreTaskbarAsync()

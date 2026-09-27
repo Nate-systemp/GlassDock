@@ -1,4 +1,4 @@
-﻿using GlassDock.Core.Desktop;
+using GlassDock.Core.Desktop;
 using GlassDock.Windows.Interop;
 using System.Runtime.InteropServices;
 
@@ -19,6 +19,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private readonly WindowsKeyGesture gesture = new();
 
     private nint keyboardHook;
+    private readonly bool dockShortcutsEnabled;
 
     private const uint ExpandMessage = 0x8000 + 71;
     private const uint LauncherMessage = 0x8000 + 72;
@@ -80,9 +81,10 @@ public sealed class WindowsKeyboardService : IKeyboardService
     public event EventHandler? LauncherRequested;
     public event EventHandler? RecoveryRequested;
 
-    public WindowsKeyboardService(nint hwnd)
+    public WindowsKeyboardService(nint hwnd, bool enableDockShortcuts = true)
     {
         this.hwnd = hwnd;
+        dockShortcutsEnabled = enableDockShortcuts;
 
         keyboardCallback = KeyboardMessage;
         callback = WindowMessage;
@@ -101,11 +103,14 @@ public sealed class WindowsKeyboardService : IKeyboardService
         // Optional development shortcut.
         // Ctrl + Alt + Space
         //
-        NativeMethods.RegisterHotKey(
-            hwnd,
-            0x4701,
-            0x4003,
-            0x20);
+        if (dockShortcutsEnabled)
+        {
+            NativeMethods.RegisterHotKey(
+                hwnd,
+                0x4701,
+                0x4003,
+                0x20);
+        }
 
         //
         // IMPORTANT SAFETY HOTKEY.
@@ -135,36 +140,39 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 "Cannot register the GlassDock recovery hotkey.");
         }
 
-        //
-        // Synchronize the gesture state with keys
-        // already physically held when GlassDock starts.
-        //
-        for (var key = 8; key < 256; key++)
+        if (dockShortcutsEnabled)
         {
-            if (NativeMethods.GetAsyncKeyState(key) < 0)
+            //
+            // Synchronize the gesture state with keys
+            // already physically held when GlassDock starts.
+            //
+            for (var key = 8; key < 256; key++)
             {
-                gesture.Process(
-                    key,
-                    true);
+                if (NativeMethods.GetAsyncKeyState(key) < 0)
+                {
+                    gesture.Process(
+                        key,
+                        true);
+                }
             }
-        }
 
-        //
-        // Global low-level keyboard hook.
-        //
-        keyboardHook =
-            NativeMethods.SetWindowsHookExW(
-                13,
-                keyboardCallback,
-                0,
-                0);
+            //
+            // Global low-level keyboard hook.
+            //
+            keyboardHook =
+                NativeMethods.SetWindowsHookExW(
+                    13,
+                    keyboardCallback,
+                    0,
+                    0);
 
-        if (keyboardHook == 0)
-        {
-            Dispose();
+            if (keyboardHook == 0)
+            {
+                Dispose();
 
-            throw new InvalidOperationException(
-                "Cannot register Windows keyboard handling.");
+                throw new InvalidOperationException(
+                    "Cannot register Windows keyboard handling.");
+            }
         }
     }
 

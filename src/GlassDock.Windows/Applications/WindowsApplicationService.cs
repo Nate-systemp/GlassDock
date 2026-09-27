@@ -14,6 +14,9 @@ public sealed class WindowsApplicationService : IApplicationService
     private readonly ConcurrentDictionary<nint, long> activationTimes = new();
     private readonly WindowsApplicationLauncher launcher = new();
     private readonly DockPinStore pinStore = new();
+    private readonly WindowsApplicationIconService externalIconService =
+        new(targetIconSize: 64, cacheCapacity: 64, allowLargerIcons: false);
+    private readonly object externalIconGate = new();
     private readonly NativeMethods.WinEventProc callback;
     private readonly List<nint> hooks = [];
     private Thread? worker;
@@ -213,6 +216,32 @@ public sealed class WindowsApplicationService : IApplicationService
             Interlocked.Increment(ref pinRevision);
         RequestRefresh();
         return saved;
+    }
+
+
+    public ApplicationIcon? GetIconForExternalTarget(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        try
+        {
+            lock (externalIconGate)
+            {
+                return externalIconService.FromShell(
+                    "tray:" + path.ToUpperInvariant(),
+                    path);
+            }
+        }
+        catch (Exception error) when (
+            error is COMException or
+            IOException or
+            UnauthorizedAccessException or
+            ArgumentException or
+            InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     public bool PinExternalTarget(string path)

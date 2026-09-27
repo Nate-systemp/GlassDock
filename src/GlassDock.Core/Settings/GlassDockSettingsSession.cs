@@ -132,8 +132,15 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultDockDisplayMode,
             GlassDockSettings.DefaultHoverWaveEnabled) with
         {
-            DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode
+            DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode,
+            LaunchAtStartup = Current.LaunchAtStartup
         };
+
+    public GlassDockSettings CreateLaunchAtStartupUpdate(bool enabled) =>
+        GlassDockSettings.Normalize(Current with
+        {
+            LaunchAtStartup = enabled
+        });
 
     public GlassDockSettings CreateDisplayModeUpdate(DockDisplayMode displayMode) =>
         GlassDockSettings.Normalize(Current with

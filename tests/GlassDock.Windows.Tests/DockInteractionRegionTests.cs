@@ -40,8 +40,6 @@ public sealed class DockInteractionRegionTests
             using var manager = new WindowsOverlayManager(window);
             manager.Configure();
             var scale = manager.Scale;
-            bool Contains(double x, double y) => PtInRegion(region,
-                (int)Math.Round(x * scale), (int)Math.Round(y * scale));
             void Hit(double x, double y, bool inside)
             {
                 var sx = -640 + (int)Math.Round(x * scale);
@@ -66,9 +64,9 @@ public sealed class DockInteractionRegionTests
                 Hit(320, 135, false);
 
                 manager.SetInteractionRegion(false);
-                Assert.NotEqual(0, GetWindowRgn(window, region));
-                Assert.True(Contains(320, 120));
-                Assert.False(Contains(150, 100));
+                Assert.Equal(0, GetWindowRgn(window, region)); // Input-only; preserve rendered shadow.
+                Hit(320, 120, true);
+                Hit(150, 100, false);
 
                 // The hit region follows each animated position, without a
                 // permanent corridor above or beside the pill.
