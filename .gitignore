@@ -18,7 +18,11 @@ secrets.json
 
 # Build / distribution files
 publish/
+publish-before-velopack-*/
+publish-before-update-*/
 Releases/
+Releases-default-architecture-verification/
+Releases-before-update-*/
 Installer/
 installer/
 TestExtract/
@@ -34,6 +38,3 @@ installer/wix/*
 !installer/wix/packages.lock.json
 dist/
 !installer/wix/README.md
-
-Releases-default-architecture-verification/
-publish-before-velopack-*/

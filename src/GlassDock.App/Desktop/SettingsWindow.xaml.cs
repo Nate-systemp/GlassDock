@@ -5,6 +5,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using GlassDock.App.Updates;
 
 namespace GlassDock.App.Desktop;
 
@@ -23,6 +24,9 @@ public sealed partial class SettingsWindow : Window
     private bool saving;
     private bool closed;
     private bool populating;
+    private ManualUpdateService? updates;
+    private bool updateBusy;
+    private readonly CancellationTokenSource updateLifetime;
 
     public SettingsWindow(
         GlassDockSettingsSession settingsSession,
@@ -44,8 +48,10 @@ public sealed partial class SettingsWindow : Window
         this.restartGlassDock = restartGlassDock;
         this.restartSafeMode = restartSafeMode;
         this.exitGlassDock = exitGlassDock;
+        updateLifetime = CancellationTokenSource.CreateLinkedTokenSource(shutdown.CancellationToken);
 
         InitializeComponent();
+        ConfigureNumberFormatting();
         UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
         Title = "GlassDock Settings";
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
@@ -59,7 +65,43 @@ public sealed partial class SettingsWindow : Window
             : "Normal mode is active.";
         ResumeTaskbarButton.IsEnabled = !safeMode;
         SetStatus("Settings loaded.", success: true);
-        Closed += (_, _) => closed = true;
+        Closed += (_, _) =>
+        {
+            closed = true;
+            updateLifetime.Cancel();
+            updateLifetime.Dispose();
+        };
+    }
+
+    private void ConfigureNumberFormatting()
+    {
+        // Format text only: NumberBox.Value and persisted doubles retain precision.
+        // A rounder is needed because FractionDigits alone is a minimum, not a cap.
+        SetNumberFormat(IconSizeBox, 0);
+        SetNumberFormat(IconSpacingBox, 0);
+        SetNumberFormat(BottomMarginBox, 0);
+        SetNumberFormat(GlassBlurAmountBox, 0);
+        SetNumberFormat(MagnificationScaleBox, 2);
+        SetNumberFormat(BorderThicknessBox, 2);
+        SetNumberFormat(DockOpacityBox, 1);
+        SetNumberFormat(BorderOpacityBox, 1);
+        SetNumberFormat(AutoHideDelayBox, 2);
+        SetNumberFormat(PeekDelayBox, 2);
+    }
+
+    private static void SetNumberFormat(NumberBox box, int decimals)
+    {
+        box.NumberFormatter = new global::Windows.Globalization.NumberFormatting.DecimalFormatter
+        {
+            IntegerDigits = 1,
+            FractionDigits = decimals,
+            IsGrouped = false,
+            NumberRounder = new global::Windows.Globalization.NumberFormatting.IncrementNumberRounder
+            {
+                Increment = Math.Pow(10, -decimals),
+                RoundingAlgorithm = global::Windows.Globalization.NumberFormatting.RoundingAlgorithm.RoundHalfUp
+            }
+        };
     }
 
     private void Populate(GlassDockSettings settings)
@@ -110,6 +152,84 @@ public sealed partial class SettingsWindow : Window
             ? "Version unavailable"
             : $"Version {version.Major}.{version.Minor}.{version.Build}";
         SettingsPathText.Text = settingsStore.SettingsFilePath;
+        try
+        {
+            updates = new ManualUpdateService();
+            if (updates.CurrentVersion is { } installedVersion)
+                VersionText.Text = $"Version {installedVersion}";
+            else
+                VersionText.Text += " (development build)";
+            CheckUpdatesButton.IsEnabled = updates.CanUpdate;
+            if (!updates.CanUpdate)
+                UpdateStatusText.Text = "Updates are available in the installed Natesystemp.GlassDock build. Development builds are not updated.";
+        }
+        catch (Exception)
+        {
+            CheckUpdatesButton.IsEnabled = false;
+            UpdateStatusText.Text = "Update information is unavailable. Reopen Settings to retry.";
+        }
+    }
+
+    private async void CheckUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested || updateBusy || updates is null) return;
+        SetUpdateBusy(true, "Checking for updates…");
+        InstallUpdateButton.Visibility = Visibility.Collapsed;
+        UpdateProgress.IsIndeterminate = true;
+        try
+        {
+            await updates.CheckAsync(updateLifetime.Token);
+            if (closed || shutdown.IsRequested) return;
+            UpdateStatusText.Text = updates.AvailableVersion is { } version
+                ? $"GlassDock {version} is available."
+                : "GlassDock is up to date.";
+            InstallUpdateButton.Visibility = updates.AvailableVersion is null ? Visibility.Collapsed : Visibility.Visible;
+        }
+        catch (OperationCanceledException) when (closed || shutdown.IsRequested) { }
+        catch (Exception)
+        {
+            if (!closed && !shutdown.IsRequested)
+                UpdateStatusText.Text = "Could not check for updates. Check your connection and try again.";
+        }
+        finally { if (!closed && !shutdown.IsRequested) SetUpdateBusy(false); }
+    }
+
+    private async void InstallUpdateClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested || updateBusy || updates is null) return;
+        SetUpdateBusy(true, "Downloading update…");
+        UpdateProgress.IsIndeterminate = false;
+        UpdateProgress.Value = 0;
+        var progress = new Progress<int>(value =>
+        {
+            if (closed || shutdown.IsRequested || !updateBusy) return;
+            UpdateProgress.Value = Math.Clamp(value, 0, 100);
+            UpdateStatusText.Text = $"Downloading update… {Math.Clamp(value, 0, 100)}%";
+        });
+        try
+        {
+            await updates.DownloadAsync(value => ((IProgress<int>)progress).Report(value), updateLifetime.Token);
+            if (closed || shutdown.IsRequested) return;
+            UpdateStatusText.Text = "Installing update… GlassDock will restart.";
+            updates.ApplyAfterExit(safeMode);
+            exitGlassDock();
+        }
+        catch (OperationCanceledException) when (closed || shutdown.IsRequested) { }
+        catch (Exception)
+        {
+            if (!closed && !shutdown.IsRequested)
+                UpdateStatusText.Text = "Could not install the update. Try Update again or check for updates.";
+        }
+        finally { if (!closed && !shutdown.IsRequested) SetUpdateBusy(false); }
+    }
+
+    private void SetUpdateBusy(bool busy, string? message = null)
+    {
+        updateBusy = busy;
+        CheckUpdatesButton.IsEnabled = !busy && updates?.CanUpdate == true;
+        InstallUpdateButton.IsEnabled = !busy;
+        UpdateProgress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        if (message is not null) UpdateStatusText.Text = message;
     }
 
     private DockAppearanceMode SelectedDockAppearance =>

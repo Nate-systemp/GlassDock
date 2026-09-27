@@ -400,6 +400,18 @@
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="6">
+                            <TextBlock Text="Updates" FontWeight="SemiBold" Foreground="#FF222222"/>
+                            <TextBlock x:Name="UpdateStatusText" Text="Check for a newer version of GlassDock." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                            <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,6"/>
+                            <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                                <Button x:Name="CheckUpdatesButton" Content="Check for Updates" Click="CheckUpdatesClick"/>
+                                <Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdateClick" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="6">
                             <TextBlock Text="Settings file" FontWeight="SemiBold" Foreground="#FF222222"/>
                             <TextBlock x:Name="SettingsPathText" FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                         </StackPanel>

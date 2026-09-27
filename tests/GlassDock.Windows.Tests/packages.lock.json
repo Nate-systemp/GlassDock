@@ -12,6 +12,12 @@
           "Microsoft.TestPlatform.TestHost": "18.10.0"
         }
       },
+      "Velopack": {
+        "type": "Direct",
+        "requested": "[1.2.158, )",
+        "resolved": "1.2.158",
+        "contentHash": "wQN38beVrAf0WzFMnZtl7UmwxqwaJ7xVYypqITdOI4YUTYch2UvE+xAjg9msfaitVDtgfWeIcGsjRNQ65C03ZQ=="
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.3, )",
