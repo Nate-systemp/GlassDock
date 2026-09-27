@@ -186,6 +186,11 @@ public sealed partial class SettingsWindow : Window
             InstallUpdateButton.Visibility = updates.AvailableVersion is null ? Visibility.Collapsed : Visibility.Visible;
         }
         catch (OperationCanceledException) when (closed || shutdown.IsRequested) { }
+        catch (TimeoutException)
+        {
+            if (!closed && !shutdown.IsRequested)
+                UpdateStatusText.Text = "GitHub did not respond within 15 seconds. Please try again.";
+        }
         catch (Exception)
         {
             if (!closed && !shutdown.IsRequested)

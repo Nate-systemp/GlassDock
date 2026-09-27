@@ -71,6 +71,42 @@ public sealed class ManualUpdateServiceTests
         Assert.Throws<InvalidOperationException>(() => service.ApplyAfterExit(false));
     }
 
+    [Fact]
+    public async Task Timeout_releases_caller_but_retries_share_the_unfinished_request()
+    {
+        var completion = new TaskCompletionSource<UpdateInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var manager = new FakeManager { Pending = completion.Task };
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var service = new ManualUpdateService(manager, TimeSpan.FromMilliseconds(100), log.Enqueue);
+        await Assert.ThrowsAsync<TimeoutException>(() => service.CheckAsync(default).WaitAsync(TimeSpan.FromSeconds(3)));
+        await Assert.ThrowsAsync<TimeoutException>(() => service.CheckAsync(default).WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal(1, manager.Checks);
+        Assert.Null(service.AvailableVersion);
+        Assert.Contains(log, line => line.StartsWith("Check timeout"));
+        var retry = service.CheckAsync(default);
+        completion.SetResult(manager.Result);
+        await retry;
+        Assert.Equal(1, manager.Checks);
+        Assert.Equal("0.1.1", service.AvailableVersion);
+    }
+
+    [Fact]
+    public async Task Cancellation_returns_without_waiting_for_GitHub_and_late_result_is_not_applied()
+    {
+        var completion = new TaskCompletionSource<UpdateInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var manager = new FakeManager { Pending = completion.Task };
+        var service = new ManualUpdateService(manager);
+        using var cancellation = new CancellationTokenSource();
+        var check = service.CheckAsync(cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check.WaitAsync(TimeSpan.FromSeconds(3)));
+        completion.SetResult(manager.Result);
+        Assert.Null(service.AvailableVersion);
+        manager.Pending = null;
+        await service.CheckAsync(default);
+        Assert.Equal("0.1.1", service.AvailableVersion);
+    }
+
     private sealed class FakeManager() : UpdateManager("https://example.invalid",
         locator: new Velopack.Locators.TestVelopackLocator(ManualUpdateService.PackageId, "0.1.0", Path.GetTempPath()))
     {

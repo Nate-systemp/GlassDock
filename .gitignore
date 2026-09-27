@@ -23,6 +23,7 @@ publish-before-update-*/
 Releases/
 Releases-default-architecture-verification/
 Releases-before-update-*/
+Releases-0.1.1/
 Installer/
 installer/
 TestExtract/
