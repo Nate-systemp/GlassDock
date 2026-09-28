@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <OutputType>Exe</OutputType>
+    <ApplicationIcon>../GlassDock.App/Assets/Doky.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />

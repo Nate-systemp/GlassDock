@@ -206,6 +206,7 @@ public sealed class DesktopOverlayWindow : Window
         settingsSession.Changed += SettingsChanged;
 
         Title = "Doky — Floating Dock";
+        WindowBranding.Apply(this);
         // The settings load in App.OnLaunched is asynchronous, so the UI dispatcher can
         // already be pumping while this window is constructed. Subscribe before any
         // native call can show the HWND; the queued callback runs after construction.
@@ -2715,6 +2716,7 @@ keyboard.RecoveryRequested +=
         if (lab is null)
         {
             lab = new Window { Title = "Doky — Glass Material Laboratory", Content = new Views.GlassLabView() };
+            WindowBranding.Apply(lab);
             lab.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1320, 900));
             lab.Closed += (_, _) => lab = null;
         }

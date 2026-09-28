@@ -88,6 +88,7 @@ public partial class App : Application
         }
 
         window = new Window { Title = "Doky — Glass Material Laboratory", Content = new Views.GlassLabView() };
+        WindowBranding.Apply(window);
         window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1320, 900));
         window.Activate();
     }

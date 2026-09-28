@@ -1,6 +1,6 @@
 # Settings window
 
-Step 4 extends the product-facing GlassDock Settings window with safe dock
+Step 4 extends the product-facing Doky Settings window with safe dock
 appearance controls. Startup, taskbar-mode, and multi-monitor settings remain
 inactive.
 

@@ -54,6 +54,7 @@ public sealed partial class SettingsWindow : Window
         ConfigureNumberFormatting();
         UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
         Title = "Doky Settings";
+        WindowBranding.Apply(this);
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
 
         ShowSettingsPage("Appearance");

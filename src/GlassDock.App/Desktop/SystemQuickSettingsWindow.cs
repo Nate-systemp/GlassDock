@@ -54,6 +54,7 @@ internal sealed class SystemQuickSettingsWindow : Window
     {
         this.controls = controls;
         Title = "Doky Quick Settings";
+        WindowBranding.Apply(this);
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);

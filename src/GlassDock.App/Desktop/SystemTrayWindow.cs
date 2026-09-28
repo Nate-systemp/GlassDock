@@ -59,6 +59,7 @@ internal sealed class SystemTrayWindow : Window
         this.controls = controls;
         this.applicationService = applicationService;
         Title = "Doky Hidden Tray";
+        WindowBranding.Apply(this);
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);

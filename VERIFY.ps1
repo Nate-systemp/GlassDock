@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-Write-Host "Building GlassDock..." -ForegroundColor Cyan
+Write-Host "Building Doky..." -ForegroundColor Cyan
 dotnet build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

@@ -28,7 +28,7 @@ function Clear-OutputDirectory([string]$Path) {
     New-Item -ItemType Directory -Path $full -Force | Out-Null
 }
 if (Get-Process GlassDock.App,GlassDock.Watchdog -ErrorAction SilentlyContinue) {
-    throw 'Exit GlassDock normally before building the installer.'
+    throw 'Exit Doky normally before building the installer.'
 }
 # Remove only this build's outputs, not unrelated distribution artifacts.
 Clear-OutputDirectory $PublishDir

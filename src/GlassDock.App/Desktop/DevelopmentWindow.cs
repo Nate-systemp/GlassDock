@@ -10,6 +10,7 @@ internal sealed class DevelopmentWindow : Window
     public DevelopmentWindow(DesktopOverlayWindow dock)
     {
         Title = "Doky — Development Controls";
+        WindowBranding.Apply(this);
         var panel = new StackPanel { Padding = new Thickness(28), Spacing = 16, RequestedTheme = ElementTheme.Dark };
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Colors.LightGreen) };
         var rendering = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };

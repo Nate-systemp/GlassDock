@@ -4,6 +4,8 @@
     <MajorUpgrade Schedule="afterInstallInitialize"
                   DowngradeErrorMessage="A newer version of Doky is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="Doky.ico" SourceFile="$(sys.SOURCEFILEDIR)..\..\src\GlassDock.App\Assets\Doky.ico" />
+    <Property Id="ARPPRODUCTICON" Value="Doky.ico" />
     <!-- Run in the interactive installer client after the install has committed,
          not in the Windows Installer service. ShellExecute honors app elevation. -->
     <Property Id="WixShellExecTarget" Value="[#GlassDockExe]" />
@@ -24,7 +26,7 @@
         <Component Id="MainExecutable" Guid="*">
           <File Id="GlassDockExe" Source="$(sys.SOURCEFILEDIR)..\..\publish\GlassDock\GlassDock.App.exe" KeyPath="yes">
             <Shortcut Id="GlassDockShortcut" Directory="GlassDockStartMenu" Name="Doky"
-                      Advertise="no" WorkingDirectory="INSTALLFOLDER" />
+                      Advertise="no" WorkingDirectory="INSTALLFOLDER" Icon="Doky.ico" IconIndex="0" />
           </File>
           <RemoveFolder Id="RemoveStartMenuFolder" Directory="GlassDockStartMenu" On="uninstall" />
         </Component>

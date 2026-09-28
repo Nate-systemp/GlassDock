@@ -33,7 +33,7 @@ try
     if (parent.StartTime.ToUniversalTime().Ticks != startTicks ||
         parent.SessionId != Process.GetCurrentProcess().SessionId ||
         !string.Equals(parent.ProcessName, "GlassDock.App", StringComparison.OrdinalIgnoreCase))
-        throw new InvalidOperationException("Parent identity does not match GlassDock.App.");
+        throw new InvalidOperationException("Parent identity does not match the Doky application.");
 
     try { ownsLease = lease.WaitOne(0); }
     catch (AbandonedMutexException) { ownsLease = true; }

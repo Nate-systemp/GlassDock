@@ -10,6 +10,7 @@
 #define EscapeConstArgument(Value) StringChange(StringChange(StringChange(Value, "%", "%25"), ",", "%2c"), "}", "%7d")
 
 [Setup]
+SetupIconFile=..\src\GlassDock.App\Assets\Doky.ico
 AppId={{8B5C9796-0FF1-48A5-BFB5-49E738EFB72D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

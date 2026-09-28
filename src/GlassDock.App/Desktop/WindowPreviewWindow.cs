@@ -100,6 +100,7 @@ internal sealed class WindowPreviewWindow : Window
         this.session = session;
 
         Title = "Doky — Window previews";
+        WindowBranding.Apply(this);
         Content = root;
 
         SystemBackdrop = backdrop;

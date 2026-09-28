@@ -21,9 +21,7 @@
         <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#FFFBFBFB" BorderBrush="#FFE4E4E4" BorderThickness="0,0,0,1">
             <Grid Height="64" Padding="22,0">
                 <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                    <Border Width="32" Height="32" CornerRadius="8" Background="#FFE8F2FF">
-                        <TextBlock Text="G" FontSize="18" FontWeight="SemiBold" Foreground="#FF0067C0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Image Source="ms-appx:///Assets/Doky.png" Width="32" Height="32" Stretch="Uniform" AutomationProperties.Name="Doky logo"/>
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="Doky Settings" FontSize="18" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
                         <TextBlock Text="Customize how Doky looks and behaves." FontSize="12" Foreground="#FF6B6B6B"/>
@@ -393,6 +391,7 @@
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="8">
                             <TextBlock Text="Doky" FontSize="22" FontWeight="SemiBold" Foreground="#FF222222"/>
+                            <Image Source="ms-appx:///Assets/Doky.png" Width="64" Height="64" Stretch="Uniform" HorizontalAlignment="Left" AutomationProperties.Name="Doky logo"/>
                             <TextBlock Text="A clean, modern dock for Windows 11." FontSize="13" Foreground="#FF6B6B6B"/>
                             <TextBlock x:Name="VersionText" Margin="0,4,0,0" FontSize="12" Foreground="#FF6B6B6B"/>
                         </StackPanel>
