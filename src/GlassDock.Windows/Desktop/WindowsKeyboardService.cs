@@ -123,22 +123,11 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 0x4003,
                 0x7B);
 
+        // The recovery hotkey is a convenience fallback, not a startup requirement.
+        // Another application or Windows itself may already own Ctrl+Alt+F12.
+        // Keep GlassDock running and let the watchdog / Recovery UI remain available
+        // when registration fails.
         IsRegistered = recovery;
-
-        if (!recovery)
-        {
-            NativeMethods.UnregisterHotKey(
-                hwnd,
-                0x4701);
-
-            NativeMethods.RemoveWindowSubclass(
-                hwnd,
-                callback,
-                1);
-
-            throw new InvalidOperationException(
-                "Cannot register the GlassDock recovery hotkey.");
-        }
 
         if (dockShortcutsEnabled)
         {
