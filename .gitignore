@@ -18,16 +18,17 @@ secrets.json
 
 # Build / distribution files
 publish/
-publish-before-velopack-*/
-publish-before-update-*/
+publish-*/
 Releases/
-Releases-default-architecture-verification/
-Releases-before-update-*/
-Releases-0.1.1/
+Releases-*/
 Installer/
 installer/
 TestExtract/
-GlassDock-Windows-x64.zip
+dist/
+
+# Temporary GlassDock debugging / transfer files
+/GlassDock-*.zip
+/GlassDock-TEST-*.exe
 
 # MSI sources are versioned; generated payloads and installers are not.
 !installer/
@@ -37,5 +38,6 @@ installer/wix/*
 !installer/wix/*.wixproj
 !installer/wix/*.wxs
 !installer/wix/packages.lock.json
-dist/
 !installer/wix/README.md
+
+/hash-check/

@@ -27,6 +27,18 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     private DockAppearanceMode plainAppearance = DockAppearanceMode.Dark;
     private double plainOpacity = 1;
     private double plainCornerRadius = 28;
+    private bool desktopFallback;
+
+    internal void SetDesktopFallback(bool enabled)
+    {
+        desktopFallback = enabled;
+        MaterialShape.Fill = new SolidColorBrush(enabled
+            ? (plainAppearance == DockAppearanceMode.Light
+                ? Color.FromArgb(245, 243, 243, 243) : Color.FromArgb(245, 36, 36, 36))
+            : Colors.Transparent);
+        if (!enabled && IsLoaded && !UsePlainSurface && shadow is null)
+            OnLoaded(this, new RoutedEventArgs());
+    }
 
     public string RenderingMode => UseDesktopBackdrop ? "Desktop system backdrop · shared material graph" : brush.RenderingMode;
     public bool UseDesktopBackdrop { get; set; }
@@ -46,6 +58,11 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (UseDesktopBackdrop && (desktopFallback || (Application.Current as App)?.BasicRendering == true))
+        {
+            SetDesktopFallback(true);
+            return;
+        }
         if (UsePlainSurface)
         {
             // The solid SystemBackdrop is below XAML. A filled XAML shadow
@@ -139,7 +156,7 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         Rim.BorderThickness = new Thickness(0);
         Rim.Opacity = 0;
 
-        if (!UseDesktopBackdrop)
+        if (!UseDesktopBackdrop || desktopFallback)
         {
             var color = plainAppearance == DockAppearanceMode.Light
                 ? Color.FromArgb((byte)(plainOpacity * 255), 243, 243, 243)

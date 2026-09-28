@@ -15,12 +15,33 @@ public partial class App : Application
     private bool? pendingRestartSafeMode;
 
     private GlassDock.Windows.Desktop.WindowsCompositionSupport? desktopComposition;
+    private readonly Rendering.OptionalComposition optionalComposition = new(Environment.GetCommandLineArgs()
+        .Contains("--basic-rendering", StringComparer.OrdinalIgnoreCase));
+    internal bool BasicRendering => optionalComposition.Disabled;
+
+    // Called only by a loaded backdrop host, never before the first Window exists.
+    internal bool TryEnableDesktopComposition()
+    {
+        return optionalComposition.TryInitialize(() =>
+        {
+            Rendering.StartupDiagnostics.Write("OS composition dispatcher initializing");
+            desktopComposition = new GlassDock.Windows.Desktop.WindowsCompositionSupport();
+        }, DisableDesktopComposition);
+    }
+
+    internal void DisableDesktopComposition(Exception error)
+    {
+        optionalComposition.Disable();
+        Rendering.StartupDiagnostics.Write("Optional composition failed; using XAML surface", error);
+    }
 
     public App()
     {
+        Rendering.StartupDiagnostics.Write("App resources initializing");
         InitializeComponent();
         UnhandledException += (_, e) =>
         {
+            Rendering.StartupDiagnostics.Write("Unhandled XAML exception", e.Exception);
             // Development diagnostics only. No transmission; preserve the fail-fast behavior.
             try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "development-error.log"), e.Exception.ToString()); }
             catch (IOException) { }
@@ -44,12 +65,13 @@ public partial class App : Application
             if (startupLaunch)
                 await Task.Delay(TimeSpan.FromMilliseconds(1500));
 
-            desktopComposition = new GlassDock.Windows.Desktop.WindowsCompositionSupport();
+            Rendering.StartupDiagnostics.Write($"Loading settings; basicRendering={BasicRendering}");
             var inspect = arguments.Contains("--controls", StringComparer.OrdinalIgnoreCase);
             var safeMode = arguments.Contains("--safe-mode", StringComparer.OrdinalIgnoreCase);
             var settingsStore = new GlassDockSettingsStore();
             var settingsSession = new GlassDockSettingsSession(
                 await settingsStore.LoadAsync());
+            Rendering.StartupDiagnostics.Write("Constructing dock");
             var dock = new Desktop.DesktopOverlayWindow(
                 settingsSession,
                 settingsStore,
@@ -59,6 +81,7 @@ public partial class App : Application
                 safeMode,
                 PrepareRestart);
             window = dock;
+            Rendering.StartupDiagnostics.Write("Dock constructed");
             // SetWindowPos shows the non-activating desktop window without taking keyboard focus.
             if (inspect) dock.ShowControls();
             return;

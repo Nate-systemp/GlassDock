@@ -193,10 +193,69 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     public string RenderingMode { get; private set; } = "Desktop backdrop connecting";
     public event EventHandler? RenderingModeChanged;
+    private int connectionVersion;
+    private FrameworkElement? loadingRoot;
+    private RoutedEventHandler? loadedHandler;
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(target, xamlRoot);
+        var version = ++connectionVersion;
+        if (xamlRoot.Content is not FrameworkElement root) return;
+        void QueueConnection()
+        {
+            SetSurfaceFallback(root, true);
+            root.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (version != connectionVersion) return;
+                RenderingMode = "Basic XAML surface";
+                if ((Application.Current as App)?.TryEnableDesktopComposition() == true)
+                {
+                    try
+                    {
+                        StartupDiagnostics.Write("Loaded window: Win2D/backdrop initializing");
+                        ConnectDesktop(target);
+                        SetSurfaceFallback(root, false);
+                        StartupDiagnostics.Write("Desktop backdrop ready");
+                    }
+                    catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
+                    {
+                        // Release partially created native resources. Keep the XAML body
+                        // visible; never mark unrelated XAML exceptions handled globally.
+                        ReleaseDesktop(target);
+                        ((App)Application.Current).DisableDesktopComposition(error);
+                        RenderingMode = "Basic XAML surface · desktop composition unavailable";
+                        SetSurfaceFallback(root, true);
+                    }
+                }
+                RenderingModeChanged?.Invoke(this, EventArgs.Empty);
+            });
+        }
+        if (root.IsLoaded) QueueConnection();
+        else
+        {
+            loadingRoot = root;
+            loadedHandler = (_, _) =>
+            {
+                root.Loaded -= loadedHandler;
+                loadedHandler = null;
+                loadingRoot = null;
+                if (version == connectionVersion) QueueConnection();
+            };
+            root.Loaded += loadedHandler;
+        }
+    }
+
+    private static void SetSurfaceFallback(DependencyObject element, bool enabled)
+    {
+        if (element is Controls.GlassSurface surface && surface.UseDesktopBackdrop)
+            surface.SetDesktopFallback(enabled);
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+            SetSurfaceFallback(VisualTreeHelper.GetChild(element, i), enabled);
+    }
+
+    private void ConnectDesktop(ICompositionSupportsSystemBackdrop target)
+    {
         compositor = new W.Compositor();
         canvasDevice = CanvasDevice.GetSharedDevice();
         geometry = compositor.CreatePathGeometry();
@@ -691,6 +750,17 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
     {
+        connectionVersion++;
+        if (loadingRoot is not null && loadedHandler is not null)
+            loadingRoot.Loaded -= loadedHandler;
+        loadingRoot = null;
+        loadedHandler = null;
+        ReleaseDesktop(target);
+        base.OnTargetDisconnected(target);
+    }
+
+    private void ReleaseDesktop(ICompositionSupportsSystemBackdrop target)
+    {
         StopPresentationAnimation();
         bodyTrack?.Dispose(); bodyTrack = null;
         rimTrack?.Dispose(); rimTrack = null;
@@ -756,6 +826,5 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         source = null;
         solidSurface = null;
         compositor = null;
-        base.OnTargetDisconnected(target);
     }
 }
