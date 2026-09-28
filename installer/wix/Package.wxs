@@ -1,8 +1,8 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Id="GlassDock" Name="GlassDock" Manufacturer="Natesystemp"
+  <Package Id="GlassDock" Name="Doky" Manufacturer="Natesystemp"
            Version="$(InstallerVersion)" UpgradeCode="5fb9248e-3141-422b-927d-5a9a57810d4c" Scope="perMachine">
     <MajorUpgrade Schedule="afterInstallInitialize"
-                  DowngradeErrorMessage="A newer version of GlassDock is already installed." />
+                  DowngradeErrorMessage="A newer version of Doky is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <!-- Run in the interactive installer client after the install has committed,
          not in the Windows Installer service. ShellExecute honors app elevation. -->
@@ -14,7 +14,7 @@
               Condition="NOT REMOVE" />
     </InstallUISequence>
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="GlassDockStartMenu" Name="GlassDock" />
+      <Directory Id="GlassDockStartMenu" Name="Doky" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="GlassDock">
@@ -23,7 +23,7 @@
         </Files>
         <Component Id="MainExecutable" Guid="*">
           <File Id="GlassDockExe" Source="$(sys.SOURCEFILEDIR)..\..\publish\GlassDock\GlassDock.App.exe" KeyPath="yes">
-            <Shortcut Id="GlassDockShortcut" Directory="GlassDockStartMenu" Name="GlassDock"
+            <Shortcut Id="GlassDockShortcut" Directory="GlassDockStartMenu" Name="Doky"
                       Advertise="no" WorkingDirectory="INSTALLFOLDER" />
           </File>
           <RemoveFolder Id="RemoveStartMenuFolder" Directory="GlassDockStartMenu" On="uninstall" />

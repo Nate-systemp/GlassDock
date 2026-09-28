@@ -31,7 +31,7 @@ internal sealed class ManualUpdateService
 
     public async Task CheckAsync(CancellationToken cancellationToken)
     {
-        if (!CanUpdate) throw new InvalidOperationException("Updates require the installed GlassDock application.");
+        if (!CanUpdate) throw new InvalidOperationException("Updates require the installed Doky application.");
         if (busy) throw new InvalidOperationException("An update operation is already running.");
         busy = true;
         available = null;

@@ -87,7 +87,7 @@ public partial class App : Application
             return;
         }
 
-        window = new Window { Title = "GlassDock — Glass Material Laboratory", Content = new Views.GlassLabView() };
+        window = new Window { Title = "Doky — Glass Material Laboratory", Content = new Views.GlassLabView() };
         window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1320, 900));
         window.Activate();
     }

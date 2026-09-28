@@ -16,7 +16,7 @@ Package with explicit architecture and the native C++ prerequisite (self-contain
 ```powershell
 vpk pack --packId Natesystemp.GlassDock --packVersion 0.1.9 `
   --packDir .\publish-compat-0.1.9 --mainExe GlassDock.App.exe `
-  --packTitle GlassDock --runtime win-x64 --framework vcredist143-x64 `
+  --packTitle Doky --runtime win-x64 --framework vcredist143-x64 `
   --outputDir .\Releases-compat-0.1.9
 ```
 
@@ -41,7 +41,7 @@ A native fail-fast inside WinUI cannot be recovered with a managed catch block.
 
 ## Other PC test
 
-1. Exit all old GlassDock instances normally. Run the 0.1.9 Setup.exe from
+1. Exit all old Doky instances normally. Run the 0.1.9 Setup.exe from
    Releases-compat-0.1.9 and allow its supported VC++ prerequisite installation
    if needed. Test normal launch first; if it runs, exit normally.
 2. In PowerShell run:

@@ -277,14 +277,14 @@ public sealed class DesktopWindowFocus : IDisposable
         if (dim == 0)
         {
             dim = Create(
-                "GlassDock desktop dim",
+                "Doky desktop dim",
                 153);
         }
 
         if (mirror == 0)
         {
             mirror = Create(
-                "GlassDock desktop mirror",
+                "Doky desktop mirror",
                 0);
         }
 

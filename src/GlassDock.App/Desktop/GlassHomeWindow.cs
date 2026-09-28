@@ -104,7 +104,7 @@ internal sealed class GlassHomeWindow : Window
 
     public GlassHomeWindow()
     {
-        Title = "GlassDock — Glass Home";
+        Title = "Doky — Glass Home";
         var material = GlassMaterialPresets.Create(GlassMaterialPreset.Clear) with
         {
             // Reference direction: dark acrylic / luminous glass, not milky frosted glass.
@@ -447,7 +447,7 @@ internal sealed class GlassHomeWindow : Window
 
         footer.Children.Add(
             Label(
-                "GlassDock",
+                "Doky",
                 12));
 
         footer.Children.Add(

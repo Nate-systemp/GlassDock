@@ -16,11 +16,11 @@ public sealed class WindowsStartupService
     {
         executablePath ??= Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath))
-            throw new InvalidOperationException("GlassDock executable path is unavailable.");
+            throw new InvalidOperationException("Doky executable path is unavailable.");
 
         executablePath = Path.GetFullPath(executablePath);
         if (!string.Equals(Path.GetExtension(executablePath), ".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("GlassDock startup registration requires the application executable.");
+            throw new InvalidOperationException("Doky startup registration requires the application executable.");
 
         this.executablePath = executablePath;
     }

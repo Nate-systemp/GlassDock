@@ -205,7 +205,7 @@ public sealed class DesktopOverlayWindow : Window
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
         settingsSession.Changed += SettingsChanged;
 
-        Title = "GlassDock — Floating Dock";
+        Title = "Doky — Floating Dock";
         // The settings load in App.OnLaunched is asynchronous, so the UI dispatcher can
         // already be pumping while this window is constructed. Subscribe before any
         // native call can show the HWND; the queued callback runs after construction.
@@ -358,7 +358,7 @@ keyboard.RecoveryRequested +=
         MenuItem(menu, "Restore Windows taskbar", RestoreTaskbar);
         MenuItem(menu, "Glass Material Laboratory", ShowLab);
         menu.Items.Add(new MenuFlyoutSeparator());
-        MenuItem(menu, "Exit GlassDock", RequestShutdown);
+        MenuItem(menu, "Exit Doky", RequestShutdown);
         menu.Opening += (_, _) =>
         {
             previews.BeginContextMenu(menu);
@@ -1330,7 +1330,7 @@ keyboard.RecoveryRequested +=
             }
             else
             {
-                SetStatus("GlassDock could not save the app order.");
+                SetStatus("Doky could not save the app order.");
                 SynchronizeItems();
             }
         }
@@ -1613,8 +1613,8 @@ keyboard.RecoveryRequested +=
                 SetStatus(added switch
                 {
                     0 => "Nothing was pinned.",
-                    1 => "Pinned 1 item to GlassDock.",
-                    _ => $"Pinned {added} items to GlassDock."
+                    1 => "Pinned 1 item to Doky.",
+                    _ => $"Pinned {added} items to Doky."
                 });
                 return;
             }
@@ -1746,7 +1746,7 @@ keyboard.RecoveryRequested +=
 
         if (externalDropTargetButton is null)
         {
-            e.DragUIOverride.Caption = "Pin to GlassDock";
+            e.DragUIOverride.Caption = "Pin to Doky";
             e.DragUIOverride.IsCaptionVisible = true;
             SetExternalDropVisual(true);
         }
@@ -1770,7 +1770,7 @@ keyboard.RecoveryRequested +=
 
         if (externalDropTargetButton is null)
         {
-            e.DragUIOverride.Caption = "Pin to GlassDock";
+            e.DragUIOverride.Caption = "Pin to Doky";
             e.DragUIOverride.IsCaptionVisible = true;
             SetExternalDropVisual(true);
         }
@@ -1830,8 +1830,8 @@ keyboard.RecoveryRequested +=
             SetStatus(added switch
             {
                 0 => "Nothing was pinned.",
-                1 => "Pinned 1 item to GlassDock.",
-                _ => $"Pinned {added} items to GlassDock."
+                1 => "Pinned 1 item to Doky.",
+                _ => $"Pinned {added} items to Doky."
             });
         }
         catch (Exception error) when (
@@ -1839,7 +1839,7 @@ keyboard.RecoveryRequested +=
             IOException or
             InvalidOperationException)
         {
-            SetStatus($"GlassDock could not pin the dropped item: {error.Message}");
+            SetStatus($"Doky could not pin the dropped item: {error.Message}");
         }
         finally
         {
@@ -2714,7 +2714,7 @@ keyboard.RecoveryRequested +=
         if (closing || shutdown.IsRequested) return;
         if (lab is null)
         {
-            lab = new Window { Title = "GlassDock — Glass Material Laboratory", Content = new Views.GlassLabView() };
+            lab = new Window { Title = "Doky — Glass Material Laboratory", Content = new Views.GlassLabView() };
             lab.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1320, 900));
             lab.Closed += (_, _) => lab = null;
         }

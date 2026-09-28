@@ -47,7 +47,7 @@ internal sealed class CalendarPopoverWindow : Window
 
     public CalendarPopoverWindow(DockAppearanceSettings appearance, Func<bool>? utilityOwnsPointer = null)
     {
-        Title = "GlassDock Calendar";
+        Title = "Doky Calendar";
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);

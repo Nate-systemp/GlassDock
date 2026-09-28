@@ -25,8 +25,8 @@
                         <TextBlock Text="G" FontSize="18" FontWeight="SemiBold" Foreground="#FF0067C0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <StackPanel VerticalAlignment="Center" Spacing="1">
-                        <TextBlock Text="GlassDock Settings" FontSize="18" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Customize how GlassDock looks and behaves." FontSize="12" Foreground="#FF6B6B6B"/>
+                        <TextBlock Text="Doky Settings" FontSize="18" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Customize how Doky looks and behaves." FontSize="12" Foreground="#FF6B6B6B"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>
@@ -105,7 +105,7 @@
                             </Grid>
 
                             <Border Padding="14" CornerRadius="10" Background="#FFF7F7F7" BorderBrush="#FFE7E7E7" BorderThickness="1">
-                                <TextBlock Text="Light and Dark are solid surfaces. Frosted, Acrylic, and Clear use GlassDock's glass renderer and the glass controls under Advanced." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
+                                <TextBlock Text="Light and Dark are solid surfaces. Frosted, Acrylic, and Clear use Doky's glass renderer and the glass controls under Advanced." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
                             </Border>
                         </StackPanel>
                     </Border>
@@ -152,7 +152,7 @@
                 <StackPanel x:Name="BehaviorPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Behavior" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Control how GlassDock responds to your pointer." FontSize="13" Foreground="#FF6B6B6B"/>
+                        <TextBlock Text="Control how Doky responds to your pointer." FontSize="13" Foreground="#FF6B6B6B"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
@@ -204,7 +204,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="3" VerticalAlignment="Center">
                                     <TextBlock Text="Dock display" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                    <TextBlock Text="Choose which monitor hosts GlassDock." FontSize="12" Foreground="#FF6B6B6B"/>
+                                    <TextBlock Text="Choose which monitor hosts Doky." FontSize="12" Foreground="#FF6B6B6B"/>
                                 </StackPanel>
                                 <ComboBox x:Name="DockDisplayModeBox" Grid.Column="1" HorizontalAlignment="Stretch" AutomationProperties.Name="Dock monitor behavior">
                                     <ComboBoxItem Content="Primary display"/>
@@ -231,7 +231,7 @@
                 <StackPanel x:Name="StartupPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Startup" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Control how GlassDock starts when you sign in to Windows." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                        <TextBlock Text="Control how Doky starts when you sign in to Windows." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
@@ -241,13 +241,13 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Text="Start GlassDock when I sign in" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                <TextBlock Text="Uses your Windows user startup registration. GlassDock also prevents duplicate dock instances." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                <TextBlock Text="Start Doky when I sign in" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Uses your Windows user startup registration. Doky also prevents duplicate dock instances." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                             </StackPanel>
                             <ToggleSwitch x:Name="LaunchAtStartupToggle"
                                           Grid.Column="1"
                                           VerticalAlignment="Center"
-                                          AutomationProperties.Name="Start GlassDock when I sign in"/>
+                                          AutomationProperties.Name="Start Doky when I sign in"/>
                         </Grid>
                     </Border>
                 </StackPanel>
@@ -318,7 +318,7 @@
                 <StackPanel x:Name="RecoveryPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Recovery" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Restore Windows shell behavior or restart GlassDock in a safer mode." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                        <TextBlock Text="Restore Windows shell behavior or restart Doky in a safer mode." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
@@ -338,7 +338,7 @@
                                 <Button x:Name="ResumeTaskbarButton" Grid.Column="1" Content="Resume suppression" Click="ResumeTaskbarClick" Padding="14,8"/>
                             </Grid>
 
-                            <TextBlock Text="Restoring the taskbar pauses suppression for this GlassDock session. Restart GlassDock or choose Resume suppression to turn it back on." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                            <TextBlock Text="Restoring the taskbar pauses suppression for this Doky session. Restart Doky or choose Resume suppression to turn it back on." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
@@ -346,10 +346,10 @@
                         <StackPanel Spacing="14">
                             <StackPanel Spacing="3">
                                 <TextBlock Text="Restart and Safe Mode" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                <TextBlock Text="Safe Mode keeps the Windows taskbar visible, disables GlassDock Win-key interception, and disables Hover Wave for that session." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                <TextBlock Text="Safe Mode keeps the Windows taskbar visible, disables Doky Win-key interception, and disables Hover Wave for that session." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <Button Content="Restart GlassDock" Click="RestartClick" Padding="14,8"/>
+                                <Button Content="Restart Doky" Click="RestartClick" Padding="14,8"/>
                                 <Button Content="Restart in Safe Mode" Click="SafeModeClick" Padding="14,8"/>
                             </StackPanel>
                         </StackPanel>
@@ -375,8 +375,8 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Text="Exit GlassDock" FontWeight="SemiBold" Foreground="#FF7A1F1F"/>
-                                <TextBlock Text="GlassDock restores the Windows taskbar before it exits." FontSize="12" Foreground="#FF7A5A5A"/>
+                                <TextBlock Text="Exit Doky" FontWeight="SemiBold" Foreground="#FF7A1F1F"/>
+                                <TextBlock Text="Doky restores the Windows taskbar before it exits." FontSize="12" Foreground="#FF7A5A5A"/>
                             </StackPanel>
                             <Button Grid.Column="1" Content="Exit" Click="ExitClick" Padding="16,8"/>
                         </Grid>
@@ -387,12 +387,12 @@
                 <StackPanel x:Name="AboutPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="About" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="GlassDock information and local configuration." FontSize="13" Foreground="#FF6B6B6B"/>
+                        <TextBlock Text="Doky information and local configuration." FontSize="13" Foreground="#FF6B6B6B"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="GlassDock" FontSize="22" FontWeight="SemiBold" Foreground="#FF222222"/>
+                            <TextBlock Text="Doky" FontSize="22" FontWeight="SemiBold" Foreground="#FF222222"/>
                             <TextBlock Text="A clean, modern dock for Windows 11." FontSize="13" Foreground="#FF6B6B6B"/>
                             <TextBlock x:Name="VersionText" Margin="0,4,0,0" FontSize="12" Foreground="#FF6B6B6B"/>
                         </StackPanel>
@@ -401,7 +401,7 @@
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="6">
                             <TextBlock Text="Updates" FontWeight="SemiBold" Foreground="#FF222222"/>
-                            <TextBlock x:Name="UpdateStatusText" Text="Check for a newer version of GlassDock." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                            <TextBlock x:Name="UpdateStatusText" Text="Check for a newer version of Doky." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                             <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,6"/>
                             <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
                                 <Button x:Name="CheckUpdatesButton" Content="Check for Updates" Click="CheckUpdatesClick"/>

@@ -12,6 +12,11 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PlatformTarget>x64</PlatformTarget>
 
+    <!-- User-facing branding only. Assembly/executable/package identity stays GlassDock. -->
+    <Product>Doky</Product>
+    <AssemblyTitle>Doky</AssemblyTitle>
+    <Description>Doky desktop dock</Description>
+
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 

@@ -9,7 +9,7 @@ internal sealed class DevelopmentWindow : Window
 {
     public DevelopmentWindow(DesktopOverlayWindow dock)
     {
-        Title = "GlassDock — Development Controls";
+        Title = "Doky — Development Controls";
         var panel = new StackPanel { Padding = new Thickness(28), Spacing = 16, RequestedTheme = ElementTheme.Dark };
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Colors.LightGreen) };
         var rendering = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
@@ -48,7 +48,7 @@ internal sealed class DevelopmentWindow : Window
         panel.Children.Add(rendering);
         panel.Children.Add(new TextBlock { Text = "Bare Windows key toggles the dock; Windows-key shortcuts pass through. Dock items launch pinned apps or focus existing windows.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12 });
-        var exit = new Button { Content = "Exit GlassDock" };
+        var exit = new Button { Content = "Exit Doky" };
         exit.Click += (_, _) => dock.RequestShutdown();
         panel.Children.Add(exit);
         Refresh();

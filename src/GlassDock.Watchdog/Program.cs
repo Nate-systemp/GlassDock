@@ -18,7 +18,7 @@ if (args is ["--restore"])
 if (args.Length != 3 || args[0] is not ("--watch" or "--watch-active") ||
     !int.TryParse(args[1], out var parentId) || !long.TryParse(args[2], out var startTicks))
 {
-    Console.WriteLine("GlassDock Recovery: --status, --restore, or App-owned --watch <pid> <start-ticks>");
+    Console.WriteLine("Doky Recovery: --status, --restore, or App-owned --watch <pid> <start-ticks>");
     return 0;
 }
 

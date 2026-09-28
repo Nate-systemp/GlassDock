@@ -106,7 +106,7 @@ public sealed class WindowsApplicationIndex : IDisposable
             when (ShellApplicationMetadata.IsDiscoveryError(error))
         {
             warning =
-                "Application indexing was incomplete. Restart GlassDock to retry.";
+                "Application indexing was incomplete. Restart Doky to retry.";
         }
         finally
         {

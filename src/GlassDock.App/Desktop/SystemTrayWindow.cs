@@ -58,7 +58,7 @@ internal sealed class SystemTrayWindow : Window
     {
         this.controls = controls;
         this.applicationService = applicationService;
-        Title = "GlassDock Hidden Tray";
+        Title = "Doky Hidden Tray";
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);
@@ -1564,4 +1564,3 @@ internal static class WindowsTrayAccessibility
         int cy,
         uint flags);
 }
-

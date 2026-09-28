@@ -53,7 +53,7 @@ internal sealed class SystemQuickSettingsWindow : Window
     public SystemQuickSettingsWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance, Func<bool>? utilityOwnsPointer = null)
     {
         this.controls = controls;
-        Title = "GlassDock Quick Settings";
+        Title = "Doky Quick Settings";
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);

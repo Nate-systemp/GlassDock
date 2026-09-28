@@ -37,7 +37,7 @@ public sealed class DesktopShutdownRegressionTests
         Assert.True(restoreTaskbar < disposeWatchdog);
         Assert.True(disposeWatchdog < closeMain);
         Assert.True(closeMain < completeApplication);
-        Assert.Contains("MenuItem(menu, \"Exit GlassDock\", RequestShutdown);", source, StringComparison.Ordinal);
+        Assert.Contains("MenuItem(menu, \"Exit Doky\", RequestShutdown);", source, StringComparison.Ordinal);
         Assert.Contains("private void OnClosed(object sender, WindowEventArgs e) => BeginShutdown(closeMainWindow: false);", source, StringComparison.Ordinal);
     }
 }

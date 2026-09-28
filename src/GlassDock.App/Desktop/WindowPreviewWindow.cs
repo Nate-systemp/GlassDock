@@ -99,7 +99,7 @@ internal sealed class WindowPreviewWindow : Window
         this.dock = dock;
         this.session = session;
 
-        Title = "GlassDock — Window previews";
+        Title = "Doky — Window previews";
         Content = root;
 
         SystemBackdrop = backdrop;

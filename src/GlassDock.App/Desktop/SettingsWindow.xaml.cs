@@ -53,7 +53,7 @@ public sealed partial class SettingsWindow : Window
         InitializeComponent();
         ConfigureNumberFormatting();
         UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
-        Title = "GlassDock Settings";
+        Title = "Doky Settings";
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
 
         ShowSettingsPage("Appearance");
@@ -61,7 +61,7 @@ public sealed partial class SettingsWindow : Window
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         PopulateAbout();
         RecoveryModeStatusText.Text = safeMode
-            ? "Safe Mode is active. Taskbar suppression, GlassDock Win-key interception, and Hover Wave are disabled for this session."
+            ? "Safe Mode is active. Taskbar suppression, Doky Win-key interception, and Hover Wave are disabled for this session."
             : "Normal mode is active.";
         ResumeTaskbarButton.IsEnabled = !safeMode;
         SetStatus("Settings loaded.", success: true);
@@ -161,7 +161,7 @@ public sealed partial class SettingsWindow : Window
                 VersionText.Text += " (development build)";
             CheckUpdatesButton.IsEnabled = updates.CanUpdate;
             if (!updates.CanUpdate)
-                UpdateStatusText.Text = "Updates are available in the installed Natesystemp.GlassDock build. Development builds are not updated.";
+                UpdateStatusText.Text = "Updates are available in the installed Doky build. Development builds are not updated.";
         }
         catch (Exception)
         {
@@ -181,8 +181,8 @@ public sealed partial class SettingsWindow : Window
             await updates.CheckAsync(updateLifetime.Token);
             if (closed || shutdown.IsRequested) return;
             UpdateStatusText.Text = updates.AvailableVersion is { } version
-                ? $"GlassDock {version} is available."
-                : "GlassDock is up to date.";
+                ? $"Doky {version} is available."
+                : "Doky is up to date.";
             InstallUpdateButton.Visibility = updates.AvailableVersion is null ? Visibility.Collapsed : Visibility.Visible;
         }
         catch (OperationCanceledException) when (closed || shutdown.IsRequested) { }
@@ -215,7 +215,7 @@ public sealed partial class SettingsWindow : Window
         {
             await updates.DownloadAsync(value => ((IProgress<int>)progress).Report(value), updateLifetime.Token);
             if (closed || shutdown.IsRequested) return;
-            UpdateStatusText.Text = "Installing update… GlassDock will restart.";
+            UpdateStatusText.Text = "Installing update… Doky will restart.";
             updates.ApplyAfterExit(safeMode);
             exitGlassDock();
         }

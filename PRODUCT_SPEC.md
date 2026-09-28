@@ -1,12 +1,12 @@
-# GlassDock product specification
+# Doky product specification
 This document describes the long-term product. Implemented scope is limited to the Phase 0 foundation, Phase 1 material laboratory, and separately authorized Phase 2–3 desktop dock foundation. See ROADMAP.md for current gates; requirements below do not authorize future features.
 
 ## 1. Product overview
-GlassDock — A cleaner way to use Windows. A premium Windows interaction layer, intended for commercial distribution.
+Doky — A cleaner way to use Windows. A premium Windows interaction layer, intended for commercial distribution.
 ## 2. Target user experience
 A calm, minimal and responsive desktop with a small dock and full-screen launcher.
-## 3. GlassDock philosophy
-Feel spatial, elegant and distinctly GlassDock while respecting Windows conventions. Visual quality, accessibility and reliability are product requirements.
+## 3. Doky philosophy
+Feel spatial, elegant and distinctly Doky while respecting Windows conventions. Visual quality, accessibility and reliability are product requirements.
 ## 4. Dock behavior
 Eventually expand smoothly on proximity, support pinned and running apps, and minimize when appropriate. Taskbar replacement requires proven recovery.
 ## 5. Home indicator

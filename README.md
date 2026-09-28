@@ -1,4 +1,4 @@
-# GlassDock
+# Doky
 A cleaner way to use Windows.
 
 Seven C# projects with a floating desktop dock, a preserved Glass Material Laboratory, architecture boundaries, tests and documentation.
@@ -14,7 +14,7 @@ dotnet run --project src/GlassDock.App -c Release -- --lab
 ```
 Launch one App instance at a time. Default launch shows a peek pill; hover raises the pill and clicking expands the dock of running and pinned applications. Right-click for persisted Dock Settings, recovery, the laboratory, or Exit. Bottom spacing and dock hide/peek delays are applied from the settings file.
 
-`--controls` also opens development controls and makes the overlay visible to window inspection tools/Alt+Tab. Default mode is a non-activating tool window. `--lab` opens only the Phase 1 laboratory; compare its three presets and five scenes. Close running GlassDock instances before rebuilding.
+`--controls` also opens development controls and makes the overlay visible to window inspection tools/Alt+Tab. Default mode is a non-activating tool window. `--lab` opens only the Phase 1 laboratory; compare its three presets and five scenes. Close running Doky instances before rebuilding.
 
 Default launch requests a watchdog-owned taskbar lease while the app is active. The separate development button offers a bounded 60-second test. Ctrl+Alt+F12 restores immediately; normal exit and failure recovery also restore. Bare Win and Ctrl+Alt+Space toggle the dock; Win+Space opens Glass Home with application/Settings search. A low-level keyboard hook recognizes the Win gestures and passes normal Win shortcuts through. Context menus suppress dock toggling until they close.
 
@@ -25,7 +25,7 @@ Independent recovery after a Release build (does not require App):
 ```
 Suppression is a reversible visibility experiment, not production taskbar replacement. See [recovery design](docs/DESKTOP_RECOVERY_DESIGN.md) and [desktop verification](docs/PHASE_2_3_VALIDATION.md) before testing.
 NuGet restore requires internet access for development dependencies; application networking is absent.
-Use GlassDock.sln in Visual Studio. The current development app is x64 and unpackaged.
+Use GlassDock.sln in Visual Studio. The current Doky development app is x64 and unpackaged.
 
 Read [product specification](PRODUCT_SPEC.md), [architecture](ARCHITECTURE.md), [roadmap](ROADMAP.md), and [validation](docs/PHASE_0_VALIDATION.md).
 Phase 2–3 reuses the Phase 1 glass graph with a native system-backdrop adapter. Refraction remains an explicitly labelled lighting approximation. No discovery, real app launching, full launcher, startup registration, commercial services or shell replacement is implemented.

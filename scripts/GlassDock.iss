@@ -1,7 +1,7 @@
-; GlassDock / Doki Installer
+; Doky installer (internal application identity remains GlassDock)
 ; Non-commercial use only.
 
-#define MyAppName "Doki"
+#define MyAppName "Doky"
 #define MyAppVersion "1.0"
 #define MyAppPublisher "Natesystemp"
 #define MyAppURL "https://www.dokidock.com"
