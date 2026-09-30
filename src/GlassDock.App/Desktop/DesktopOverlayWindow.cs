@@ -2462,7 +2462,8 @@ keyboard.RecoveryRequested +=
         desktopBackdrop.UseInnerEdge = !solid;
         if (glassStyle is { } style)
         {
-            desktopBackdrop.Apply(Appearance.ApplyTo(DockMaterialStylePresets.Create(style), true) with
+            // Settings already supplies absolute, editable preset values; apply them once.
+            desktopBackdrop.ApplyMainDock(style, Appearance.ApplyTo(DockMaterialStylePresets.Create(style), true) with
             {
                 CornerRadius = cornerRadius,
                 BorderThickness = Appearance.BorderThickness,

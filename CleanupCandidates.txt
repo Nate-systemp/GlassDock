@@ -1,0 +1,100 @@
+========== ZIP / ARCHIVE FILES ==========
+
+FullName                                                                                              Length
+--------                                                                                              ------
+C:\Dev\GlassDock\GlassDock-composition-files.zip                                                       68720
+C:\Dev\GlassDock\GlassDock-crash-startup-next.zip                                                      22094
+C:\Dev\GlassDock\GlassDock-current-runtime.zip                                                          9873
+C:\Dev\GlassDock\GlassDock-hotkey-crash-files.zip                                                      25098
+C:\Dev\GlassDock\GlassDock-runtime-files.zip                                                            3056
+C:\Dev\GlassDock\GlassDock-startup-files.zip                                                            3299
+C:\Dev\GlassDock\GlassDock-TEST-0.1.5-FRESH.zip                                                    114938458
+C:\Dev\GlassDock\artifacts\capture-mitigation-complete-files.zip                                       37371
+C:\Dev\GlassDock\artifacts\dock-input-capture-review.zip                                               27432
+C:\Dev\GlassDock\artifacts\GlassDock-interaction-fixes-20260920.zip                                    49143
+C:\Dev\GlassDock\artifacts\peek-pill-complete-files.zip                                                22034
+C:\Dev\GlassDock\Releases\Natesystemp.GlassDock-win-Portable.zip                                   145171780
+C:\Dev\GlassDock\Releases-0.1.1\Natesystemp.GlassDock-win-Portable.zip                             142059904
+C:\Dev\GlassDock\Releases-before-update-20260927-131627\Natesystemp.GlassDock-win-Portable.zip     142055695
+C:\Dev\GlassDock\Releases-compat-0.1.9\Natesystemp.GlassDock-win-Portable.zip                      143928429
+C:\Dev\GlassDock\Releases-compat-0.1.9-first-attempt\Natesystemp.GlassDock-win-Portable.zip        143574550
+C:\Dev\GlassDock\Releases-compat-0.1.9-without-prerequisite\Natesystemp.GlassDock-win-Portable.zip 143928401
+C:\Dev\GlassDock\Releases-default-architecture-verification\GlassDock-win-Portable.zip             141701834
+C:\Dev\GlassDock\Releases-test\Natesystemp.GlassDock-win-Portable.zip                              143928316
+
+
+
+
+========== OLD PUBLISH / RELEASE / TEMP FOLDERS ==========
+
+FullName                                                   
+--------                                                   
+C:\Dev\GlassDock\hash-check                                
+C:\Dev\GlassDock\publish-before-update-20260927-131547     
+C:\Dev\GlassDock\publish-before-velopack-20260927-123604   
+C:\Dev\GlassDock\publish-compat-0.1.9                      
+C:\Dev\GlassDock\Releases-0.1.1                            
+C:\Dev\GlassDock\Releases-before-update-20260927-131627    
+C:\Dev\GlassDock\Releases-before-velopack-20260927-123637  
+C:\Dev\GlassDock\Releases-compat-0.1.9                     
+C:\Dev\GlassDock\Releases-compat-0.1.9-first-attempt       
+C:\Dev\GlassDock\Releases-compat-0.1.9-without-prerequisite
+C:\Dev\GlassDock\Releases-default-architecture-verification
+C:\Dev\GlassDock\Releases-test                             
+C:\Dev\GlassDock\TestExtract                               
+
+
+
+
+========== GENERATED BIN / OBJ / .VS ==========
+
+FullName                                                                               
+--------                                                                               
+C:\Dev\GlassDock\.vs                                                                   
+C:\Dev\GlassDock\artifacts\application-probe\bin                                       
+C:\Dev\GlassDock\artifacts\application-probe\obj                                       
+C:\Dev\GlassDock\artifacts\control-center-probe\bin                                    
+C:\Dev\GlassDock\artifacts\control-center-probe\obj                                    
+C:\Dev\GlassDock\artifacts\effect-probe\bin                                            
+C:\Dev\GlassDock\artifacts\effect-probe\obj                                            
+C:\Dev\GlassDock\artifacts\icon-filter-probe\bin                                       
+C:\Dev\GlassDock\artifacts\icon-filter-probe\obj                                       
+C:\Dev\GlassDock\artifacts\liquid-probe\bin                                            
+C:\Dev\GlassDock\artifacts\liquid-probe\obj                                            
+C:\Dev\GlassDock\artifacts\msi-validation\predecessor\bin                              
+C:\Dev\GlassDock\artifacts\msi-validation\predecessor\obj                              
+C:\Dev\GlassDock\artifacts\preview-animation-probe\bin                                 
+C:\Dev\GlassDock\artifacts\preview-animation-probe\obj                                 
+C:\Dev\GlassDock\artifacts\preview-fixture\bin                                         
+C:\Dev\GlassDock\artifacts\preview-fixture\obj                                         
+C:\Dev\GlassDock\artifacts\preview-service-probe\bin                                   
+C:\Dev\GlassDock\artifacts\preview-service-probe\obj                                   
+C:\Dev\GlassDock\artifacts\render-probe\bin                                            
+C:\Dev\GlassDock\artifacts\render-probe\obj                                            
+C:\Dev\GlassDock\artifacts\search-build\Release\net10.0-windows10.0.26100.0\win-x64\bin
+C:\Dev\GlassDock\artifacts\search-index-probe\bin                                      
+C:\Dev\GlassDock\artifacts\search-index-probe\obj                                      
+C:\Dev\GlassDock\artifacts\tray-probe\bin                                              
+C:\Dev\GlassDock\artifacts\tray-probe\obj                                              
+C:\Dev\GlassDock\installer\wix\bin                                                     
+C:\Dev\GlassDock\installer\wix\obj                                                     
+C:\Dev\GlassDock\src\.vs                                                               
+C:\Dev\GlassDock\src\GlassDock.App\bin                                                 
+C:\Dev\GlassDock\src\GlassDock.App\obj                                                 
+C:\Dev\GlassDock\src\GlassDock.Core\bin                                                
+C:\Dev\GlassDock\src\GlassDock.Core\obj                                                
+C:\Dev\GlassDock\src\GlassDock.IconDiag\bin                                            
+C:\Dev\GlassDock\src\GlassDock.IconDiag\obj                                            
+C:\Dev\GlassDock\src\GlassDock.Licensing\bin                                           
+C:\Dev\GlassDock\src\GlassDock.Licensing\obj                                           
+C:\Dev\GlassDock\src\GlassDock.Watchdog\bin                                            
+C:\Dev\GlassDock\src\GlassDock.Watchdog\obj                                            
+C:\Dev\GlassDock\src\GlassDock.Windows\bin                                             
+C:\Dev\GlassDock\src\GlassDock.Windows\obj                                             
+C:\Dev\GlassDock\tests\GlassDock.Core.Tests\bin                                        
+C:\Dev\GlassDock\tests\GlassDock.Core.Tests\obj                                        
+C:\Dev\GlassDock\tests\GlassDock.Windows.Tests\bin                                     
+C:\Dev\GlassDock\tests\GlassDock.Windows.Tests\obj                                     
+
+
+

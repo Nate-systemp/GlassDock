@@ -52,7 +52,6 @@ public sealed partial class SettingsWindow : Window
 
         InitializeComponent();
         ConfigureNumberFormatting();
-        UtilityGlassMaterialModeBox.SelectionChanged += UtilityGlassMaterialChanged;
         Title = "Doky Settings";
         WindowBranding.Apply(this);
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
@@ -119,7 +118,6 @@ public sealed partial class SettingsWindow : Window
         IconSizeBox.Value = settings.IconSize;
         MagnificationScaleBox.Value = settings.MagnificationScale;
         IconSpacingBox.Value = settings.IconSpacing;
-        UtilityGlassMaterialModeBox.SelectedIndex = (int)settings.GlassMaterialMode;
         GlassBlurAmountBox.Value = settings.GlassBlurAmount;
         DockOpacityBox.Value = settings.DockOpacity * 100;
         BorderThicknessBox.Value = settings.BorderThickness;
@@ -127,23 +125,6 @@ public sealed partial class SettingsWindow : Window
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
         LaunchAtStartupToggle.IsOn = settings.LaunchAtStartup;
         populating = false;
-    }
-
-    private GlassMaterialMode SelectedGlassMaterialMode =>
-        Enum.IsDefined((GlassMaterialMode)UtilityGlassMaterialModeBox.SelectedIndex)
-            ? (GlassMaterialMode)UtilityGlassMaterialModeBox.SelectedIndex
-            : GlassMaterialMode.Frosted;
-
-    private void UtilityGlassMaterialChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (populating)
-            return;
-
-        var preset = DockMaterialStylePresets.Create(SelectedGlassMaterialMode);
-        GlassBlurAmountBox.Value = preset.BlurAmount;
-        DockOpacityBox.Value = preset.Opacity * 100;
-        BorderThicknessBox.Value = preset.BorderThickness;
-        BorderOpacityBox.Value = preset.BorderOpacity * 100;
     }
 
     private void PopulateAbout()
@@ -257,7 +238,6 @@ public sealed partial class SettingsWindow : Window
         if (mode.GlassStyle() is not { } style)
             return;
 
-        UtilityGlassMaterialModeBox.SelectedIndex = (int)style;
         var preset = DockMaterialStylePresets.Create(style);
         GlassBlurAmountBox.Value = preset.BlurAmount;
         DockOpacityBox.Value = preset.Opacity * 100;
@@ -362,7 +342,7 @@ public sealed partial class SettingsWindow : Window
                 ToMilliseconds(
                     PeekDelayBox.Value,
                     current.PeekDelayMilliseconds),
-                SelectedDockAppearance.GlassStyle() ?? SelectedGlassMaterialMode,
+                SelectedDockAppearance.GlassStyle() ?? current.GlassMaterialMode,
                 IconSizeBox.Value,
                 MagnificationScaleBox.Value,
                 IconSpacingBox.Value,

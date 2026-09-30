@@ -16,6 +16,14 @@ namespace GlassDock.App.Rendering;
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
     public bool UseInnerEdge { get; set; }
+    private GlassMaterialMode? dockStyle;
+    private ClearDockSpecular? clearSpecular;
+
+    public void ApplyMainDock(GlassMaterialMode style, GlassMaterial value)
+    {
+        dockStyle = style;
+        Apply(value);
+    }
     /// <summary>
     /// Uses the existing vector mask and wave geometry with a solid color
     /// source. This is used only by the main dock; utility popups retain the
@@ -118,6 +126,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 Matrix4x4.CreateScale(units, units, 1);
         }
 
+        clearSpecular?.SetTransform(matrix);
         visual.TransformMatrix = matrix;
         visual.Opacity = (float)(presentationOpacity * lastOpacity);
 
@@ -312,8 +321,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         {
             source = compositor.CreateBackdropBrush();
             stage = "effect factory";
-            // Separate named leaves keep the graph tree-shaped. Both sample the same
-            // live desktop brush; neither material branch reintroduces sharp pixels.
+            // Separate named leaves keep the graph tree-shaped. The selected main-dock
+            // style controls base diffusion; popups retain their fully blurred base.
             factory = compositor.CreateEffectFactory(
                 GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop"), new W.CompositionEffectSourceParameter("BaseBackdrop")),
                 GlassEffectGraph.Properties.Concat(["BaseBlur.BlurAmount"]));
@@ -399,7 +408,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             fallback = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(230, 35, 45, 62));
             output.Source = fallback;
             RenderingMode = $"Desktop solid fallback: {stage} (0x{exception.HResult:X8})";
-            System.Diagnostics.Debug.WriteLine(exception);
+            StartupDiagnostics.Write($"{RenderingMode}: {exception}");
         }
         target.SystemBackdrop = output;
         RenderingModeChanged?.Invoke(this, EventArgs.Empty);
@@ -438,14 +447,38 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
             effect.Properties.InsertScalar(
                 "BaseBlur.BlurAmount",
-                (float)material.BlurAmount);
+                (float)DockMaterialRendering.BaseBlur(dockStyle, material.BlurAmount));
 
             effect.Properties.InsertColor(
                 "Tint.Color",
                 GlassEffectGraph.Tint(material));
         }
 
+        if (UseInnerEdge && effect is not null && fallback is null && output is not null)
+        {
+            if (dockStyle == GlassMaterialMode.Clear)
+            {
+                clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, effect);
+                clearSpecular.Apply(material);
+                clearSpecular.SetVisible(true);
+                output.Source = clearSpecular.Brush;
+                UpdateClearBounds();
+                ApplyPresentation();
+            }
+            else
+            {
+                clearSpecular?.SetVisible(false);
+                output.Source = edgeEffect ?? effect;
+            }
+        }
         UpdateMaskPath();
+    }
+
+    private void UpdateClearBounds()
+    {
+        if (!hasBounds || clearSpecular is null) return;
+        clearSpecular.SetBounds(lastWindowWidth, lastWindowHeight,
+            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale);
     }
 
     public void SetSolidAppearance(
@@ -453,6 +486,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         double opacity,
         double cornerRadius)
     {
+        dockStyle = null;
         solidAppearance = Enum.IsDefined(appearance)
             ? appearance
             : DockAppearanceMode.Dark;
@@ -568,6 +602,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             edgeSurface!.SourceSize = size * sampling;
         }
 
+        UpdateClearBounds();
         UpdateMaskPath();
     }
 
@@ -625,7 +660,19 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         return CanvasGeometry.CreatePath(builder);
     }
 
-    private void UpdateSpecularPaths()
+    private CanvasGeometry CreateUpperRim(GlassDock.Core.Desktop.DockWaveGeometry.Outline outline, double left, double right)
+    {
+        var part = GlassDock.Core.Desktop.DockEdgeSlice.Upper(outline, left, right);
+        Vector2 Px(GlassDock.Core.Desktop.DockWaveGeometry.Point p) => new((float)(p.X * lastScale), (float)(p.Y * lastScale));
+        using var builder = new CanvasPathBuilder(canvasDevice!);
+        builder.BeginFigure(Px(part.Start));
+        foreach (var segment in part.Segments)
+            builder.AddCubicBezier(Px(segment.Control1), Px(segment.Control2), Px(segment.End));
+        builder.EndFigure(CanvasFigureLoop.Open);
+        return CanvasGeometry.CreatePath(builder);
+    }
+
+    private void UpdateSpecularPaths(GlassDock.Core.Desktop.DockWaveGeometry.Outline outline)
     {
         if (canvasDevice is null ||
             specularLeftTopGeometry is null ||
@@ -643,8 +690,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var radius = Math.Max(2,
             Math.Min(material.CornerRadius, Math.Min(lastWidth / 2, lastHeight / 2)));
 
-        // Keep glints short enough that the edge never reads as one continuous
-        // white border. Their positions also avoid the center hover-wave crest.
+        // Keep the existing partial spans and intensity. Their curves are sliced
+        // from the same final outline, including waves near either end of the dock.
         var topLeftStart = left + radius * .78;
         var topLeftEnd = Math.Min(
             right - radius - 18,
@@ -661,21 +708,11 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         Vector2 Px(double x, double y) =>
             new((float)(x * lastScale), (float)(y * lastScale));
 
-        // Top-left: a clean short line.
-        var leftTop = CreateOpenPath(
-            (Px(topLeftStart, top), null, null),
-            (Px(topLeftEnd, top), null, null));
-
-        // Top-right: line into the rounded end-cap so it looks like light
-        // sliding over curved glass rather than a decorative underline.
-        const double k = .5522847498307936;
+        // Preserve the established spans, but slice the final wave outline:
+        // no resting-baseline segment can remain inside the raised glass.
+        var leftTop = CreateUpperRim(outline, topLeftStart, topLeftEnd);
         var r = radius;
-        var rightTop = CreateOpenPath(
-            (Px(topRightStart, top), null, null),
-            (Px(right - r, top), null, null),
-            (Px(right, top + r),
-                Px(right - r + k * r, top),
-                Px(right, top + r - k * r)));
+        var rightTop = CreateUpperRim(outline, topRightStart, right);
 
         // Bottom-left: deliberately shorter and dimmer-looking by placement;
         // it balances the composition without enclosing the entire dock.
@@ -736,7 +773,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 builder);
 
         geometry.Path = new W.CompositionPath(nextGeometry);
-        UpdateSpecularPaths();
+        UpdateSpecularPaths(outline);
         renderedMask = state;
 
         var previousGeometry =
@@ -765,6 +802,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         bodyTrack?.Dispose(); bodyTrack = null;
         rimTrack?.Dispose(); rimTrack = null;
         target.SystemBackdrop = null;
+        clearSpecular?.Dispose(); clearSpecular = null;
         edgeEffect?.Dispose(); edgeFactory?.Dispose(); edgeMask?.Dispose();
         edgeSurface?.Dispose(); edgeVisual?.Dispose(); edgeShape?.Dispose(); edgeFill?.Dispose();
 

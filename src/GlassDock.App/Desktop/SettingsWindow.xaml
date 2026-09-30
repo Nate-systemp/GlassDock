@@ -260,24 +260,9 @@
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="18">
                             <StackPanel Spacing="3">
-                                <TextBlock Text="Utility popup appearance" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                <TextBlock Text="These existing controls affect Hidden Tray, Quick Settings, and Calendar popup glass. They do not turn the main dock into glass." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                <TextBlock Text="Glass tuning" FontSize="16" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock Text="Fine-tune the selected dock appearance and shared utility popup glass." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                             </StackPanel>
-
-                            <Grid ColumnSpacing="24">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
-                                <StackPanel Spacing="2" VerticalAlignment="Center">
-                                    <TextBlock Text="Material" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                    <TextBlock Text="Choose the utility popup glass style." FontSize="12" Foreground="#FF6B6B6B"/>
-                                </StackPanel>
-                                <ComboBox x:Name="UtilityGlassMaterialModeBox" Grid.Column="1" Header="Style" AutomationProperties.Name="Utility popup glass material style">
-                                    <ComboBoxItem Content="Frosted"/>
-                                    <ComboBoxItem Content="Acrylic"/>
-                                    <ComboBoxItem Content="Clear"/>
-                                </ComboBox>
-                            </Grid>
-
-                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
 
                             <Grid ColumnSpacing="24">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>

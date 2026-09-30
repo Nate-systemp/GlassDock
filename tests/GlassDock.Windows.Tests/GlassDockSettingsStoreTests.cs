@@ -7,6 +7,22 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class GlassDockSettingsStoreTests
 {
+    [Fact]
+    public async Task Explicit_appearance_wins_over_legacy_material_without_resetting_other_settings()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath,
+            """{"DockAppearanceMode":4,"GlassMaterialMode":1,"Material":"obsolete","IconSize":32,"LaunchAtStartup":true}""");
+        var loaded = await store.LoadAsync();
+        Assert.Equal(GlassMaterialMode.Clear, loaded.DockAppearanceMode.GlassStyle());
+        Assert.Equal(GlassMaterialMode.Acrylic, loaded.GlassMaterialMode);
+        Assert.Equal(32, loaded.IconSize);
+        Assert.True(loaded.LaunchAtStartup);
+        await store.SaveAsync(loaded);
+        Assert.Equal(loaded, await location.CreateStore().LoadAsync());
+    }
+
     [Theory]
     [InlineData(DockAppearanceMode.Light)]
     [InlineData(DockAppearanceMode.Dark)]
