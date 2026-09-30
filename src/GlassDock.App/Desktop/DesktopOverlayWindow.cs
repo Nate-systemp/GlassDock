@@ -321,13 +321,21 @@ public sealed class DesktopOverlayWindow : Window
 
 
 
-        keyboard = new WindowsKeyboardService(hwnd, enableDockShortcuts: !safeMode);
+        keyboard = new WindowsKeyboardService(
+            hwnd,
+            enableDockShortcuts: !safeMode,
+            elevatedHelperPath: safeMode
+                ? null
+                : Path.Combine(
+                    AppContext.BaseDirectory,
+                    "GlassDock.InputHelper.exe"));
+
+keyboard.BareWindowsRequested += async (_, _) => await ToggleDockAsync();
 
 keyboard.HomeRequested +=
     async (_, _) =>
     {
-        // Bare Win always belongs to GlassDock. If Glass Home currently owns
-        // foreground focus, close it first, then perform the normal dock toggle.
+        // Ctrl+Alt+Space retains the explicit dock toggle.
         if (home is { IsVisible: true })
             home.HideHome();
 

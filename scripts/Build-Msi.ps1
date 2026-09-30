@@ -27,7 +27,7 @@ function Clear-OutputDirectory([string]$Path) {
     if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Recurse -Force }
     New-Item -ItemType Directory -Path $full -Force | Out-Null
 }
-if (Get-Process GlassDock.App,GlassDock.Watchdog -ErrorAction SilentlyContinue) {
+if (Get-Process GlassDock.App,GlassDock.InputHelper,GlassDock.Watchdog -ErrorAction SilentlyContinue) {
     throw 'Exit Doky normally before building the installer.'
 }
 # Remove only this build's outputs, not unrelated distribution artifacts.
@@ -48,7 +48,7 @@ Clear-OutputDirectory (Join-Path $PublishDir 'Recovery')
 Run-Step 'Publish self-contained x64 watchdog' {
     dotnet publish (Join-Path $Root 'src\GlassDock.Watchdog\GlassDock.Watchdog.csproj') -c Release -r win-x64 --self-contained true -p:NuGetLockFilePath=obj/packages.publish.lock.json -o (Join-Path $PublishDir 'Recovery')
 }
-foreach ($file in @('GlassDock.App.exe','GlassDock.App.dll','GlassDock.App.pri','coreclr.dll','hostfxr.dll','Microsoft.ui.xaml.dll','Recovery\GlassDock.Watchdog.exe','Recovery\GlassDock.Watchdog.dll','Recovery\coreclr.dll')) {
+foreach ($file in @('GlassDock.App.exe','GlassDock.App.dll','GlassDock.App.pri','GlassDock.InputHelper.exe','GlassDock.InputHelper.dll','coreclr.dll','hostfxr.dll','Microsoft.ui.xaml.dll','Recovery\GlassDock.Watchdog.exe','Recovery\GlassDock.Watchdog.dll','Recovery\coreclr.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PublishDir $file))) { throw "Missing publish dependency: $file" }
 }
 Run-Step 'Restore WiX 7' { dotnet restore $WixProject --locked-mode }

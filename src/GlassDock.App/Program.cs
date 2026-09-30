@@ -1,5 +1,6 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using GlassDock.Windows.Desktop;
 using Velopack;
 
 namespace GlassDock.App;
@@ -10,7 +11,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         // Installer/update hooks must run before XAML and the OnLaunched mutex.
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            .OnBeforeUpdateFastCallback(_ =>
+                WindowsInputHelperRegistration.StopBestEffort())
+            .OnBeforeUninstallFastCallback(_ =>
+                WindowsInputHelperRegistration.RemoveBestEffort())
+            .Run();
 
         Rendering.StartupDiagnostics.Write($"Main OS={Environment.OSVersion} base={AppContext.BaseDirectory}");
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>

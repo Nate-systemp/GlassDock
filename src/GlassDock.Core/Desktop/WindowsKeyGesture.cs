@@ -13,6 +13,8 @@ public sealed class WindowsKeyGesture
     private const int RightWindows = 0x5C;
     private const int Escape = 0x1B;
 
+    public bool IsWindowsHeld => held.Contains(LeftWindows) || held.Contains(RightWindows);
+
     public bool Process(int key, bool down)
     {
         var windows = key is LeftWindows or RightWindows;

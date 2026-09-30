@@ -33,8 +33,29 @@
     <PackageReference Include="Velopack" Version="1.2.158" />
     <ProjectReference Include="../GlassDock.Core/GlassDock.Core.csproj" />
     <ProjectReference Include="../GlassDock.Windows/GlassDock.Windows.csproj" />
+    <ProjectReference Include="../GlassDock.InputHelper/GlassDock.InputHelper.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../GlassDock.Watchdog/GlassDock.Watchdog.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyBuiltInputHelper" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <MSBuild Projects="../GlassDock.InputHelper/GlassDock.InputHelper.csproj"
+             Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained">
+      <Output TaskParameter="TargetOutputs" ItemName="BuiltInputHelperTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <BuiltInputHelperDirectory>%(BuiltInputHelperTarget.RootDir)%(BuiltInputHelperTarget.Directory)</BuiltInputHelperDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <BuiltInputHelperFiles Include="$(BuiltInputHelperDirectory)/GlassDock.InputHelper.*" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(BuiltInputHelperDirectory)/GlassDock.InputHelper.exe')"
+           Text="The current elevated input helper build is missing." />
+    <Copy SourceFiles="@(BuiltInputHelperFiles)"
+          DestinationFiles="@(BuiltInputHelperFiles->'$(TargetDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <Target Name="CopyBuiltRecoveryHelper" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
     <!-- ProjectReference builds the helper, but does not copy an executable reference.
@@ -52,6 +73,14 @@
     <Error Condition="!Exists('$(BuiltRecoveryDirectory)/GlassDock.Watchdog.exe')" Text="The current watchdog build is missing; refusing to leave a stale Recovery helper." />
     <Copy SourceFiles="@(BuiltRecoveryFiles)" DestinationFiles="@(BuiltRecoveryFiles->'$(TargetDir)Recovery/%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(BuiltRecoveryRuntimeFiles)" DestinationFiles="@(BuiltRecoveryRuntimeFiles->'$(TargetDir)Recovery/runtimes/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishInputHelper" AfterTargets="Publish">
+    <MSBuild Projects="../GlassDock.InputHelper/GlassDock.InputHelper.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)" />
+    <Error Condition="!Exists('$(PublishDir)GlassDock.InputHelper.exe')"
+           Text="The elevated input helper was not published." />
   </Target>
 
   <Target Name="CopyRecoveryHelper" AfterTargets="Publish">
