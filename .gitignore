@@ -40,4 +40,6 @@ installer/wix/*
 !installer/wix/packages.lock.json
 !installer/wix/README.md
 
-/hash-check/
+/hash-check//CleanupCandidates.txt
+/FILES-INCLUDED.txt
+/ProjectFolders.txt
