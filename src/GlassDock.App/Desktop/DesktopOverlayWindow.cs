@@ -327,7 +327,9 @@ public sealed class DesktopOverlayWindow : Window
             elevatedHelperPath: safeMode
                 ? null
                 : Path.Combine(
-                    AppContext.BaseDirectory,
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    "Doky",
+                    "InputHelper",
                     "GlassDock.InputHelper.exe"));
 
 keyboard.BareWindowsRequested += async (_, _) => await ToggleDockAsync();

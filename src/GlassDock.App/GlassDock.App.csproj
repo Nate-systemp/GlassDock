@@ -25,6 +25,14 @@
     <RuntimeHostConfigurationOption Include="System.Net.DisableIPv6" Value="true" />
     <Content Include="Assets\Doky.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Doky.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Ship the one-time opt-in elevated-helper registration script. NEVER
+         run it automatically on every Doky launch (that would cause UAC). -->
+    <Content Include="..\..\scripts\Register-InputHelper.ps1" Link="Register-InputHelper.ps1"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\scripts\Install-InputHelper.ps1" Link="Install-InputHelper.ps1"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\scripts\Diagnose-InputHelper.ps1" Link="Diagnose-InputHelper.ps1"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -76,11 +84,23 @@
   </Target>
 
   <Target Name="PublishInputHelper" AfterTargets="Publish">
+    <!-- The elevated task must NEVER execute out of writable Velopack current.
+         Build a separate payload for one-time copying into protected Program Files. -->
+    <PropertyGroup>
+      <HelperPayloadDir>$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))HelperPayload/</HelperPayloadDir>
+    </PropertyGroup>
     <MSBuild Projects="../GlassDock.InputHelper/GlassDock.InputHelper.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)" />
-    <Error Condition="!Exists('$(PublishDir)GlassDock.InputHelper.exe')"
-           Text="The elevated input helper was not published." />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(HelperPayloadDir)" />
+    <Error Condition="!Exists('$(HelperPayloadDir)GlassDock.InputHelper.exe')"
+           Text="The separate protected-installation helper payload is missing." />
+    <!-- Preserve legacy package probes while the real scheduled task uses the
+         complete standalone payload installed under Program Files. -->
+    <ItemGroup>
+      <LegacyInputHelperFiles Include="$(HelperPayloadDir)GlassDock.InputHelper.exe;$(HelperPayloadDir)GlassDock.InputHelper.dll;$(HelperPayloadDir)GlassDock.InputHelper.deps.json;$(HelperPayloadDir)GlassDock.InputHelper.runtimeconfig.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LegacyInputHelperFiles)" DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyRecoveryHelper" AfterTargets="Publish">

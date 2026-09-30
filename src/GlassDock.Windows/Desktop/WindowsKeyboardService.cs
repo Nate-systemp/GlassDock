@@ -15,10 +15,13 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private readonly InputSignalMailbox signals = new();
     private const uint SignalMessage = 0x8047, OwnershipMessage = 0x8049;
 
+    // Retained for existing Glass Home visibility callers. Physical Win-down
+    // must now be withheld even while Home is hidden; visibility no longer
+    // decides whether keyboard input is captured.
     public bool CaptureBareWindowsKey
     {
         get => captureBareWindowsKey;
-        set { captureBareWindowsKey = value; UpdateState(); }
+        set => captureBareWindowsKey = value;
     }
     public bool SuppressDockToggle
     {
@@ -58,8 +61,14 @@ public sealed class WindowsKeyboardService : IKeyboardService
 
     private void UpdateState()
     {
-        hook?.UpdateState(suppressDockToggle, captureBareWindowsKey, revision);
-        elevatedHelper?.UpdateState(suppressDockToggle, captureBareWindowsKey, revision);
+        // Always withhold physical Win-down while dock shortcuts are active.
+        // Explorer can open Start on the initial Win-down, *before* we know
+        // whether the gesture is bare Win or a Win+key shortcut. Capturing
+        // only while Home is visible leaks Windows Start when Home is hidden.
+        // WindowsKeyHook replays a tagged Win-down for genuine shortcuts.
+        var captureWinDown = dockShortcutsEnabled;
+        hook?.UpdateState(suppressDockToggle, captureWinDown, revision);
+        elevatedHelper?.UpdateState(suppressDockToggle, captureWinDown, revision);
     }
     private void StartFallback()
     {

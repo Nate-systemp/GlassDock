@@ -30,6 +30,40 @@ public sealed class InputHelperProtocolTests
         finally { first.ReleaseMutex(); }
     }
     [Fact]
+    public void Hidden_home_must_not_disable_initial_win_down_suppression()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "GlassDock.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var keyboardService = File.ReadAllText(Path.Combine(root.FullName, "src", "GlassDock.Windows",
+            "Desktop", "WindowsKeyboardService.cs"));
+        var nativeHook = File.ReadAllText(Path.Combine(root.FullName, "src", "GlassDock.Windows",
+            "Desktop", "WindowsKeyHook.cs"));
+        // Home.IsVisible is NOT an acceptable condition: Explorer could see the
+        // physical Win-down and activate Windows Start before the bare release.
+        Assert.Contains("var captureWinDown = dockShortcutsEnabled;", keyboardService);
+        Assert.Contains("hook?.UpdateState(suppressDockToggle, captureWinDown, revision)", keyboardService);
+        Assert.Contains("elevatedHelper?.UpdateState(suppressDockToggle, captureWinDown, revision)", keyboardService);
+        Assert.Contains("private State state = new(false, true, 0);", nativeHook);
+        Assert.Contains("if (captureBareWindowsKey)", nativeHook);
+        Assert.Contains("The physical Win-down never reached Windows", nativeHook);
+    }
+
+    [Fact]
+    public void Elevated_task_must_use_a_protected_helper_instead_of_user_writable_app_output()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "GlassDock.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var overlay = File.ReadAllText(Path.Combine(root.FullName, "src", "GlassDock.App",
+            "Desktop", "DesktopOverlayWindow.cs"));
+        var register = File.ReadAllText(Path.Combine(root.FullName, "scripts", "Register-InputHelper.ps1"));
+        Assert.Contains("Environment.SpecialFolder.ProgramFiles", overlay);
+        Assert.Contains("'Doky\\InputHelper\\GlassDock.InputHelper.exe'", register);
+        Assert.Contains("Refusing to elevate a user-writable helper", register);
+    }
+
+    [Fact]
     public void Only_shared_hook_installs_and_handoff_removes_fallback_before_grant()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

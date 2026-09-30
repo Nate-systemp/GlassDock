@@ -6,6 +6,8 @@ using System.IO.Pipes;
 using System.Threading.Channels;
 using System.Text;
 using GlassDock.Windows.Applications;
+using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
 
 namespace GlassDock.Windows.Desktop;
 
@@ -20,7 +22,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     private readonly Channel<string> states = Channel.CreateBounded<string>(new BoundedChannelOptions(1)
     { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
     private TaskCompletionSource? grant;
-    private string state = "STATE|0|0|0";
+    private string state = "STATE|0|1|0";
 
     public WindowsInputHelperBridge(string helperPath, Action<bool> ownership, Action<InputSignal> signal)
     {
@@ -39,65 +41,106 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
     private async Task RunAsync(CancellationToken token)
     {
-        // Create the server before asking the pre-registered task to run. No UAC at startup.
-        while (!token.IsCancellationRequested)
+        // One bounded, asynchronous attempt per app start. If the installed
+        // scheduled task is missing or points to an old helper, keep fallback
+        // active and write a useful diagnostic instead of waiting forever.
+        if (token.IsCancellationRequested) return;
+
+        Process? helper = null;
+        bool handedOff = false;
+        using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
+        using var startup = CancellationTokenSource.CreateLinkedTokenSource(token);
+        startup.CancelAfter(TimeSpan.FromSeconds(15));
+        using var server = new NamedPipeServerStream(WindowsInputHelperProtocol.GetPipeName(),
+            PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        Task? stateWriter = null;
+
+        try
         {
-            Process? helper = null;
-            bool handedOff = false;
-            using var connection = CancellationTokenSource.CreateLinkedTokenSource(token);
-            using var server = new NamedPipeServerStream(WindowsInputHelperProtocol.GetPipeName(),
-                PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            Task? stateWriter = null;
-            try
+            // Begin listening BEFORE launching the scheduled task. No pipe
+            // activity or process launch occurs in the low-level keyboard hook.
+            var pendingConnection = server.WaitForConnectionAsync(startup.Token);
+            var launchResult = await RunRegisteredTaskAsync(startup.Token);
+            if (launchResult != 0)
             {
-                _ = RunRegisteredTaskAsync(token);
-                await server.WaitForConnectionAsync(token);
-                using var reader = new StreamReader(server, leaveOpen: true);
-                using var writer = new StreamWriter(server, leaveOpen: true) { AutoFlush = true };
-                var hello = await reader.ReadLineAsync(token);
-                if (hello != "HELLO2" ||
-                    !NativeMethods.GetNamedPipeClientProcessId(server.SafePipeHandle, out var pid)) continue;
-                helper = Process.GetProcessById((int)pid);
-                if (helper.SessionId != Process.GetCurrentProcess().SessionId ||
-                    !string.Equals(GetProcessPath(pid), helperPath, StringComparison.OrdinalIgnoreCase)) continue;
-                var readyToOwn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                Volatile.Write(ref grant, readyToOwn);
-                ownership(true);
-                handedOff = true;
-                await readyToOwn.Task.WaitAsync(token);
-                await writer.WriteLineAsync(Volatile.Read(ref state).AsMemory(), token);
-                await writer.WriteLineAsync("GO".AsMemory(), token);
-                if (await reader.ReadLineAsync(token) != "READY") continue;
-                stateWriter = WriteStatesAsync(writer, connection.Token);
-                long sequence = 0;
-                while (await reader.ReadLineAsync(token) is { } line)
-                {
-                    if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
-                        signal(value);
-                }
+                Log($"Scheduled task '{WindowsInputHelperRegistration.TaskName}' did not start (exit code {launchResult}). " +
+                    "Repair its registration and restart Doky.");
+                return;
             }
-            catch (Exception e) when (e is IOException or OperationCanceledException or Win32Exception or InvalidOperationException or UnauthorizedAccessException)
-            { Debug.WriteLine($"Doky input helper: {e.Message}"); }
-            finally
+
+            await pendingConnection;
+            using var reader = new StreamReader(server, leaveOpen: true);
+            using var writer = new StreamWriter(server, leaveOpen: true) { AutoFlush = true };
+            if (await reader.ReadLineAsync(startup.Token) != "HELLO2" ||
+                !NativeMethods.GetNamedPipeClientProcessId(server.SafePipeHandle, out var pid))
             {
-                connection.Cancel();
-                server.Dispose(); // wakes helper; it removes its hook before exiting
-                if (stateWriter is not null)
-                    try { await stateWriter; } catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
-                if (handedOff && helper is not null)
-                {
-                    try { await helper.WaitForExitAsync(token); }
-                    catch (OperationCanceledException) { }
-                    if (!token.IsCancellationRequested) ownership(false);
-                }
-                helper?.Dispose();
-                Volatile.Write(ref grant, null);
+                Log("Input helper handshake failed; retaining the normal-keyboard fallback.");
+                return;
             }
-            // One startup attempt. A failed helper leaves the local fallback active;
-            // do not restart processes or poll indefinitely during the app lifetime.
-            return;
+
+            helper = Process.GetProcessById((int)pid);
+            if (helper.SessionId != Process.GetCurrentProcess().SessionId ||
+                !IsExpectedExecutable(GetProcessPath(pid), helperPath))
+            {
+                Log("The registered helper is from another session or a DIFFERENT build. " +
+                    $"Expected: {helperPath}. Repair the scheduled task, then restart Doky.");
+                return;
+            }
+
+            var permission = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref grant, permission);
+            ownership(true); // Main window removes fallback hook first.
+            handedOff = true;
+            await permission.Task.WaitAsync(startup.Token);
+            await writer.WriteLineAsync(Volatile.Read(ref state).AsMemory(), startup.Token);
+            await writer.WriteLineAsync("GO".AsMemory(), startup.Token);
+            if (await reader.ReadLineAsync(startup.Token) != "READY")
+            {
+                Log("Input helper did not confirm its keyboard hook was ready.");
+                return;
+            }
+
+            stateWriter = WriteStatesAsync(writer, connection.Token);
+            long sequence = 0;
+            while (await reader.ReadLineAsync(token) is { } line)
+            {
+                if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
+                    signal(value);
+            }
+            if (!token.IsCancellationRequested)
+                Log("Elevated helper disconnected. Restoring the normal-keyboard fallback.");
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            Log("Elevated helper did not connect and initialize within 15 seconds. " +
+                "Check that its task points to the protected Program Files helper.");
+        }
+        catch (Exception e) when (e is IOException or OperationCanceledException or Win32Exception or
+                                  InvalidOperationException or UnauthorizedAccessException or ArgumentException)
+        {
+            if (!token.IsCancellationRequested) Log($"Elevated helper unavailable: {e.Message}");
+        }
+        finally
+        {
+            connection.Cancel();
+            server.Dispose(); // Helper releases its hook on disconnect before exiting.
+            if (stateWriter is not null)
+            {
+                try { await stateWriter; }
+                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
+            }
+            if (handedOff && helper is not null)
+            {
+                try { await helper.WaitForExitAsync(token); }
+                catch (OperationCanceledException) { }
+                if (!token.IsCancellationRequested) ownership(false);
+            }
+            helper?.Dispose();
+            Volatile.Write(ref grant, null);
         }
     }
+
     private async Task WriteStatesAsync(StreamWriter writer, CancellationToken token)
     {
         await foreach (var value in states.Reader.ReadAllAsync(token))
@@ -111,19 +154,77 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         return !process.IsInvalid && ApplicationNative.QueryFullProcessImageName(process, 0, path, ref length)
             ? path.ToString() : null;
     }
-    private static async Task RunRegisteredTaskAsync(CancellationToken token)
+    private static async Task<int> RunRegisteredTaskAsync(CancellationToken token)
     {
         try
         {
-            var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"))
+            var start = new ProcessStartInfo(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"))
             { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var arg in new[] { "/Run", "/TN", WindowsInputHelperRegistration.TaskName }) start.ArgumentList.Add(arg);
+            foreach (var arg in new[] { "/Run", "/TN", WindowsInputHelperRegistration.TaskName })
+                start.ArgumentList.Add(arg);
             using var process = Process.Start(start);
-            if (process is not null) await process.WaitForExitAsync(token);
+            if (process is null) return -1;
+            await process.WaitForExitAsync(token);
+            return process.ExitCode;
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException or OperationCanceledException)
-        { Debug.WriteLine($"Doky input helper task unavailable: {e.Message}"); }
+        {
+            if (!token.IsCancellationRequested)
+                Log($"Could not launch elevated helper task: {e.Message}");
+            return -1;
+        }
     }
+
+    // QueryFullProcessImageName and the task action can spell a path differently
+    // when a junction is present. Compare the final on-disk targets rather than
+    // silently rejecting a legitimate, protected helper.
+    private static bool IsExpectedExecutable(string? actual, string expected)
+    {
+        if (actual is null) return false;
+        if (string.Equals(Path.GetFullPath(actual), expected, StringComparison.OrdinalIgnoreCase))
+            return true;
+        var actualTarget = ResolveFinalPath(actual);
+        var expectedTarget = ResolveFinalPath(expected);
+        return actualTarget is not null && expectedTarget is not null &&
+               string.Equals(actualTarget, expectedTarget, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveFinalPath(string file)
+    {
+        try
+        {
+            using SafeFileHandle handle = File.OpenHandle(file, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var resolved = new StringBuilder(32768);
+            uint size = GetFinalPathNameByHandleW(handle, resolved, (uint)resolved.Capacity, 0);
+            return size is > 0 and < 32768 ? resolved.ToString() : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW",
+        CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(
+        SafeFileHandle handle, StringBuilder buffer, uint bufferLength, uint flags);
+
+    // Startup/connection diagnostics ONLY; no disk operations in keyboard hooks.
+    private static void Log(string message)
+    {
+        Debug.WriteLine($"Doky input helper: {message}");
+        try
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Doky");
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(Path.Combine(folder, "input-helper.log"),
+                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+    }
+
     public void Dispose() { lifetime.Cancel(); states.Writer.TryComplete(); }
 }
 

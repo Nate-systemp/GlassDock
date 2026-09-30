@@ -18,7 +18,9 @@ internal sealed class WindowsKeyHook : IDisposable
     private bool capturedWindowsDown;
     private int capturedWindowsKey;
     private sealed record State(bool Suppress, bool Capture, uint Revision);
-    private State state = new(false, false, 0);
+    // Capture from the moment the native hook is registered, including the
+    // brief fallback/helper handoff before the latest UI state arrives.
+    private State state = new(false, true, 0);
     private uint pressRevision;
     public void UpdateState(bool suppress, bool capture, uint revision) =>
         Volatile.Write(ref state, new(suppress, capture, revision));
@@ -117,11 +119,11 @@ internal sealed class WindowsKeyHook : IDisposable
                 keyCode,
                 true);
 
-            // Glass Home is a foreground, focusable HWND. Letting the physical
-            // Win-down reach Explorer here can make Start win the race before the
-            // bare-Win release is suppressed. Capture the down while Home is open;
-            // if another key follows, OTHER KEYS below forwards a tagged Win-down
-            // first so normal Win+ shortcuts still work.
+            // Letting the physical Win-down reach Explorer may activate Start
+            // before the bare-Win release can be recognized. The owning service
+            // enables capture for ALL active dock states (including hidden Home).
+            // If another key follows, OTHER KEYS replays a tagged Win-down first
+            // so genuine Win+ shortcuts can still reach Windows.
             if (captureBareWindowsKey)
             {
                 capturedWindowsDown = true;
@@ -227,27 +229,27 @@ internal sealed class WindowsKeyHook : IDisposable
                     keyCode,
                     false);
 
-            // If the matching Win-down was captured while Glass Home was visible,
-            // Explorer never saw a Windows-key press. Consume the release as well.
-            // Bare Win belongs to GlassDock; Win+Space belongs to Glass Home.
+            // If the matching Win-down was captured, Explorer never received
+            // that physical key. Consume the release as well. Bare Win belongs
+            // to Doky; Win+Space still belongs to Glass Home.
             if (capturedWindowsDown &&
                 capturedWindowsKey == keyCode)
             {
                 capturedWindowsDown = false;
                 capturedWindowsKey = 0;
 
-                if (wasLauncherShortcut)
-                    return 1;
-
-                if (bareWindows)
+                if (bareWindows && !wasLauncherShortcut &&
+                    !suppressCurrentWindowsPress && !suppressDockToggle)
                 {
-                    if (!suppressCurrentWindowsPress && !suppressDockToggle)
-                    {
-                        signal(false, pressRevision);
-                    }
-
-                    return 1;
+                    signal(false, pressRevision);
                 }
+
+                // The physical Win-down never reached Windows. Do not leak an
+                // unmatched Win-up for a suppressed gesture (for example when
+                // Ctrl was already held); Windows may interpret it as Start.
+                // Genuine Win+ shortcuts replay Win-down on the OTHER KEYS
+                // path, which clears capturedWindowsDown before their Win-up.
+                return 1;
             }
 
             //
