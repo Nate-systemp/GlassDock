@@ -264,7 +264,10 @@ public sealed class DesktopOverlayWindow : Window
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
-        previews = new(applications, root, hwnd, () => ExpandedContentTop);
+        previews = new(applications, root, hwnd, () => ExpandedContentTop, settingsSession,
+            () => !closing && state.State == DockState.Expanded && reorderButton is null &&
+                !externalDragActive && !SystemPopupOpen,
+            window => keyboard?.RestoreElevatedWindowAsync(window) ?? Task.FromResult(false));
         previews.HoldChanged += (_, _) => OnInteractionHoldChanged();
         previews.ActionFailed += (_, message) => SetStatus(message);
         AppWindow.Changed += (_, _) =>

@@ -1,4 +1,5 @@
 using GlassDock.Core.Desktop;
+using GlassDock.Windows.Applications;
 using GlassDock.Windows.Interop;
 using System.Diagnostics;
 using System.IO.Pipes;
@@ -50,6 +51,9 @@ public static class WindowsInputHelperHost
                 events.Writer.TryWrite(new InputSignal(launcher, revision, Environment.TickCount64)));
             ApplyState(initial, hook);
             writer.WriteLine("READY");
+            // Older clients ignore this optional capability; keyboard protocol is unchanged.
+            writer.WriteLine("CAPS|RESTORE1");
+            using var writeLock = new SemaphoreSlim(1, 1);
             var readTask = ReadStateAsync();
             var writeTask = WriteEventsAsync();
             var handles = Marshal.AllocHGlobal(IntPtr.Size);
@@ -79,7 +83,15 @@ public static class WindowsInputHelperHost
             {
                 try
                 {
-                    while (await reader.ReadLineAsync(lifetime.Token) is { } line) ApplyState(line, hook);
+                    while (await reader.ReadLineAsync(lifetime.Token) is { } line)
+                    {
+                        if (WindowsInputHelperProtocol.ReadRestore(line, Environment.TickCount64) is { } request)
+                        {
+                            var restored = RestoreWindow(request);
+                            await WriteLineAsync($"RESTORED|{request.Id}|{(restored ? 1 : 0)}");
+                        }
+                        else ApplyState(line, hook);
+                    }
                 }
                 catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
                 finally { disconnected.Set(); }
@@ -92,11 +104,17 @@ public static class WindowsInputHelperHost
                     await foreach (var value in events.Reader.ReadAllAsync(lifetime.Token))
                     {
                         if (Environment.TickCount64 - value.Timestamp > 500) continue;
-                        await writer.WriteLineAsync($"EVENT|{++sequence}|{value.Timestamp}|{value.Revision}|{(value.Launcher ? "LAUNCHER" : "HOME")}".AsMemory(), lifetime.Token);
+                        await WriteLineAsync($"EVENT|{++sequence}|{value.Timestamp}|{value.Revision}|{(value.Launcher ? "LAUNCHER" : "HOME")}");
                     }
                 }
                 catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
                 finally { disconnected.Set(); }
+            }
+            async Task WriteLineAsync(string line)
+            {
+                await writeLock.WaitAsync(lifetime.Token);
+                try { await writer.WriteLineAsync(line.AsMemory(), lifetime.Token); }
+                finally { writeLock.Release(); }
             }
         }
         finally
@@ -115,5 +133,22 @@ public static class WindowsInputHelperHost
         var parts = line.Split('|');
         if (parts.Length != 4 || parts[0] != "STATE" || !uint.TryParse(parts[3], out var revision)) return;
         hook.UpdateState(parts[1] == "1", parts[2] == "1", revision);
+    }
+
+    private static bool RestoreWindow(WindowsInputHelperProtocol.RestoreRequest request)
+    {
+        // Only normal restore/foreground of a live, identity-validated HWND in
+        // this desktop session. No arbitrary messages, launch, close or commands.
+        try
+        {
+            using var process = Process.GetProcessById(request.Window.ProcessId);
+            if (process.SessionId != Process.GetCurrentProcess().SessionId ||
+                !WindowsApplicationService.IsEligible(request.Window)) return false;
+            var window = (nint)request.Window.Handle;
+            return (!ApplicationNative.IsIconic(window) || ApplicationNative.ShowWindowAsync(window, 9)) &&
+                ApplicationNative.SetForegroundWindow(window);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { return false; }
     }
 }

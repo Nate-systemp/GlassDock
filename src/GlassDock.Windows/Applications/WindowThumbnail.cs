@@ -12,6 +12,8 @@ namespace GlassDock.Windows.Applications;
 public sealed class WindowThumbnail : IDisposable
 {
     private nint thumbnail;
+    private readonly nint source;
+    private readonly uint sourceProcess;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Size
@@ -58,12 +60,14 @@ public sealed class WindowThumbnail : IDisposable
         nint destination,
         ApplicationWindow window)
     {
+        source = (nint)window.Handle;
+        ApplicationNative.GetWindowThreadProcessId(source, out sourceProcess);
         if (WindowsApplicationService.IsEligible(window))
         {
-            DwmRegisterThumbnail(
+            if (DwmRegisterThumbnail(
                 destination,
-                (nint)window.Handle,
-                out thumbnail);
+                source,
+                out thumbnail) < 0) thumbnail = 0;
         }
     }
 
@@ -73,7 +77,8 @@ public sealed class WindowThumbnail : IDisposable
         double opacity,
         bool visible)
     {
-        if (thumbnail == 0)
+        if (!ValidateSource() || !double.IsFinite(dpi) || dpi <= 0 ||
+            rect.Width <= 0 || rect.Height <= 0)
             return false;
 
         if (DwmQueryThumbnailSourceSize(
@@ -180,7 +185,7 @@ public sealed class WindowThumbnail : IDisposable
         PreviewRect windowBounds,
         bool cropSource = true)
     {
-        if (thumbnail == 0)
+        if (!ValidateSource())
             return false;
 
         if (windowBounds.Width <= 0 ||
@@ -379,6 +384,15 @@ public sealed class WindowThumbnail : IDisposable
         }
 
         thumbnail = 0;
+    }
+
+    private bool ValidateSource()
+    {
+        if (thumbnail == 0) return false;
+        ApplicationNative.GetWindowThreadProcessId(source, out var owner);
+        if (ApplicationNative.IsWindow(source) && owner == sourceProcess) return true;
+        Dispose();
+        return false;
     }
 
     internal void SetVisible(bool visible)

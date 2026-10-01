@@ -67,6 +67,7 @@ public sealed class WindowPreviewSession
 
     public void Refresh(IReadOnlyList<ApplicationWindow> windows)
     {
+        var selected = Windows.FirstOrDefault(window => window.Handle == SelectedWindow);
         var remaining = windows.ToDictionary(window => (window.Handle, window.ProcessId, window.ProcessStartTicks));
         var ordered = new List<ApplicationWindow>();
         foreach (var old in Windows)
@@ -74,7 +75,8 @@ public sealed class WindowPreviewSession
         ordered.AddRange(remaining.Values.OrderBy(window => window.Handle));
         Windows = ordered;
         if (Windows.Count == 0) { Hide(); return; }
-        if (!Windows.Any(window => window.Handle == SelectedWindow)) Select(null);
+        if (selected is not null && !Windows.Any(window => window.Handle == selected.Handle &&
+            window.ProcessId == selected.ProcessId && window.ProcessStartTicks == selected.ProcessStartTicks)) Select(null);
     }
 
     public void Hide()

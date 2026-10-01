@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.ComponentModel;
 
 using GlassDock.Core.Applications;
 
@@ -22,9 +23,12 @@ public sealed class WindowPreviewPlacement : IDisposable
             window,
             -20,
             (nint)(inspection
-                ? (exStyle | 0x08040000L) & ~0x80L
-                : (exStyle | 0x08000080L) & ~0x40000L)
+                ? (exStyle | 0x080C0000L) & ~0x80L
+                : (exStyle | 0x08080080L) & ~0x40000L)
         );
+        // Match the dock/utilities' native desktop sampling client.
+        if (!NativeMethods.SetLayeredWindowAttributes(window, 0, 255, 2))
+            throw new Win32Exception();
 
         // Remove the native caption / resize / window frame.
         // The preview's glass backdrop draws its own rounded shape.
@@ -220,47 +224,9 @@ public sealed class WindowPreviewPlacement : IDisposable
     {
         var (area, dpi, bounds) = GetArea(dock);
 
-        var pixelWidth =
-            (int)Math.Ceiling(width * dpi);
-
-        var pixelHeight =
-            (int)Math.Ceiling(height * dpi);
-
-        var x = (int)Math.Clamp(
-            bounds.X +
-            anchorXDip * dpi -
-            pixelWidth / 2d,
-            area.X,
-            Math.Max(
-                area.X,
-                area.X +
-                area.Width -
-                pixelWidth
-            )
-        );
-
-        var y = (int)Math.Clamp(
-            bounds.Y +
-            dockTopDip * dpi -
-            pixelHeight,
-            area.Y,
-            Math.Max(
-                area.Y,
-                area.Y +
-                area.Height -
-                pixelHeight
-            )
-        );
-
-        NativeMethods.SetWindowPos(
-            window,
-            -1,
-            x,
-            y,
-            pixelWidth,
-            pixelHeight,
-            0x10 | 0x40
-        );
+        var rectangle = WindowPreviewLayout.Position(area, bounds, dpi, anchorXDip, dockTopDip, width, height);
+        NativeMethods.SetWindowPos(window, -1, (int)rectangle.X, (int)rectangle.Y,
+            (int)rectangle.Width, (int)rectangle.Height, 0x10 | 0x40);
     }
 
     public void Hide()

@@ -1,5 +1,6 @@
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
+using GlassDock.Core.Settings;
 using GlassDock.Windows.Applications;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,6 +14,9 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly FrameworkElement dockRoot;
     private readonly Func<double> dockTop;
     private readonly nint dock;
+    private readonly GlassDockSettingsSession settings;
+    private readonly Func<bool> canShow;
+    private readonly Func<ApplicationWindow, Task<bool>> restoreElevated;
     private readonly WindowPreviewSession session = new();
     private readonly WindowFrameCache frameCache = new();
     private WindowPreviewWindow? preview;
@@ -24,13 +28,19 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly Dictionary<string, (MenuFlyout Menu, long[] Handles, bool Pinned)> menuSnapshots = [];
     private bool disposed;
     public bool ContextMenuOpen => contextMenus.Count > 0;
-    public bool HoldsDock => ContextMenuOpen || session.State != WindowPreviewState.Hidden;
+    public bool HoldsDock => ContextMenuOpen || session.State != WindowPreviewState.Hidden || preview?.IsClosing == true;
     public event EventHandler? HoldChanged;
     public event EventHandler<string>? ActionFailed;
 
-    public WindowPreviewCoordinator(DockApplicationsViewModel applications, FrameworkElement dockRoot, nint dock, Func<double> dockTop)
+    public WindowPreviewCoordinator(DockApplicationsViewModel applications, FrameworkElement dockRoot, nint dock,
+        Func<double> dockTop, GlassDockSettingsSession settings, Func<bool> canShow,
+        Func<ApplicationWindow, Task<bool>> restoreElevated)
     {
         this.applications = applications; this.dockRoot = dockRoot; this.dock = dock; this.dockTop = dockTop;
+        this.settings = settings;
+        this.canShow = canShow;
+        this.restoreElevated = restoreElevated;
+        settings.Changed += SettingsChanged;
         applications.SnapshotApplied += OnSnapshot;
         TrackFrames();
     }
@@ -77,7 +87,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private async void Enter(DockApplicationItem item, bool immediate = false)
     {
-        if (disposed || ContextMenuOpen) return;
+        if (disposed || ContextMenuOpen || !canShow()) return;
         pending?.Cancel();
         if (session.ApplicationId == item.Id && session.State is not (WindowPreviewState.Hidden or WindowPreviewState.Waiting)) return;
         Hide();
@@ -87,8 +97,9 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         var delay = new CancellationTokenSource(); pending = delay;
         try
         {
-            if (!immediate) await Task.Delay(350, delay.Token);
-            if (disposed || ContextMenuOpen || delay.IsCancellationRequested || !session.Show(revision) || !buttons.TryGetValue(item.Id, out var button)) return;
+            if (!immediate) await Task.Delay(300, delay.Token);
+            if (disposed || ContextMenuOpen || !canShow() || delay.IsCancellationRequested ||
+                !session.Show(revision) || !buttons.TryGetValue(item.Id, out var button)) return;
             frameCache.Request(item.Application.Windows);
             ToolTipService.SetToolTip(button, null);
             EnsurePreview();
@@ -104,7 +115,9 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private void EnsurePreview()
     {
         if (preview is not null) return;
-        preview = new(dock, session, frameCache);
+        preview = new(dock, session, frameCache, settings.Appearance, settings.Current.DockAppearanceMode);
+        preview.Hidden += (_, _) => HoldChanged?.Invoke(this, EventArgs.Empty);
+        preview.DismissRequested += (_, _) => { pointerOwner = null; Hide(); };
         preview.Closed += (_, _) =>
         {
             if (ReferenceEquals(pointerOwner, preview)) pointerOwner = null;
@@ -118,14 +131,19 @@ internal sealed class WindowPreviewCoordinator : IDisposable
             if (!ReferenceEquals(pointerOwner, preview)) return;
             pointerOwner = null; Leave();
         };
-        preview.WindowChosen += (_, window) =>
+        preview.WindowChosen += async (_, window) =>
         {
             var selected = session.Activate(window.Handle);
             frameCache.Report(window, "preview-click-before-activation");
-            if (selected is not null && !applications.ActivateWindow(selected))
+            // Remove the topmost desktop peek before requesting foreground.
+            // A snapshot/activation event must not leave the mirror over the real app.
+            Hide(immediate: true);
+            var activated = selected is not null &&
+                (applications.ActivateWindow(selected) || await restoreElevated(selected));
+            if (disposed) return;
+            if (selected is not null && !activated)
                 ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
-            frameCache.Report(window, "preview-click-activation-requested");
-            Hide();
+            frameCache.Report(window, "preview-click-activation-requested", new { activated });
         };
         preview.WindowCloseRequested += (_, window) =>
         {
@@ -168,6 +186,12 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private void TrackFrames() => frameCache.Track(
         applications.VisibleDockApplications.SelectMany(item => item.Application.Windows));
+
+    private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs args)
+    {
+        preview?.ApplyAppearance(settings.Appearance, args.Settings.DockAppearanceMode);
+        Reposition();
+    }
 
     public void Reposition()
     {
@@ -240,7 +264,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         }
     }
 
-    public void Hide()
+    public void Hide(bool immediate = false)
     {
         var held = HoldsDock;
         pending?.Cancel();
@@ -249,7 +273,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
             var item = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id);
             if (item is not null) ToolTipService.SetToolTip(button, CreateTooltip(item.Name));
         }
-        session.Hide(); preview?.Hide();
+        session.Hide(); preview?.Hide(immediate);
         if (held != HoldsDock) HoldChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -287,6 +311,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         contextMenus.Clear();
         menuSnapshots.Clear();
         applications.SnapshotApplied -= OnSnapshot;
+        settings.Changed -= SettingsChanged;
         pending?.Cancel();
         preview?.Close(); preview = null;
         frameCache.Dispose();

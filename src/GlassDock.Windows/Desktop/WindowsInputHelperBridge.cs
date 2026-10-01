@@ -1,4 +1,5 @@
 using GlassDock.Core.Desktop;
+using GlassDock.Core.Applications;
 using GlassDock.Windows.Interop;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -23,6 +24,30 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
     private TaskCompletionSource? grant;
     private string state = "STATE|0|1|0";
+    private readonly Channel<string> commands = Channel.CreateBounded<string>(1);
+    private sealed record RestorePending(string Id, TaskCompletionSource<bool> Completion);
+    private RestorePending? restorePending;
+    private int restoreHelperPid;
+
+    public async Task<bool> RestoreWindowAsync(ApplicationWindow window)
+    {
+        var pid = Volatile.Read(ref restoreHelperPid);
+        if (pid == 0 || lifetime.IsCancellationRequested) return false;
+        var request = new RestorePending(Guid.NewGuid().ToString("N"),
+            new(TaskCreationOptions.RunContinuationsAsynchronously));
+        // One in-flight user activation, never an accumulating click queue.
+        if (Interlocked.CompareExchange(ref restorePending, request, null) is not null) return false;
+        try
+        {
+            if (!AllowSetForegroundWindow((uint)pid) || !commands.Writer.TryWrite(
+                $"RESTORE|{request.Id}|{window.Handle}|{window.ProcessId}|{window.ProcessStartTicks}|{Environment.TickCount64}")) return false;
+            return await request.Completion.Task.WaitAsync(TimeSpan.FromSeconds(2), lifetime.Token);
+        }
+        catch (Exception e) when (e is TimeoutException or OperationCanceledException) { return false; }
+        finally { Interlocked.CompareExchange(ref restorePending, null, request); }
+    }
+
+    [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(uint processId);
 
     public WindowsInputHelperBridge(string helperPath, Action<bool> ownership, Action<InputSignal> signal)
     {
@@ -105,6 +130,11 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             long sequence = 0;
             while (await reader.ReadLineAsync(token) is { } line)
             {
+                if (line == "CAPS|RESTORE1") { Volatile.Write(ref restoreHelperPid, helper.Id); continue; }
+                var acknowledgement = line.Split('|');
+                if (acknowledgement.Length == 3 && acknowledgement[0] == "RESTORED" &&
+                    Volatile.Read(ref restorePending) is { } request && request.Id == acknowledgement[1])
+                { request.Completion.TrySetResult(acknowledgement[2] == "1"); continue; }
                 if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
                     signal(value);
             }
@@ -123,6 +153,8 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         }
         finally
         {
+            Volatile.Write(ref restoreHelperPid, 0);
+            Volatile.Read(ref restorePending)?.Completion.TrySetResult(false);
             connection.Cancel();
             server.Dispose(); // Helper releases its hook on disconnect before exiting.
             if (stateWriter is not null)
@@ -143,8 +175,24 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
     private async Task WriteStatesAsync(StreamWriter writer, CancellationToken token)
     {
-        await foreach (var value in states.Reader.ReadAllAsync(token))
-            await writer.WriteLineAsync(value.AsMemory(), token);
+        Task<bool>? stateReady = null, commandReady = null;
+        while (!token.IsCancellationRequested)
+        {
+            stateReady ??= states.Reader.WaitToReadAsync(token).AsTask();
+            commandReady ??= commands.Reader.WaitToReadAsync(token).AsTask();
+            var completed = await Task.WhenAny(stateReady, commandReady);
+            if (!await completed) return;
+            if (ReferenceEquals(completed, stateReady))
+            {
+                stateReady = null;
+                if (states.Reader.TryRead(out var value)) await writer.WriteLineAsync(value.AsMemory(), token);
+            }
+            else
+            {
+                commandReady = null;
+                if (commands.Reader.TryRead(out var value)) await writer.WriteLineAsync(value.AsMemory(), token);
+            }
+        }
     }
     private static string? GetProcessPath(uint pid)
     {
@@ -225,7 +273,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
     }
 
-    public void Dispose() { lifetime.Cancel(); states.Writer.TryComplete(); }
+    public void Dispose() { lifetime.Cancel(); states.Writer.TryComplete(); commands.Writer.TryComplete(); }
 }
 
 public static class WindowsInputHelperRegistration
@@ -282,6 +330,17 @@ public static class WindowsInputHelperRegistration
 
 internal static class WindowsInputHelperProtocol
 {
+    internal sealed record RestoreRequest(string Id, ApplicationWindow Window);
+    internal static RestoreRequest? ReadRestore(string line, long now)
+    {
+        var parts = line.Split('|');
+        if (parts.Length != 6 || parts[0] != "RESTORE" || !Guid.TryParseExact(parts[1], "N", out _) ||
+            !long.TryParse(parts[2], out var hwnd) || hwnd <= 0 ||
+            !int.TryParse(parts[3], out var pid) || pid <= 0 ||
+            !long.TryParse(parts[4], out var ticks) || ticks <= 0 ||
+            !long.TryParse(parts[5], out var stamp) || now - stamp is < 0 or > 1000) return null;
+        return new(parts[1], new(new(null, Environment.ProcessPath), "", hwnd, pid, ticks, false, null));
+    }
     private const string PipePrefix = "GlassDock.InputHelper.Session";
 
     internal static Mutex AcquireSingleInstance(int session, out bool created) =>

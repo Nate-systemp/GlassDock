@@ -131,7 +131,7 @@ public sealed class DesktopWindowHighlightTests
             var earlierWindows = new List<nint>();
             try
             {
-                source = CreateWindowExW(0x08000080, "STATIC", "Capture cache test", 0x80000006, 120, 120, 320, 240, 0, 0, 0, 0);
+                source = CreateWindowExW(0x08000080, "STATIC", "Capture cache test", 0x80000006, 120, 120, 1280, 720, 0, 0, 0, 0);
                 preview = CreateWindowExW(0x08000088, "STATIC", "Capture cache preview", 0x80000006, 500, 700, 200, 80, 0, 0, 0, 0);
                 ShowWindow(source, 4); ShowWindow(preview, 4); UpdateWindow(source);
                 var ticks = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks;
@@ -156,6 +156,10 @@ public sealed class DesktopWindowHighlightTests
                 }
                 var retained = Frame();
                 Assert.NotNull(retained);
+                // A desktop mirror must not enlarge a deliberately downsampled
+                // 960x540 frame for an ordinary HD source.
+                Assert.Equal(1280, retained.GetType().GetProperty("Width")!.GetValue(retained));
+                Assert.Equal(720, retained.GetType().GetProperty("Height")!.GetValue(retained));
                 var pixels = (byte[])retained.GetType().GetProperty("Pixels")!.GetValue(retained)!;
                 Assert.Contains(pixels.Where((_, index) => index % 4 != 3), value => value > 32);
                 ShowWindow(source, 7);

@@ -19,13 +19,24 @@ namespace GlassDock.Windows.Applications;
 /// RAM policy:
 /// - only one Windows.Graphics.Capture session may exist at a time;
 /// - a capture session is disposed immediately after one useful frame;
-/// - retained frames are scaled to at most 960x540 BGRA;
+/// - retained frames preserve native pixels up to 1920x1080 BGRA;
 /// - retained CPU pixels are capped at 24 MiB;
 /// - minimized frames are preferred during eviction because they cannot be
 ///   recaptured until their real window is restored.
 /// </summary>
 public sealed class WindowFrameCache : IDisposable
 {
+    /// <summary>Read-only last-visible BGRA pixels, shared with preview cards.
+    /// Reading this view never starts a capture or restores a source window.</summary>
+    public readonly record struct CachedWindowFrame(
+        int Width, int Height, ReadOnlyMemory<byte> Pixels, DateTimeOffset CapturedAt);
+
+    public CachedWindowFrame? GetCachedFrame(ApplicationWindow window)
+    {
+        var frame = Get(window);
+        return frame is null ? null : new(frame.Width, frame.Height, frame.Pixels, frame.CapturedAt);
+    }
+
     internal sealed record Frame(
         int Width,
         int Height,
@@ -36,6 +47,7 @@ public sealed class WindowFrameCache : IDisposable
     {
         public ApplicationWindow Window;
         public Frame? Latest;
+        public (NativeMethods.Rect Bounds, NativeMethods.Rect Frame)? LastVisibleGeometry;
         public CaptureJob? Capture;
         public bool Queued;
         public long LastAttemptTicks;
@@ -71,9 +83,10 @@ public sealed class WindowFrameCache : IDisposable
     private const int MaxConcurrentCaptures = 1;
 
     // Retained preview frames are intentionally much smaller than a desktop
-    // source. 960x540 BGRA is ~1.98 MiB per full-size cached frame.
-    private const int MaxRetainedWidth = 960;
-    private const int MaxRetainedHeight = 540;
+    // source. Keep Full HD sources sharp when shown as desktop mirrors.
+    // The total retained budget remains 24 MiB; larger frames evict sooner.
+    private const int MaxRetainedWidth = 1920;
+    private const int MaxRetainedHeight = 1080;
 
     private const int MaxRetainedFrames = 16;
     private const long RetainedByteBudget = 24L * 1024 * 1024;
@@ -205,6 +218,8 @@ public sealed class WindowFrameCache : IDisposable
                         window;
                 }
 
+                RememberVisibleGeometry(entry);
+
                 if (!entry.PrimingRequested && !NativeMethods.IsIconic((nint)window.Handle) &&
                     WindowsApplicationService.IsEligible(window))
                 {
@@ -243,6 +258,33 @@ public sealed class WindowFrameCache : IDisposable
                 ? Volatile.Read(
                     ref entry.Latest)
                 : null;
+        }
+    }
+
+    internal (NativeMethods.Rect Bounds, NativeMethods.Rect Frame)? GetLastVisibleGeometry(ApplicationWindow window)
+    {
+        lock (gate)
+            return !disposed && entries.TryGetValue(Key(window), out var entry) ? entry.LastVisibleGeometry : null;
+    }
+
+    private static void RememberVisibleGeometry(Entry entry)
+    {
+        var window = (nint)entry.Window.Handle;
+        // rcNormalPosition loses snapped/maximized/full-screen geometry on minimize.
+        // Retain the actual displayed physical bounds during existing reconciliation.
+        var previousDpi = NativeMethods.SetThreadDpiAwarenessContext(-4);
+        try
+        {
+            if (NativeMethods.IsIconic(window) || !NativeMethods.GetWindowRect(window, out var bounds) ||
+                bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top) return;
+            var frame = bounds;
+            if (NativeMethods.DwmGetFrameBounds(window, 9, out var extended, Marshal.SizeOf<NativeMethods.Rect>()) >= 0 &&
+                extended.Right > extended.Left && extended.Bottom > extended.Top) frame = extended;
+            entry.LastVisibleGeometry = (bounds, frame);
+        }
+        finally
+        {
+            if (previousDpi != 0) NativeMethods.SetThreadDpiAwarenessContext(previousDpi);
         }
     }
 

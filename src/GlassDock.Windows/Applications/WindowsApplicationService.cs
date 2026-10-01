@@ -115,6 +115,7 @@ public sealed class WindowsApplicationService : IApplicationService
             try
             {
                 if (!ApplicationNative.IsWindowVisible(window)) return true;
+                if (!HasPreviewBounds(window)) return true;
                 var style = ApplicationNative.GetWindowLongPtr(window, -20).ToInt64();
                 var appWindow = (style & 0x40000) != 0;
                 if (!appWindow && ((style & (0x80 | 0x08000000)) != 0 || ApplicationNative.GetWindow(window, 4) != 0)) return true;
@@ -275,6 +276,9 @@ public sealed class WindowsApplicationService : IApplicationService
 
     public bool OpenFileLocation(DockApplication application) => launcher.OpenFileLocation(application);
 
+    internal static bool HasPreviewBounds(nint window) => ApplicationNative.IsIconic(window) ||
+        (NativeMethods.GetWindowRect(window, out var bounds) && bounds.Right > bounds.Left && bounds.Bottom > bounds.Top);
+
     internal static bool IsEligible(ApplicationWindow existing)
     {
         var window = (nint)existing.Handle;
@@ -294,7 +298,10 @@ public sealed class WindowsApplicationService : IApplicationService
     {
         if (!IsEligible(existing)) { RequestRefresh(); return false; }
         var window = (nint)existing.Handle;
-        if (ApplicationNative.IsIconic(window)) ApplicationNative.ShowWindowAsync(window, 9);
+        if (ApplicationNative.IsIconic(window))
+        {
+            if (!ApplicationNative.ShowWindowAsync(window, 9)) { RequestRefresh(); return false; }
+        }
         var focused = ApplicationNative.SetForegroundWindow(window);
         RequestRefresh();
         return focused;

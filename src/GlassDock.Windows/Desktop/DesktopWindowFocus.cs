@@ -460,6 +460,15 @@ public sealed class DesktopWindowFocus : IDisposable
         var frame =
             bounds;
 
+        if (NativeMethods.IsIconic(window) && frameCache?.GetLastVisibleGeometry(target) is { } geometry)
+        {
+            // Match the last displayed snapped/maximized surface, not the normal
+            // restored rectangle that WINDOWPLACEMENT reports while minimized.
+            bounds = geometry.Bounds;
+            frame = geometry.Frame;
+            placementDetails = new { coordinateSpace = "last-visible-physical-screen-pixels", bounds = ToPreviewRect(bounds) };
+        }
+
         //
         // Extended frame bounds are safe/useful
         // while the real source window is visible.

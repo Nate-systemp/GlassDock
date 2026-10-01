@@ -6,6 +6,26 @@ namespace GlassDock.Windows.Tests;
 public sealed class InputHelperProtocolTests
 {
     [Fact]
+    public void RestoreRequestsRequireIdentityAndRejectExpiredOrMalformedCommands()
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var command = $"RESTORE|{id}|123|456|789|1000";
+        var request = WindowsInputHelperProtocol.ReadRestore(command, 1500);
+        Assert.NotNull(request);
+        Assert.Equal(id, request.Id);
+        Assert.Equal(123, request.Window.Handle);
+        Assert.Equal(456, request.Window.ProcessId);
+        Assert.Equal(789, request.Window.ProcessStartTicks);
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore(command, 2001));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore(command, 999));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore($"RESTORE|{id}|0|456|789|1000", 1500));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore($"RESTORE|{id}|123|0|789|1000", 1500));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore($"RESTORE|{id}|123|456|0|1000", 1500));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore("RESTORE|invalid|123|456|789|1000", 1500));
+        Assert.Null(WindowsInputHelperProtocol.ReadRestore("STATE|0|1|0", 1500));
+    }
+
+    [Fact]
     public void Duplicate_stale_and_invalid_events_cannot_replay_actions()
     {
         long sequence = 0;

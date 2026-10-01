@@ -1,336 +1,228 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices.WindowsRuntime;
 using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
 using GlassDock.Core.Applications;
-using GlassDock.Core.Materials;
+using GlassDock.Core.Settings;
 using GlassDock.Windows.Applications;
 using GlassDock.Windows.Desktop;
-using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Desktop;
 
+/// <summary>Retained preview host. DWM owns live pixels; XAML owns card chrome.</summary>
 internal sealed class WindowPreviewWindow : Window
 {
-    private readonly Canvas root = new()
-    {
-        Background = Brush(1, 0, 0, 0),
-        RequestedTheme = ElementTheme.Dark
-    };
-
+    private readonly Canvas root = new();
+    private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
+    private readonly Border solid = new() { IsHitTestVisible = false, CornerRadius = new(28) };
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly UtilityPopupTheme theme = new();
     private readonly WindowPreviewPlacement placement;
     private readonly WindowPreviewSession session;
-
-    // Actual-window focus effect is preserved.
-    // DesktopWindowHighlight was intentionally removed
-    // so hovering a preview no longer creates a white border.
+    private readonly WindowFrameCache frameCache;
     private readonly DesktopWindowFocus desktopFocus;
-
     private readonly nint hwnd;
     private readonly nint dock;
-
     private readonly List<Card> cards = [];
-
-    private readonly Button more = new()
-    {
-        Height = 26,
-        Padding = new Thickness(8, 0, 8, 0),
-        FontSize = 11
-    };
-
+    private readonly Button more = new() { Height = 26, Padding = new(8, 0, 8, 0), FontSize = 11 };
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer animation;
-
-    private WindowPreviewLayout compact =
-        WindowPreviewLayout.Create(1, 600, 400, false);
-
-    private WindowPreviewLayout expanded =
-        WindowPreviewLayout.Create(1, 600, 400, true);
-
+    private readonly Stopwatch elapsed = Stopwatch.StartNew();
+    private readonly UISettings uiSettings = new();
+    private WindowPreviewLayout compact = WindowPreviewLayout.Create(1, 600, 400, false);
+    private WindowPreviewLayout expanded = WindowPreviewLayout.Create(1, 600, 400, true);
     private bool isShown;
     private bool rebuilding;
-    private double progress;
-    private double animationFrom;
-    private double animationTo;
-    private double animationStarted;
-
-    private double anchorX;
-    private double dockTop;
-
-    private int page;
-
-    private readonly Stopwatch elapsed = Stopwatch.StartNew();
-
+    private bool closed;
+    private double progress, animationFrom, animationTo, animationStarted;
+    private double visibility, visibilityFrom, visibilityTo, visibilityStarted;
+    private double anchorX, dockTop;
+    private int page, windowCount;
+    private CancellationTokenSource? focusHideDelay;
+    private bool AnimationsEnabled => uiSettings.AnimationsEnabled;
+    public bool IsClosing => isShown && visibilityTo == 0;
+    public event EventHandler? Hidden;
+    public event EventHandler? DismissRequested;
     public event EventHandler? PointerArrived;
     public event EventHandler? PointerDeparted;
     public event EventHandler<ApplicationWindow>? WindowChosen;
     public event EventHandler<ApplicationWindow>? WindowCloseRequested;
 
-    private sealed record Card(
-        ApplicationWindow Window,
-        Button Button,
-        Button CloseButton,
-        Border Border,
-        TextBlock Title,
-        TextBlock Fallback,
-        WindowThumbnail Thumbnail)
+    private sealed class Card
     {
-        public double Emphasis;
-        public double EmphasisFrom;
-        public double EmphasisTo;
-
-        public double Dimming;
-        public double DimmingFrom;
-        public double DimmingTo;
-
-        public double HoverStarted;
+        public required ApplicationWindow Window;
+        public required Button Button;
+        public required Button CloseButton;
+        public required Border Border;
+        public required TextBlock Title;
+        public required TextBlock Fallback;
+        public required Image Cached;
+        public required WindowThumbnail Thumbnail;
+        public double Emphasis, EmphasisFrom, EmphasisTo, HoverStarted;
+        public ReadOnlyMemory<byte> CachedPixels;
     }
 
-    public WindowPreviewWindow(
-        nint dock,
-        WindowPreviewSession session,
-        WindowFrameCache frameCache)
+    public WindowPreviewWindow(nint dock, WindowPreviewSession session, WindowFrameCache frameCache,
+        DockAppearanceSettings appearance, DockAppearanceMode mode)
     {
         this.dock = dock;
         this.session = session;
-
+        this.frameCache = frameCache;
         Title = "Doky — Window previews";
         WindowBranding.Apply(this);
         Content = root;
-
-        SystemBackdrop = backdrop;
-
-        backdrop.Apply(
-            GlassMaterialPresets.Create(
-                GlassMaterialPreset.Frosted) with
-            {
-                BlurAmount = 8,
-                Opacity = .08,
-                CornerRadius = 12,
-                EdgeHighlight = 0,
-                BorderOpacity = 0.03
-            }
-        );
-
-        var inspection =
-            Environment.GetCommandLineArgs()
-                .Contains(
-                    "--controls",
-                    StringComparer.OrdinalIgnoreCase);
-
+        var inspection = Environment.GetCommandLineArgs().Contains("--controls", StringComparer.OrdinalIgnoreCase);
         AppWindow.IsShownInSwitchers = inspection;
-
-        var presenter =
-            (OverlappedPresenter)AppWindow.Presenter;
-
+        var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);
-
-        presenter.IsResizable = false;
-        presenter.IsMaximizable = false;
-        presenter.IsMinimizable = false;
+        presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
-
-        hwnd =
-            WinRT.Interop.WindowNative
-                .GetWindowHandle(this);
-
-        desktopFocus = new(hwnd, frameCache);
-
-        //
-        // IMPORTANT:
-        // We only dismiss DesktopWindowFocus now.
-        // No DesktopWindowHighlight exists anymore.
-        //
-        desktopFocus.Dismissed += (_, _) =>
-        {
-            // No white-border cleanup needed.
-        };
-
+        hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         placement = new(hwnd, inspection);
+        desktopFocus = new(hwnd, frameCache);
+        root.Children.Add(glass);
+        root.Children.Add(solid);
+        solid.Background = theme.Overlay;
+        ApplyAppearance(appearance, mode);
+        // As with the dock/utilities, attach after Content and native setup.
+        SystemBackdrop = backdrop;
 
         root.PointerEntered += (_, _) =>
         {
-            Trace("ROOT ENTER");
-
-            if (!placement.ContainsPointer())
-                return;
-
-            PointerArrived?.Invoke(
-                this,
-                EventArgs.Empty);
-
+            if (!placement.ContainsPointer() || IsClosing) return;
+            PointerArrived?.Invoke(this, EventArgs.Empty);
             Expand();
         };
-
-        root.PointerExited += (_, e) =>
+        root.PointerExited += (_, _) =>
         {
-            var point =
-                e.GetCurrentPoint(root).Position;
-
-            Trace(
-                $"ROOT EXIT point={point} " +
-                $"inside={placement.ContainsPointer()} " +
-                $"bounds={root.ActualWidth}x{root.ActualHeight} " +
-                $"source={e.OriginalSource.GetType().Name}");
-
-            if (placement.ContainsPointer())
-                return;
-
+            if (placement.ContainsPointer() || IsClosing) return;
             Collapse();
-
-            PointerDeparted?.Invoke(
-                this,
-                EventArgs.Empty);
+            PointerDeparted?.Invoke(this, EventArgs.Empty);
         };
-
         root.KeyDown += (_, e) =>
         {
-            if (e.Key ==
-                global::Windows.System.VirtualKey.Escape)
-            {
-                Hide();
-
-                PointerDeparted?.Invoke(
-                    this,
-                    EventArgs.Empty);
-
-                e.Handled = true;
-            }
+            if (e.Key != global::Windows.System.VirtualKey.Escape) return;
+            DismissRequested?.Invoke(this, EventArgs.Empty);
+            e.Handled = true;
         };
-
-        root.SizeChanged += (_, _) =>
-        {
-            Draw();
-        };
-
+        root.SizeChanged += (_, _) => Draw();
         more.Click += (_, _) =>
         {
-            // Compact +N opens the current stack; only a settled expanded panel changes page.
-            if (!CanFocus) { Expand(); return; }
-            focusHideDelay?.Cancel();
-            desktopFocus.Hide();
-            session.Select(null);
-            page = WindowPreviewLayout.NextPage(page, session.Windows.Count, expanded.Capacity);
+            if (!CanFocus) return;
+            ClearSelection();
+            page = WindowPreviewLayout.NextPage(page, windowCount, expanded.Capacity);
             Rebuild();
             Draw();
+            root.UpdateLayout();
+            SyncHoveredCard();
         };
+        theme.StyleButton(more);
+        more.Background = theme.Tile;
         animation = DispatcherQueue.CreateTimer();
-
-        // 60-ish FPS is already visually smooth and avoids the extra
-        // allocations / dispatch pressure of the former 100 FPS timer.
-        animation.Interval =
-            TimeSpan.FromMilliseconds(16);
-
+        animation.Interval = TimeSpan.FromMilliseconds(16);
         animation.Tick += (_, _) =>
         {
             var moving = Advance();
-
             Draw();
             if (session.CompleteTransition(progress))
             {
                 root.UpdateLayout();
                 SyncHoveredCard();
-                moving = true; // Selection may have just started its emphasis animation.
+                moving = true;
             }
-
-            if (!moving)
-                animation.Stop();
+            if (visibility == 0 && visibilityTo == 0) FinishHide();
+            else if (!moving) animation.Stop();
         };
-
         Closed += (_, _) =>
         {
+            closed = true;
             isShown = false;
             focusHideDelay?.Cancel();
             animation.Stop();
-
             desktopFocus.Dispose();
-
             ClearCards();
-
             placement.Dispose();
         };
     }
 
-    public void Show(
-        double anchor,
-        double top)
+    public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
+    {
+        theme.Apply(mode);
+        root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
+        // Alpha 1 is an input surface, not a separate material overlay.
+        root.Background = new SolidColorBrush(DockControlPalette.Surface(mode, 1));
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        if (isShown) Draw();
+    }
+
+    public void Show(double anchor, double top)
     {
         anchorX = anchor;
         dockTop = top;
-
-        isShown = true;
-        focusHideDelay?.Cancel();
-        desktopFocus.Hide();
-        page = 0;
-
-        progress = 0;
-        animationFrom = 0;
-        animationTo = 0;
-
         animation.Stop();
-
+        ClearSelection();
+        page = 0;
+        isShown = true;
+        root.IsHitTestVisible = true;
+        visibility = visibilityFrom = 0;
+        visibilityTo = 1;
+        visibilityStarted = elapsed.Elapsed.TotalMilliseconds;
+        progress = animationFrom = animationTo = 0;
         Rebuild();
         Draw();
+        // Show the full group automatically, without requiring a second hover
+        // to discover other windows. Focus remains gated until expansion settles.
+        Expand();
     }
 
     private void Expand()
     {
-        if (session.State is not (WindowPreviewState.Compact or WindowPreviewState.Collapsing))
-            return;
-
+        if (session.State is not (WindowPreviewState.Compact or WindowPreviewState.Collapsing)) return;
         session.Expand();
-
         StartTransition(1);
     }
 
-    public void Collapse()
+    private void Collapse()
     {
-        //
-        // Keep original focus behavior.
-        //
-        focusHideDelay?.Cancel();
-        desktopFocus.Hide();
-
-        if (session.State is not
-            (WindowPreviewState.Expanding or WindowPreviewState.Expanded or
-             WindowPreviewState.WindowHovered))
-            return;
-
+        ClearSelection();
+        if (session.State is not (WindowPreviewState.Expanding or WindowPreviewState.Expanded or WindowPreviewState.WindowHovered)) return;
         session.Collapse();
-
         StartTransition(0);
-
-        AnimateSelection();
     }
 
-    private void StartTransition(
-        double target)
+    private void StartTransition(double target)
     {
-        Trace(
-            $"TRANSITION p={progress:F3} " +
-            $"target={target} " +
-            $"enabled={new UISettings().AnimationsEnabled}");
-
         Advance();
-
         animationFrom = progress;
         animationTo = target;
-
-        animationStarted =
-            elapsed.Elapsed.TotalMilliseconds;
-
-        //
-        // Preview expansion/collapse animation.
-        //
+        animationStarted = elapsed.Elapsed.TotalMilliseconds;
         animation.Start();
     }
 
-    private CancellationTokenSource? focusHideDelay;
+    private bool CanFocus => isShown && !IsClosing && !rebuilding && progress == 1 && animationTo == 1 &&
+        session.State is WindowPreviewState.Expanded or WindowPreviewState.WindowHovered;
+
+    private void ClearSelection()
+    {
+        session.Select(null);
+        focusHideDelay?.Cancel();
+        desktopFocus.Hide();
+    }
+
+    private void SyncHoveredCard()
+    {
+        if (!CanFocus) return;
+        var hovered = cards.FirstOrDefault(card => ContainsPointer(card.Button) || ContainsPointer(card.CloseButton));
+        if (session.SelectedWindow == hovered?.Window.Handle) return;
+        session.Select(hovered?.Window.Handle);
+        AnimateSelection();
+    }
 
     private async Task HideDesktopFocusDelayed()
     {
@@ -340,10 +232,9 @@ internal sealed class WindowPreviewWindow : Window
         try
         {
             await Task.Delay(180, cancellation.Token);
-            if (!cancellation.IsCancellationRequested && session.SelectedWindow is null)
-                desktopFocus.Hide();
+            if (!cancellation.IsCancellationRequested && session.SelectedWindow is null) desktopFocus.Hide();
         }
-        catch (TaskCanceledException) { }
+        catch (OperationCanceledException) { }
         finally
         {
             if (ReferenceEquals(focusHideDelay, cancellation)) focusHideDelay = null;
@@ -351,909 +242,294 @@ internal sealed class WindowPreviewWindow : Window
         }
     }
 
-    private bool CanFocus => isShown && !rebuilding && progress == 1 && animationTo == 1 &&
-        session.State is WindowPreviewState.Expanded or WindowPreviewState.WindowHovered;
-
-    private void SyncHoveredCard()
-    {
-        if (!CanFocus) return;
-        var hovered = cards.FirstOrDefault(card => card.Button.Visibility == Visibility.Visible && ContainsPointer(card.Button));
-        var handle = hovered?.Window.Handle;
-        if (session.SelectedWindow == handle) return;
-        session.Select(handle);
-        AnimateSelection();
-    }
-
     private void AnimateSelection()
     {
-        if (!CanFocus)
-        {
-            session.Select(null);
-            focusHideDelay?.Cancel();
-            desktopFocus.Hide();
-        }
+        if (!CanFocus) ClearSelection();
         else
         {
-            var selectedWindow = session.Windows.FirstOrDefault(window => window.Handle == session.SelectedWindow);
-            if (selectedWindow is null) _ = HideDesktopFocusDelayed();
+            var selected = cards.FirstOrDefault(card => card.Window.Handle == session.SelectedWindow);
+            if (selected is null) _ = HideDesktopFocusDelayed();
             else
             {
                 focusHideDelay?.Cancel();
-                desktopFocus.Show(selectedWindow);
+                desktopFocus.Show(selected.Window);
             }
         }
         Advance();
         foreach (var card in cards)
         {
-            var emphasis = CanFocus && session.SelectedWindow == card.Window.Handle ? 1d : 0d;
-            var dimming = CanFocus && session.SelectedWindow is not null && emphasis == 0 ? 1d : 0d;
-            if (card.EmphasisTo == emphasis && card.DimmingTo == dimming) continue;
+            var target = CanFocus && session.SelectedWindow == card.Window.Handle ? 1d : 0d;
+            if (card.EmphasisTo == target) continue;
             card.EmphasisFrom = card.Emphasis;
-            card.DimmingFrom = card.Dimming;
-            card.EmphasisTo = emphasis;
-            card.DimmingTo = dimming;
+            card.EmphasisTo = target;
             card.HoverStarted = elapsed.Elapsed.TotalMilliseconds;
         }
         animation.Start();
     }
+
     private bool Advance()
     {
-        var now =
-            elapsed.Elapsed.TotalMilliseconds;
-
-        var t = Math.Clamp(
-            (now - animationStarted) / 260,
-            0,
-            1
-        );
-
-        progress = Lerp(
-            animationFrom,
-            animationTo,
-            Ease(t)
-        );
-
-        var moving =
-            t < 1 &&
-            animationFrom != animationTo;
-
+        var now = elapsed.Elapsed.TotalMilliseconds;
+        var enabled = AnimationsEnabled;
+        var t = enabled ? Math.Clamp((now - animationStarted) / 220, 0, 1) : 1;
+        progress = Lerp(animationFrom, animationTo, Ease(t));
+        var moving = t < 1 && animationFrom != animationTo;
+        var fade = enabled ? Math.Clamp((now - visibilityStarted) / 140, 0, 1) : 1;
+        visibility = Lerp(visibilityFrom, visibilityTo, Ease(fade));
+        moving |= fade < 1 && visibilityFrom != visibilityTo;
         foreach (var card in cards)
         {
-            var hover = Math.Clamp(
-                (now - card.HoverStarted) / 160,
-                0,
-                1
-            );
-
-            card.Emphasis = Lerp(
-                card.EmphasisFrom,
-                card.EmphasisTo,
-                Ease(hover)
-            );
-
-            card.Dimming = Lerp(
-                card.DimmingFrom,
-                card.DimmingTo,
-                Ease(hover)
-            );
-
-            moving |=
-                hover < 1 &&
-                (
-                    card.EmphasisFrom !=
-                    card.EmphasisTo ||
-
-                    card.DimmingFrom !=
-                    card.DimmingTo
-                );
+            var hover = enabled ? Math.Clamp((now - card.HoverStarted) / 120, 0, 1) : 1;
+            card.Emphasis = Lerp(card.EmphasisFrom, card.EmphasisTo, Ease(hover));
+            moving |= hover < 1 && card.EmphasisFrom != card.EmphasisTo;
         }
-
         return moving;
     }
 
-    private static double Ease(
-        double t)
-        => t * t * (3 - 2 * t);
-
-    private static double Lerp(
-        double from,
-        double to,
-        double amount)
-        => from +
-           (to - from) *
-           amount;
-
-    public void Refresh(
-        double anchor,
-        double top)
+    public void Refresh(double anchor, double top)
     {
         anchorX = anchor;
         dockTop = top;
-
-        if (page >= session.Windows.Count)
-            page = 0;
-
-        var (area, dpi, _) =
-            WindowPreviewPlacement.GetArea(dock);
-
-        var layout =
-            WindowPreviewLayout.Create(
-                session.Windows.Count - page,
-                area.Width / dpi - 24,
-                area.Height / dpi - 24,
-                true
-            );
-
-        var visible =
-            session.Windows
-                .Skip(page)
-                .Take(layout.Capacity)
-                .ToArray();
-
-        if (visible.Length == 0)
-            page = 0;
-
-        if (
-            layout.Width != expanded.Width ||
-            layout.Height != expanded.Height ||
+        if (!isShown || IsClosing) return;
+        if (session.Windows.Count == 0) { Hide(); return; }
+        if (page >= session.Windows.Count) page = 0;
+        var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
+        var layout = WindowPreviewLayout.Create(session.Windows.Count - page,
+            area.Width / dpi - 24, area.Height / dpi - 24, true);
+        var windows = session.Windows.Skip(page).Take(layout.Capacity).ToArray();
+        if (layout.Width != expanded.Width || layout.Height != expanded.Height ||
             layout.Capacity != expanded.Capacity ||
-            !cards
-                .Select(card => card.Window)
-                .SequenceEqual(visible))
-        {
+            !cards.Select(card => Key(card.Window)).SequenceEqual(windows.Select(Key)))
             Rebuild();
+        else
+        {
+            windowCount = session.Windows.Count;
+            for (var i = 0; i < cards.Count; i++)
+            {
+                cards[i].Window = windows[i];
+                UpdateTitle(cards[i]);
+            }
         }
-
         Draw();
     }
+
+    private static (long, int, long) Key(ApplicationWindow window) =>
+        (window.Handle, window.ProcessId, window.ProcessStartTicks);
 
     private void Rebuild()
     {
         rebuilding = true;
         try
         {
-        Trace("REBUILD");
-
-        var previous =
-            cards.ToDictionary(
-                card =>
-                    (
-                        card.Window.Handle,
-                        card.Window.ProcessId,
-                        card.Window.ProcessStartTicks
-                    ));
-
-        ClearCards();
-
-        var (area, dpi, _) =
-            WindowPreviewPlacement.GetArea(dock);
-
-        compact =
-            WindowPreviewLayout.Create(
-                session.Windows.Count - page,
-                area.Width / dpi - 24,
-                area.Height / dpi - 24,
-                false
-            );
-
-        expanded =
-            WindowPreviewLayout.Create(
-                session.Windows.Count - page,
-                area.Width / dpi - 24,
-                area.Height / dpi - 24,
-                true
-            );
-
-        foreach (
-            var window in
-            session.Windows
-                .Skip(page)
-                .Take(expanded.Capacity)
-                .Reverse())
-        {
-            var title =
-                new TextBlock
-                {
-                    Text =
-                        string.IsNullOrWhiteSpace(
-                            window.Title)
-                            ? window.Name
-                            : window.Title,
-
-                    FontSize = 12,
-
-                    TextTrimming =
-                        TextTrimming.CharacterEllipsis,
-
-                    VerticalAlignment =
-                        VerticalAlignment.Center,
-
-                    Foreground =
-                        Brush(
-                            240,
-                            245,
-                            247,
-                            255)
-                };
-
-            var fallback =
-                new TextBlock
-                {
-                    Text =
-                        window.IsMinimized
-                            ? "Minimized window"
-                            : "Preview unavailable",
-
-                    HorizontalAlignment =
-                        HorizontalAlignment.Center,
-
-                    VerticalAlignment =
-                        VerticalAlignment.Center,
-
-                    FontSize = 12,
-
-                    Opacity = .75
-                };
-
-            var appIcon =
-                new AdaptiveAppIcon(
-                    size: 22,
-                    maximumHoverScale: 1.0);
-
-            appIcon.SetIcon(window.Icon);
-
-            appIcon.VerticalAlignment =
-                VerticalAlignment.Center;
-
-            var footer =
-                new StackPanel
-                {
-                    Orientation =
-                        Orientation.Horizontal,
-
-                    Spacing = 8,
-
-                    Margin =
-                        new Thickness(
-                            10,
-                            0,
-                            10,
-                            5),
-
-                    Height = 28,
-
-                    VerticalAlignment =
-                        VerticalAlignment.Bottom
-                };
-
-            footer.Children.Add(appIcon);
-            footer.Children.Add(title);
-
-            var grid = new Grid();
-
-            grid.Children.Add(fallback);
-            grid.Children.Add(footer);
-
-            var border =
-                new Border
-                {
-                    CornerRadius =
-                        new CornerRadius(9),
-
-                    BorderThickness =
-                        new Thickness(1),
-
-                    BorderBrush =
-                        Brush(
-                            55,
-                            190,
-                            200,
-                            215),
-
-                    Background =
-                        Brush(
-                            55,
-                            18,
-                            21,
-                            28),
-
-                    Child = grid
-                };
-
-            var button =
-                new Button
-                {
-                    Content = border,
-
-                    Padding =
-                        new Thickness(0),
-
-                    BorderThickness =
-                        new Thickness(0),
-
-                    Background =
-                        Brush(
-                            0,
-                            0,
-                            0,
-                            0)
-                };
-
-            foreach (
-                var resource in
-                new[]
-                {
-                    "ButtonBackgroundPointerOver",
-                    "ButtonBackgroundPressed",
-                    "ButtonBorderBrushPointerOver",
-                    "ButtonBorderBrushPressed"
-                })
+            var previous = cards.ToDictionary(card => Key(card.Window));
+            cards.Clear();
+            root.Children.Clear();
+            root.Children.Add(glass);
+            root.Children.Add(solid);
+            var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
+            var count = session.Windows.Count - page;
+            windowCount = session.Windows.Count;
+            compact = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, false);
+            expanded = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, true);
+            var windows = session.Windows.Skip(page).Take(expanded.Capacity).ToArray();
+            // DWM registrations follow compact stack z-order, front last.
+            foreach (var window in windows.Reverse())
             {
-                button.Resources[resource] =
-                    Brush(
-                        0,
-                        0,
-                        0,
-                        0);
+                if (!previous.Remove(Key(window), out var card)) card = CreateCard(window);
+                card.Window = window;
+                UpdateTitle(card);
+                cards.Insert(0, card);
+                root.Children.Add(card.Button);
+                root.Children.Add(card.CloseButton);
             }
-
-            button.HorizontalContentAlignment =
-                HorizontalAlignment.Stretch;
-
-            button.VerticalContentAlignment =
-                VerticalAlignment.Stretch;
-
-            AutomationProperties.SetName(
-                button,
-                title.Text);
-
-            // Sibling of the card button: its click cannot bubble through the activation button.
-           var closeButton = new Button
-{
-    Content = null,
-
-    Width = 14,
-    Height = 14,
-
-    MinWidth = 0,
-    MinHeight = 0,
-
-    Padding = new Thickness(0),
-
-    CornerRadius = new CornerRadius(7),
-
-    BorderThickness = new Thickness(0),
-
-    // macOS close red
-    Background = Brush(255, 255, 95, 87),
-
-    Foreground = Brush(255, 75, 20, 18),
-
-    FontSize = 11,
-    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-
-    HorizontalContentAlignment = HorizontalAlignment.Center,
-    VerticalContentAlignment = VerticalAlignment.Center,
-
-    Opacity = 0,
-    IsHitTestVisible = false
-};
-
-// Remove WinUI's default button hover/pressed visuals.
-foreach (var resource in new[]
-{
-    "ButtonBackgroundPointerOver",
-    "ButtonBackgroundPressed",
-    "ButtonBorderBrushPointerOver",
-    "ButtonBorderBrushPressed"
-})
-{
-    closeButton.Resources[resource] =
-        resource.Contains("Background")
-            ? Brush(255, 255, 95, 87)
-            : Brush(0, 0, 0, 0);
-}
-            AutomationProperties.SetName(closeButton, $"Close {title.Text}");
-            closeButton.Click += (_, _) =>
-            {
-                if (session.SelectedWindow == window.Handle)
-                {
-                    session.Select(null);
-                    focusHideDelay?.Cancel();
-                    desktopFocus.Hide();
-                    AnimateSelection();
-                }
-                WindowCloseRequested?.Invoke(this, window);
-            };
-            closeButton.PointerEntered += (_, _) =>
-{
-    closeButton.Content = new TextBlock
-{
-    Text = "\u00D7",
-    FontSize = 11,
-    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-    Foreground = Brush(255, 75, 20, 18),
-
-    HorizontalAlignment = HorizontalAlignment.Center,
-    VerticalAlignment = VerticalAlignment.Center,
-
-    Margin = new Thickness(0, -1, 0, 0)
-};
-    Draw();
-};
-
-closeButton.PointerExited += (_, _) =>
-{
-    closeButton.Content = null;
-
-    SyncHoveredCard();
-    Draw();
-};
-
-closeButton.GotFocus += (_, _) =>
-{
-    closeButton.Content = new TextBlock
-{
-    Text = "\u00D7",
-    FontSize = 11,
-    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-    Foreground = Brush(255, 75, 20, 18),
-
-    HorizontalAlignment = HorizontalAlignment.Center,
-    VerticalAlignment = VerticalAlignment.Center,
-
-    Margin = new Thickness(0, -1, 0, 0)
-};
-    Draw();
-};
-
-closeButton.LostFocus += (_, _) =>
-{
-    closeButton.Content = null;
-    Draw();
-};
-
-            AutomationProperties.SetItemStatus(
-                button,
-                window.IsMinimized
-                    ? "Minimized"
-                    : window.IsActive
-                        ? "Active"
-                        : "Running");
-
-            button.PointerEntered += (_, _) =>
-            {
-                if (!ContainsPointer(button))
-                    return;
-
-                Expand();
-                Draw();
-                if (!CanFocus) return;
-
-                session.Select(
-                    window.Handle);
-
-                AnimateSelection();
-            };
-
-            button.PointerExited += (_, _) =>
-            {
-                Draw();
-                if (!CanFocus) return;
-                if (
-                    ContainsPointer(button) ||
-                    session.SelectedWindow !=
-                    window.Handle)
-                    return;
-
-                session.Select(null);
-
-                AnimateSelection();
-            };
-
-            button.Click += (_, _) =>
-            {
-                WindowChosen?.Invoke(
-                    this,
-                    window);
-            };
-
-            //
-            // Register rear thumbnails first so
-            // DWM composites the dominant one last.
-            //
-            var card =
-                new Card(
-                    window,
-                    button,
-                    closeButton,
-                    border,
-                    title,
-                    fallback,
-                    new WindowThumbnail(
-                        hwnd,
-                        window)
-                );
-
-            if (
-                previous.TryGetValue(
-                    (
-                        window.Handle,
-                        window.ProcessId,
-                        window.ProcessStartTicks
-                    ),
-                    out var old))
-            {
-                card.Emphasis =
-                    old.Emphasis;
-
-                card.EmphasisFrom =
-                    old.EmphasisFrom;
-
-                card.EmphasisTo =
-                    old.EmphasisTo;
-
-                card.Dimming =
-                    old.Dimming;
-
-                card.DimmingFrom =
-                    old.DimmingFrom;
-
-                card.DimmingTo =
-                    old.DimmingTo;
-
-                card.HoverStarted =
-                    old.HoverStarted;
-            }
-
-            cards.Insert(
-                0,
-                card);
-
-            root.Children.Add(
-                button);
-            root.Children.Add(closeButton);
-        }
-
-        root.Children.Add(more);
+            foreach (var unused in previous.Values) unused.Thumbnail.Dispose();
+            root.Children.Add(more);
         }
         finally { rebuilding = false; }
-        if (session.SelectedWindow is long selected && !cards.Any(card => card.Window.Handle == selected))
+        if (session.SelectedWindow is long selected && !cards.Any(card => card.Window.Handle == selected)) ClearSelection();
+    }
+
+    private Card CreateCard(ApplicationWindow window)
+    {
+        var title = new TextBlock { FontSize = 12, Foreground = theme.Primary,
+            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var fallback = new TextBlock { FontSize = 12, Foreground = theme.Secondary,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var cached = new Image { Stretch = Stretch.Uniform, Margin = new(8, 36, 8, 34), IsHitTestVisible = false };
+        var icon = new AdaptiveAppIcon(22, 1, showTile: false) { VerticalAlignment = VerticalAlignment.Center };
+        icon.SetIcon(window.Icon);
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(10, 0, 10, 5),
+            Height = 28, VerticalAlignment = VerticalAlignment.Bottom };
+        footer.Children.Add(icon);
+        footer.Children.Add(title);
+        var content = new Grid();
+        content.Children.Add(fallback);
+        content.Children.Add(cached);
+        content.Children.Add(footer);
+        var border = new Border { CornerRadius = new(DockControlPalette.ButtonRadius),
+            BorderThickness = new(1), BorderBrush = theme.TileBorder, Background = theme.Tile, Child = content };
+        var button = new Button { Content = border, Padding = new(0), BorderThickness = new(0),
+            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0, 0, 0, 0)),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        theme.StyleButton(button);
+        // A sibling rather than a child of the activation button. Its click
+        // cannot bubble through the card activation handler.
+        var close = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 10, Foreground = theme.Primary },
+            Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new(0),
+            BorderThickness = new(0), Background = theme.Tile, Opacity = 0, IsHitTestVisible = false };
+        theme.StyleButton(close);
+        var card = new Card { Window = window, Button = button, CloseButton = close, Border = border,
+            Title = title, Fallback = fallback, Cached = cached, Thumbnail = new(hwnd, window) };
+        button.PointerEntered += (_, _) =>
         {
-            session.Select(null);
-            focusHideDelay?.Cancel();
-            desktopFocus.Hide();
-        }
-        AnimateSelection();
+            if (!ContainsPointer(button) || IsClosing) return;
+            Expand();
+            if (CanFocus) { session.Select(card.Window.Handle); AnimateSelection(); }
+            Draw();
+        };
+        button.PointerExited += (_, _) => { SyncHoveredCard(); Draw(); };
+        button.Click += (_, _) =>
+        {
+            if (!IsClosing) WindowChosen?.Invoke(this, card.Window);
+        };
+        close.Click += (_, _) =>
+        {
+            if (IsClosing) return;
+            if (session.SelectedWindow == card.Window.Handle) { ClearSelection(); AnimateSelection(); }
+            WindowCloseRequested?.Invoke(this, card.Window);
+        };
+        close.PointerEntered += (_, _) => Draw();
+        close.PointerExited += (_, _) => { SyncHoveredCard(); Draw(); };
+        close.GotFocus += (_, _) => Draw();
+        close.LostFocus += (_, _) => Draw();
+        return card;
+    }
+
+    private static void UpdateTitle(Card card)
+    {
+        card.Title.Text = string.IsNullOrWhiteSpace(card.Window.Title) ? card.Window.Name : card.Window.Title;
+        card.Fallback.Text = card.Window.IsMinimized ? "Minimized · no cached preview yet" : "Preview unavailable";
+        AutomationProperties.SetName(card.Button, card.Title.Text);
+        AutomationProperties.SetName(card.CloseButton, "Close " + card.Title.Text);
+        AutomationProperties.SetItemStatus(card.Button, card.Window.IsMinimized ? "Minimized" : card.Window.IsActive ? "Active" : "Running");
     }
 
     private void Draw()
     {
-        if (!isShown || cards.Count == 0)
-            return;
-
-        var width =
-            compact.Width +
-            (
-                expanded.Width -
-                compact.Width
-            ) *
-            progress;
-
-        var height =
-            expanded.Height;
-
-        placement.Position(
-            dock,
-            anchorX,
-            dockTop,
-            width,
-            height);
-
-        var dpi =
-            WindowPreviewPlacement
-                .GetArea(dock)
-                .Dpi;
-
-        backdrop.SetBounds(
-            width,
-            height,
-            width,
-            height - 12,
-            12,
-            dpi);
-
-        for (
-            var index =
-                cards.Count - 1;
-
-            index >= 0;
-
-            index--)
+        if (!isShown || rebuilding || cards.Count == 0) return;
+        var width = Lerp(compact.Width, expanded.Width, progress);
+        var height = Lerp(compact.Height, expanded.Height, progress);
+        placement.Position(dock, anchorX, dockTop, width, height);
+        var dpi = WindowPreviewPlacement.GetArea(dock).Dpi;
+        // All layers, including native thumbnails, use the same fade and travel.
+        var travel = 6 * (1 - visibility);
+        root.Opacity = visibility;
+        glass.Width = solid.Width = width;
+        glass.Height = solid.Height = Math.Max(0, height - 12);
+        Canvas.SetTop(glass, travel);
+        Canvas.SetTop(solid, travel);
+        backdrop.SetBounds(width, height, width, Math.Max(0, height - 12 - travel), 12, dpi, visibility);
+        for (var index = cards.Count - 1; index >= 0; index--)
         {
-            var card =
-                cards[index];
-
-            var from =
-                compact.Cards[index];
-
-            var to =
-                expanded.Cards[index];
-
-            var rect =
-                new PreviewRect(
-                    from.X +
-                    (to.X - from.X) *
-                    progress,
-
-                    from.Y +
-                    (to.Y - from.Y) *
-                    progress,
-
-                    from.Width +
-                    (to.Width - from.Width) *
-                    progress,
-
-                    from.Height +
-                    (to.Height - from.Height) *
-                    progress
-                );
-
-            var selected =
-                session.SelectedWindow ==
-                card.Window.Handle;
-
-            rect =
-                new PreviewRect(
-                    rect.X -
-                    rect.Width *
-                    .02 *
-                    card.Emphasis,
-
-                    rect.Y -
-                    4 *
-                    card.Emphasis,
-
-                    rect.Width *
-                    (
-                        1 +
-                        .04 *
-                        card.Emphasis
-                    ),
-
-                    rect.Height *
-                    (
-                        1 +
-                        .04 *
-                        card.Emphasis
-                    )
-                );
-
-            var opacity =
-                (
-                    index == 0
-                        ? 1
-                        : .66 +
-                          .34 *
-                          progress
-                ) *
-                (
-                    1 -
-                    .78 *
-                    card.Dimming *
-                    progress
-                );
-
-            if (index >= 3)
-            {
-                opacity *= progress;
-            }
-
-            var visible =
-                progress > 0 ||
-                index < 3;
-
-            card.Button.Visibility =
-                visible
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-
-            card.Button.Opacity =
-                opacity;
-
-            card.Title.Opacity =
-                index == 0
-                    ? 1
-                    : progress;
-
-            Canvas.SetZIndex(
-                card.Button,
-                selected
-                    ? 20
-                    : cards.Count - index);
-
-            Canvas.SetLeft(
-                card.Button,
-                rect.X);
-
-            Canvas.SetTop(
-                card.Button,
-                rect.Y);
-
-            card.Button.Width =
-                rect.Width;
-
-            card.Button.Height =
-                rect.Height;
-
+            var card = cards[index];
+            var from = compact.Cards[index];
+            var to = expanded.Cards[index];
+            var rect = new PreviewRect(Lerp(from.X, to.X, progress), Lerp(from.Y, to.Y, progress) + travel,
+                Lerp(from.Width, to.Width, progress), Lerp(from.Height, to.Height, progress));
+            var visible = progress > 0 || index < 3;
+            var opacity = visibility * (index == 0 ? 1 : Lerp(.66, 1, progress));
+            if (index >= 3) opacity *= progress;
+            card.Button.Visibility = card.CloseButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            card.Button.Opacity = visibility > 0 ? opacity / visibility : 0;
+            Canvas.SetLeft(card.Button, rect.X);
+            Canvas.SetTop(card.Button, rect.Y);
+            Canvas.SetZIndex(card.Button, cards.Count - index);
+            card.Button.Width = rect.Width;
+            card.Button.Height = rect.Height;
+            card.Title.MaxWidth = Math.Max(0, rect.Width - 60);
+            card.Border.Background = card.Emphasis > .5 ? theme.Hover : theme.Tile;
             var closeVisible = visible && CanFocus &&
                 (ContainsPointer(card.Button) || ContainsPointer(card.CloseButton) || card.CloseButton.FocusState != FocusState.Unfocused);
-            card.CloseButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
             card.CloseButton.Opacity = closeVisible ? 1 : 0;
             card.CloseButton.IsHitTestVisible = closeVisible;
             card.CloseButton.IsTabStop = CanFocus;
-            var closeBounds = WindowPreviewLayout.CloseButtonBounds(rect, card.CloseButton.Width);
-            Canvas.SetLeft(card.CloseButton, closeBounds.X);
-            Canvas.SetTop(card.CloseButton, closeBounds.Y);
+            var closeRect = WindowPreviewLayout.CloseButtonBounds(rect, card.CloseButton.Width);
+            Canvas.SetLeft(card.CloseButton, closeRect.X);
+            Canvas.SetTop(card.CloseButton, closeRect.Y);
             Canvas.SetZIndex(card.CloseButton, 25);
 
-            ((SolidColorBrush)
-                card.Border.BorderBrush)
-                .Color =
-                    global::Windows.UI.Color
-                        .FromArgb(
-                            (byte)Lerp(
-                                45,
-                                165,
-                                card.Emphasis),
-
-                            (byte)Lerp(
-                                235,
-                                215,
-                                card.Emphasis),
-
-                            (byte)Lerp(
-                                243,
-                                234,
-                                card.Emphasis),
-
-                            255
-                        );
-
-            ((SolidColorBrush)
-                card.Border.Background)
-                .Color =
-                    global::Windows.UI.Color
-                        .FromArgb(
-                            (byte)Lerp(
-                                30,
-                                60,
-                                card.Emphasis),
-
-                            (byte)Lerp(
-                                25,
-                                90,
-                                card.Emphasis),
-
-                            (byte)Lerp(
-                                30,
-                                105,
-                                card.Emphasis),
-
-                            (byte)Lerp(
-                                45,
-                                135,
-                                card.Emphasis)
-                        );
-
-            var shown =
-                card.Thumbnail.Update(
-                    new PreviewRect(
-                        rect.X + 8,
-                        rect.Y + 26,
-                        rect.Width - 16,
-                        rect.Height - 58),
-
-                    dpi,
-                    opacity,
-                    visible);
-
-            card.Fallback.Visibility =
-                shown
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
+            var frame = card.Window.IsMinimized ? frameCache.GetCachedFrame(card.Window) : null;
+            if (frame is { } cachedFrame && !card.CachedPixels.Equals(cachedFrame.Pixels))
+            {
+                var bitmap = new WriteableBitmap(cachedFrame.Width, cachedFrame.Height);
+                using (var stream = bitmap.PixelBuffer.AsStream()) stream.Write(cachedFrame.Pixels.Span);
+                bitmap.Invalidate();
+                card.Cached.Source = bitmap;
+                card.CachedPixels = cachedFrame.Pixels;
+            }
+            var useCache = frame is not null;
+            card.Cached.Visibility = useCache ? Visibility.Visible : Visibility.Collapsed;
+            if (frame is null && card.Cached.Source is not null)
+            {
+                card.Cached.Source = null;
+                card.CachedPixels = default;
+            }
+            var shown = card.Thumbnail.Update(new(rect.X + 8, rect.Y + 36, Math.Max(1, rect.Width - 16), Math.Max(1, rect.Height - 70)),
+                dpi, opacity, visible && !useCache);
+            card.Fallback.Visibility = useCache || shown ? Visibility.Collapsed : Visibility.Visible;
         }
-
-        var shownCount = progress < 1 ? Math.Min(3, cards.Count) : cards.Count;
-        var remaining = session.Windows.Count - page - cards.Count;
-        var hasAnotherPage = session.Windows.Count > expanded.Capacity;
-        more.Content = progress < 1
-            ? $"+{session.Windows.Count - shownCount} more"
-            : remaining > 0 ? $"+{remaining} more · {page + 1}–{page + cards.Count} of {session.Windows.Count}"
-            : $"Back to first · {page + 1}–{page + cards.Count} of {session.Windows.Count}";
+        var remaining = windowCount - page - cards.Count;
+        more.Content = remaining > 0 ? $"+{remaining} more · {page + 1}–{page + cards.Count} of {windowCount}"
+            : $"Back to first · {page + 1}–{page + cards.Count} of {windowCount}";
+        more.Visibility = windowCount > expanded.Capacity ? Visibility.Visible : Visibility.Collapsed;
+        more.IsEnabled = CanFocus;
         more.MaxWidth = Math.Max(0, width - 24);
-        more.Visibility = (progress < 1 ? session.Windows.Count > shownCount : hasAnotherPage)
-            ? Visibility.Visible : Visibility.Collapsed;
-        Canvas.SetLeft(
-            more,
-            12);
-
-        Canvas.SetTop(
-            more,
-            height - 34);
-
-        Canvas.SetZIndex(
-            more,
-            30);
+        Canvas.SetLeft(more, 12);
+        Canvas.SetTop(more, height - 34 + travel);
+        Canvas.SetZIndex(more, 30);
     }
 
-    private bool ContainsPointer(
-        Button button)
-        =>
-            placement.ContainsPointer(
-                new PreviewRect(
-                    Canvas.GetLeft(button),
-                    Canvas.GetTop(button),
-                    button.Width,
-                    button.Height));
+    private bool ContainsPointer(Button button) => placement.ContainsPointer(
+        new(Canvas.GetLeft(button), Canvas.GetTop(button), button.Width, button.Height));
 
     private void ClearCards()
     {
-        foreach (var card in cards)
-        {
-            card.Thumbnail.Dispose();
-        }
-
+        foreach (var card in cards) card.Thumbnail.Dispose();
         cards.Clear();
-
         root.Children.Clear();
+        root.Children.Add(glass);
+        root.Children.Add(solid);
     }
 
-    public void Hide()
+    public void Hide(bool immediate = false)
+    {
+        if (!isShown || closed) return;
+        ClearSelection();
+        root.IsHitTestVisible = false;
+        if (immediate || !AnimationsEnabled) { FinishHide(); return; }
+        Advance();
+        visibilityFrom = visibility;
+        visibilityTo = 0;
+        visibilityStarted = elapsed.Elapsed.TotalMilliseconds;
+        animation.Start();
+    }
+
+    private void FinishHide()
     {
         isShown = false;
-        session.Select(null);
-        focusHideDelay?.Cancel();
-        desktopFocus.Hide();
-
-        Trace("HIDE");
-
         animation.Stop();
-
         placement.Hide();
-
         ClearCards();
+        Hidden?.Invoke(this, EventArgs.Empty);
     }
 
-    private static SolidColorBrush Brush(
-        byte a,
-        byte r,
-        byte g,
-        byte b)
-        =>
-            new(
-                global::Windows.UI.Color
-                    .FromArgb(
-                        a,
-                        r,
-                        g,
-                        b));
+    private static double Ease(double t) => t * t * (3 - 2 * t);
+    private static double Lerp(double a, double b, double t) => a + (b - a) * t;
 
-    private static readonly bool TraceEnabled =
-        string.Equals(
-            Environment.GetEnvironmentVariable(
-                "GLASSDOCK_PREVIEW_TRACE"),
-            "1",
-            StringComparison.Ordinal);
-
-    internal static void Trace(
-        string message)
+    private static readonly bool TraceEnabled = Environment.GetEnvironmentVariable("GLASSDOCK_PREVIEW_TRACE") == "1";
+    internal static void Trace(string message)
     {
-        if (!TraceEnabled)
-            return;
-
-        System.IO.File.AppendAllText(
-            @"C:\Dev\GlassDock\artifacts\preview-runtime.trace",
-            $"{DateTime.Now:HH:mm:ss.fff} {message}\n");
+        if (!TraceEnabled) return;
+        Debug.WriteLine("[WindowPreview] " + message);
     }
 }

@@ -1,4 +1,5 @@
 using GlassDock.Core.Desktop;
+using GlassDock.Core.Applications;
 using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
@@ -35,6 +36,8 @@ public sealed class WindowsKeyboardService : IKeyboardService
         }
     }
     public bool IsRegistered { get; private set; }
+    public Task<bool> RestoreElevatedWindowAsync(ApplicationWindow window) =>
+        disposed || elevatedHelper is null ? Task.FromResult(false) : elevatedHelper.RestoreWindowAsync(window);
     public event EventHandler? HomeRequested;
     public event EventHandler? BareWindowsRequested;
     public event EventHandler? LauncherRequested;

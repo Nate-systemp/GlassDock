@@ -6,6 +6,52 @@ namespace GlassDock.Core.Tests;
 public sealed class WindowPreviewTests
 {
     [Fact]
+    public void SingleWindowGetsALargerPreviewAndGroupsWrapBeforePagination()
+    {
+        var single = WindowPreviewLayout.Create(1, 1200, 700, true);
+        var group = WindowPreviewLayout.Create(8, 1200, 700, true);
+        Assert.True(single.Cards[0].Width > group.Cards[0].Width);
+        Assert.True(single.Cards[0].Height > group.Cards[0].Height);
+        Assert.Equal(8, group.Cards.Count);
+        Assert.True(group.Cards.Max(card => card.Y) > group.Cards.Min(card => card.Y));
+        Assert.All(group.Cards, card => Assert.True(card.Y + card.Height <= group.Height - 34));
+    }
+
+    [Theory]
+    [InlineData(-1920, 0, 1)]
+    [InlineData(0, -1080, 1.25)]
+    [InlineData(-2560, -1440, 1.5)]
+    [InlineData(1920, 0, 2)]
+    public void PlacementUsesPhysicalMonitorOriginOnceAndFitsFloatingOrPinnedWorkArea(
+        double x, double y, double dpi)
+    {
+        foreach (var pinned in new[] { false, true })
+        {
+            var dockHeight = 144 * dpi;
+            var dock = new PreviewRect(x + 40, y + 1080 - dockHeight, 1600, dockHeight);
+            var dockTop = 144 - 68 - (pinned ? 0 : 16);
+            var work = new PreviewRect(x, y, 1920, pinned ? 1080 - 68 * dpi : 1080);
+            foreach (var anchor in new[] { 0d, 500, 1600 / dpi })
+            {
+                var result = WindowPreviewLayout.Position(work, dock, dpi, anchor, dockTop, 560, 230);
+                Assert.True(result.X >= work.X && result.X + result.Width <= work.X + work.Width);
+                Assert.True(result.Y >= work.Y && result.Y + result.Height <= work.Y + work.Height);
+                Assert.True(result.Y + result.Height <= dock.Y + dockTop * dpi);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReusedHandleCannotRetainSelectionFromAnEarlierProcess()
+    {
+        var session = new WindowPreviewSession();
+        session.Show(session.Begin(App(Window(1))));
+        session.Expand(); session.CompleteTransition(1); session.Select(1);
+        session.Refresh([Window(1) with { ProcessStartTicks = 200 }]);
+        Assert.Null(session.SelectedWindow);
+    }
+
+    [Fact]
     public void CloseControlStaysInsideTopRightOfEveryCard()
     {
         foreach (var width in new[] { 90d, 600d, 1896d })
