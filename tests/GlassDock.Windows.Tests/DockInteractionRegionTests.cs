@@ -4,6 +4,7 @@ using Xunit;
 
 namespace GlassDock.Windows.Tests;
 
+[Collection(NativeDesktopTestCollection.Name)]
 public sealed class DockInteractionRegionTests
 {
     [Fact]
