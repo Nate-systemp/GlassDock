@@ -6,6 +6,11 @@
     version="0.1.0.0"
     name="GlassDock.App" />
 
+  <msix xmlns="urn:schemas-microsoft-com:msix.v1"
+        publisher="CN=Natesystemp"
+        packageName="Natesystemp.Doky.NotificationIdentity"
+        applicationId="Doky" />
+
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

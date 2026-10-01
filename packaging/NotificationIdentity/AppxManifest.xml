@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+ xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+ xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+ xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+ xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+ IgnorableNamespaces="uap uap3 uap10 rescap">
+ <Identity Name="Natesystemp.Doky.NotificationIdentity" Publisher="CN=Natesystemp" Version="1.0.0.0" ProcessorArchitecture="x64" />
+ <Properties>
+  <DisplayName>Doky</DisplayName><PublisherDisplayName>Natesystemp</PublisherDisplayName>
+  <Logo>Assets\Doky.png</Logo><uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+ </Properties>
+ <Resources><Resource Language="en-us" /></Resources>
+ <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
+ <Applications>
+  <Application Id="Doky" Executable="GlassDock.App.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+   <uap:VisualElements DisplayName="Doky" Description="Doky notification badges" BackgroundColor="transparent"
+    Square150x150Logo="Assets\Doky.png" Square44x44Logo="Assets\Doky.png" />
+  </Application>
+ </Applications>
+ <Capabilities>
+  <rescap:Capability Name="runFullTrust" /><rescap:Capability Name="unvirtualizedResources" />
+  <uap3:Capability Name="userNotificationListener" />
+ </Capabilities>
+</Package>

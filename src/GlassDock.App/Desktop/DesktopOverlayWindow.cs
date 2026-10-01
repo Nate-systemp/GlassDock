@@ -83,6 +83,8 @@ public sealed class DesktopOverlayWindow : Window
     };
     private readonly DockStateMachine state = new();
     private readonly WindowsApplicationService applicationService = new();
+    private readonly WindowsNotificationService notifications = new();
+    private int notificationRefreshQueued;
     private readonly WindowsApplicationLauncher dropLauncher = new();
     private readonly DockApplicationsViewModel applications;
     private readonly WindowPreviewCoordinator previews;
@@ -264,6 +266,17 @@ public sealed class DesktopOverlayWindow : Window
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
+        notifications.Changed += (_, _) => RefreshNotificationBadges();
+        notifications.RefreshRequested += (_, _) =>
+        {
+            if (Interlocked.Exchange(ref notificationRefreshQueued, 1) != 0) return;
+            if (!DispatcherQueue.TryEnqueue(async () =>
+            {
+                Interlocked.Exchange(ref notificationRefreshQueued, 0);
+                if (!closing) await notifications.RefreshAsync();
+            })) Interlocked.Exchange(ref notificationRefreshQueued, 0);
+        };
+        applications.SnapshotApplied += (_, _) => RefreshNotificationBadges();
         previews = new(applications, root, hwnd, () => ExpandedContentTop, settingsSession,
             () => !closing && state.State == DockState.Expanded && reorderButton is null &&
                 !externalDragActive && !SystemPopupOpen,
@@ -377,6 +390,11 @@ keyboard.RecoveryRequested +=
         surface.RenderingModeChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
         var menu = new MenuFlyout();
         MenuItem(menu, "Dock Settings", ShowSettings);
+        MenuItem(menu, "Enable notification badges", async () =>
+        {
+            await notifications.StartAsync(requestPermission: true);
+            if (!closing) SetStatus(notifications.Status);
+        });
         MenuItem(menu, "Open Glass Home", ShowHome);
         menu.Items.Add(new MenuFlyoutSeparator());
         MenuItem(menu, "Restore Windows taskbar", RestoreTaskbar);
@@ -426,6 +444,7 @@ keyboard.RecoveryRequested +=
         indicator.Opacity = 1;
         ApplyMaterial(false);
         applicationService.Start();
+        _ = notifications.StartAsync();
         RefreshUtilityStatus();
         utilityTimer.Start();
 
@@ -516,6 +535,21 @@ keyboard.RecoveryRequested +=
         return Math.Min(maximumWidth, applicationWidth + UtilityClusterWidth);
     }
 
+    private void RefreshNotificationBadges()
+    {
+        if (closing) return;
+        foreach (var item in applications.VisibleDockApplications)
+        {
+            if (applicationButtons.TryGetValue(item.Id, out var button) && button.Content is Grid content &&
+                content.Children.FirstOrDefault() is AdaptiveAppIcon icon)
+            {
+                var count = NotificationCounts.ForApplication(item.Application.Identity, notifications.Counts);
+                icon.SetNotificationCount(count);
+                AutomationProperties.SetHelpText(button, count > 0 ? $"{count} notifications in Windows Notification Center" : "");
+            }
+        }
+    }
+
     private Button CreateApplicationButton(DockApplicationItem item)
     {
     var image = new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale, showTile: false);
@@ -557,6 +591,7 @@ keyboard.RecoveryRequested +=
         ApplicationIcon? renderedIcon = null;
         void Update()
         {
+            image.SetNotificationCount(NotificationCounts.ForApplication(item.Application.Identity, notifications.Counts));
             AutomationProperties.SetName(button, item.Name);
             AutomationProperties.SetItemStatus(button, item.IsActive ? "Active" : item.IsRunning ? "Running" : "Pinned");
             ToolTipService.SetToolTip(button, WindowPreviewCoordinator.CreateTooltip(item.Name));
@@ -3066,6 +3101,7 @@ keyboard.RecoveryRequested +=
         root.ContextFlyout?.Hide();
 
         previews.Dispose();
+        notifications.Dispose();
         applications.Dispose();
         taskbarRevision++;
         state.Hide();
