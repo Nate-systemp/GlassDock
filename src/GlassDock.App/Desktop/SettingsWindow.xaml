@@ -208,7 +208,7 @@
                 <StackPanel x:Name="NotificationsPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Notifications" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Show Windows Notification Center counts directly on supported Doky app icons." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                        <TextBlock Text="Show the best available notification state directly on supported Doky app icons." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
@@ -217,7 +217,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="3" VerticalAlignment="Center">
                                     <TextBlock Text="Notification badges" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                    <TextBlock Text="Display unread-style counts from Windows Notification Center on matching dock apps. Doky reads counts only; it does not read notification text or remove notifications." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                    <TextBlock Text="Display exact counts when a provider can supply them, or an activity dot when only unread activity is known. Doky never invents counts." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <ToggleSwitch x:Name="NotificationBadgesToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="NotificationBadgesToggleToggled" AutomationProperties.Name="Show notification badges on Doky app icons"/>
                             </Grid>
@@ -231,7 +231,7 @@
                             </StackPanel>
 
                             <Border Padding="14" CornerRadius="10" Background="#FFF7F7F7" BorderBrush="#FFE7E7E7" BorderThickness="1">
-                                <TextBlock Text="Windows may show a privacy prompt the first time access is requested. Doky must be launched through its registered notification identity for this permission to be available." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
+                                <TextBlock Text="The current Windows provider reads Notification Center identity/count metadata only; it does not read notification text or remove notifications. Windows may request permission the first time it is enabled." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
                             </Border>
                         </StackPanel>
                     </Border>

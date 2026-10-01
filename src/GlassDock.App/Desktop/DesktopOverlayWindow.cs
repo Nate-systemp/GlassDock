@@ -83,7 +83,8 @@ public sealed class DesktopOverlayWindow : Window
     };
     private readonly DockStateMachine state = new();
     private readonly WindowsApplicationService applicationService = new();
-    private readonly WindowsNotificationService notifications = new();
+    private readonly WindowsToastBadgeProvider windowsToastBadges = new();
+    private readonly BadgeCoordinator badges;
     private int notificationRefreshQueued;
     private readonly WindowsApplicationLauncher dropLauncher = new();
     private readonly DockApplicationsViewModel applications;
@@ -214,6 +215,7 @@ public sealed class DesktopOverlayWindow : Window
         this.shutdownCompleted = shutdownCompleted;
         this.safeMode = safeMode;
         this.prepareRestart = prepareRestart;
+        badges = new BadgeCoordinator([windowsToastBadges]);
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
         pinDockRequested = settingsSession.Current.PinDock;
         notificationBadgesRequested = settingsSession.Current.NotificationBadgesEnabled;
@@ -268,17 +270,17 @@ public sealed class DesktopOverlayWindow : Window
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
-        notifications.Changed += (_, _) => RefreshNotificationBadges();
-        notifications.RefreshRequested += (_, _) =>
+        badges.Changed += (_, _) => QueueNotificationBadgeRefresh();
+        badges.RefreshRequested += (_, _) =>
         {
             if (Interlocked.Exchange(ref notificationRefreshQueued, 1) != 0) return;
             if (!DispatcherQueue.TryEnqueue(async () =>
             {
                 Interlocked.Exchange(ref notificationRefreshQueued, 0);
-                if (!closing) await notifications.RefreshAsync();
+                if (!closing) await badges.RefreshAsync();
             })) Interlocked.Exchange(ref notificationRefreshQueued, 0);
         };
-        applications.SnapshotApplied += (_, _) => RefreshNotificationBadges();
+        applications.SnapshotApplied += (_, _) => QueueNotificationBadgeRefresh();
         previews = new(applications, root, hwnd, () => ExpandedContentTop, settingsSession,
             () => !closing && state.State == DockState.Expanded && reorderButton is null &&
                 !externalDragActive && !SystemPopupOpen,
@@ -431,9 +433,9 @@ keyboard.RecoveryRequested +=
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closing || shutdown.IsRequested) return;
 
-            await notifications.StartAsync(requestPermission: true);
+            await badges.StartAsync(requestPermission: true);
             settingsSession.Replace(edited);
-            if (!closing) SetStatus(notifications.Status);
+            if (!closing) SetStatus(badges.Status);
         }
         catch (OperationCanceledException) when (shutdown.IsRequested)
         {
@@ -466,9 +468,9 @@ keyboard.RecoveryRequested +=
         ApplyMaterial(false);
         applicationService.Start();
         if (notificationBadgesRequested)
-            _ = notifications.StartAsync();
+            _ = badges.StartAsync();
         else
-            notifications.Stop();
+            badges.Stop();
         RefreshUtilityStatus();
         utilityTimer.Start();
 
@@ -559,6 +561,15 @@ keyboard.RecoveryRequested +=
         return Math.Min(maximumWidth, applicationWidth + UtilityClusterWidth);
     }
 
+    private void QueueNotificationBadgeRefresh()
+    {
+        if (closing) return;
+        if (DispatcherQueue.HasThreadAccess)
+            RefreshNotificationBadges();
+        else
+            DispatcherQueue.TryEnqueue(RefreshNotificationBadges);
+    }
+
     private void RefreshNotificationBadges()
     {
         if (closing) return;
@@ -567,9 +578,9 @@ keyboard.RecoveryRequested +=
             if (applicationButtons.TryGetValue(item.Id, out var button) && button.Content is Grid content &&
                 content.Children.FirstOrDefault() is AdaptiveAppIcon icon)
             {
-                var count = NotificationCounts.ForApplication(item.Application.Identity, notifications.Counts);
-                icon.SetNotificationCount(count);
-                AutomationProperties.SetHelpText(button, count > 0 ? $"{count} notifications in Windows Notification Center" : "");
+                var badge = badges.ForApplication(item.Application.Identity);
+                icon.SetNotificationBadge(badge);
+                AutomationProperties.SetHelpText(button, badge.AccessibilityText);
             }
         }
     }
@@ -615,8 +626,10 @@ keyboard.RecoveryRequested +=
         ApplicationIcon? renderedIcon = null;
         void Update()
         {
-            image.SetNotificationCount(NotificationCounts.ForApplication(item.Application.Identity, notifications.Counts));
+            var badge = badges.ForApplication(item.Application.Identity);
+            image.SetNotificationBadge(badge);
             AutomationProperties.SetName(button, item.Name);
+            AutomationProperties.SetHelpText(button, badge.AccessibilityText);
             AutomationProperties.SetItemStatus(button, item.IsActive ? "Active" : item.IsRunning ? "Running" : "Pinned");
             ToolTipService.SetToolTip(button, WindowPreviewCoordinator.CreateTooltip(item.Name));
             running.Visibility = item.IsRunning ? Visibility.Visible : Visibility.Collapsed;
@@ -2789,9 +2802,9 @@ keyboard.RecoveryRequested +=
         if (notificationBadgesChanged)
         {
             if (notificationBadgesRequested)
-                _ = notifications.StartAsync();
+                _ = badges.StartAsync();
             else
-                notifications.Stop();
+                badges.Stop();
         }
 
         if (pinChanged || (pinDockRequested && !pinnedPlacementActive && !pinDockTransitionActive))
@@ -2940,7 +2953,7 @@ keyboard.RecoveryRequested +=
                 () => RestartGlassDock(inSafeMode: false),
                 () => RestartGlassDock(inSafeMode: true),
                 RequestShutdown,
-                notifications);
+                badges);
             created.Closed += (_, _) => settingsWindow.Release(created);
             return created;
         });
@@ -3136,7 +3149,7 @@ keyboard.RecoveryRequested +=
         root.ContextFlyout?.Hide();
 
         previews.Dispose();
-        notifications.Dispose();
+        badges.Dispose();
         applications.Dispose();
         taskbarRevision++;
         state.Hide();

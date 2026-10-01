@@ -1,3 +1,4 @@
+using GlassDock.Core.Applications;
 using GlassDock.Core.Settings;
 using GlassDock.Core.Desktop;
 using GlassDock.Windows.Settings;
@@ -16,7 +17,7 @@ public sealed partial class SettingsWindow : Window
     private readonly GlassDockSettingsStore settingsStore;
     private readonly ApplicationShutdownState shutdown;
     private readonly WindowsStartupService startupService = new();
-    private readonly WindowsNotificationService notifications;
+    private readonly BadgeCoordinator badges;
     private readonly bool safeMode;
     private readonly Action restoreTaskbar;
     private readonly Action resumeTaskbar;
@@ -40,7 +41,7 @@ public sealed partial class SettingsWindow : Window
         Action restartGlassDock,
         Action restartSafeMode,
         Action exitGlassDock,
-        WindowsNotificationService notifications)
+        BadgeCoordinator badges)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -51,7 +52,7 @@ public sealed partial class SettingsWindow : Window
         this.restartGlassDock = restartGlassDock;
         this.restartSafeMode = restartSafeMode;
         this.exitGlassDock = exitGlassDock;
-        this.notifications = notifications;
+        this.badges = badges;
         updateLifetime = CancellationTokenSource.CreateLinkedTokenSource(shutdown.CancellationToken);
 
         InitializeComponent();
@@ -64,7 +65,7 @@ public sealed partial class SettingsWindow : Window
         var startupEnabled = startupService.IsEnabled();
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         PopulateAbout();
-        notifications.Changed += NotificationsChanged;
+        badges.Changed += NotificationsChanged;
         UpdateNotificationStatus();
         RecoveryModeStatusText.Text = safeMode
             ? "Safe Mode is active. Taskbar suppression, Doky Win-key interception, and Hover Wave are disabled for this session."
@@ -74,7 +75,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) =>
         {
             closed = true;
-            notifications.Changed -= NotificationsChanged;
+            badges.Changed -= NotificationsChanged;
             updateLifetime.Cancel();
             updateLifetime.Dispose();
         };
@@ -158,9 +159,9 @@ public sealed partial class SettingsWindow : Window
                 return;
 
             if (desired)
-                await notifications.StartAsync(requestPermission: true);
+                await badges.StartAsync(requestPermission: true);
             else
-                notifications.Stop();
+                badges.Stop();
 
             settingsSession.Replace(edited);
             UpdateNotificationStatus();
@@ -204,9 +205,9 @@ public sealed partial class SettingsWindow : Window
         NotificationStatusText.Text = "Requesting Windows notification access…";
         try
         {
-            await notifications.StartAsync(requestPermission: true);
+            await badges.StartAsync(requestPermission: true);
             UpdateNotificationStatus();
-            SetStatus(notifications.Status, success: notifications.Status.Contains("enabled", StringComparison.OrdinalIgnoreCase));
+            SetStatus(badges.Status, success: badges.Status.Contains("enabled", StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception error)
         {
@@ -235,7 +236,7 @@ public sealed partial class SettingsWindow : Window
     private void UpdateNotificationStatus()
     {
         if (closed) return;
-        NotificationStatusText.Text = notifications.Status;
+        NotificationStatusText.Text = badges.Status;
         NotificationAccessButton.IsEnabled = NotificationBadgesToggle.IsOn && !saving;
     }
 

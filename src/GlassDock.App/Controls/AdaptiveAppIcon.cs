@@ -34,16 +34,23 @@ internal sealed class AdaptiveAppIcon : Grid
     private int rasterWidth, rasterHeight;
     private NotificationBadge? badge;
 
-    public void SetNotificationCount(int count)
+    public void SetNotificationCount(int count) =>
+        SetNotificationBadge(BadgeDisplayState.Counted(count, "legacy-count"));
+
+    public void SetNotificationBadge(BadgeDisplayState display)
     {
-        if (badge is null && count <= 0) return;
+        if (badge is null && !display.IsVisible) return;
         if (badge is null)
         {
-            badge = new NotificationBadge { HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -4, -5, 0) };
+            badge = new NotificationBadge
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -4, -5, 0)
+            };
             Children.Add(badge);
         }
-        badge.SetCount(count);
+        badge.SetBadge(display);
     }
 
     public AdaptiveAppIcon(double size, double maximumHoverScale, bool showTile = true)

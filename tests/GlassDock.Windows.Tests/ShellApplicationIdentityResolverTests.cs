@@ -30,7 +30,7 @@ public sealed class ShellApplicationIdentityResolverTests
     }
 
     [Fact]
-    public void Canonical_squirrel_identity_merges_pin_and_windows_and_matches_notification_count()
+    public void Canonical_squirrel_identity_merges_pin_and_windows_and_matches_badge_coordinator()
     {
         var path = @"C:\Apps\Product\app-1.0\Product.exe";
         var appId = ShellApplicationIdentityResolver.Resolve(path,
@@ -42,8 +42,16 @@ public sealed class ShellApplicationIdentityResolverTests
         var app = Assert.Single(applications);
         Assert.True(app.IsPinned);
         Assert.Equal(2, app.Windows.Count);
-        Assert.Equal(3, GlassDock.Core.Applications.NotificationCounts.ForApplication(app.Identity,
-            new Dictionary<string, int> { ["Vendor.Product"] = 3 }));
+
+        using var coordinator = new GlassDock.Core.Applications.BadgeCoordinator([
+            new TestBadgeProvider(new Dictionary<string, GlassDock.Core.Applications.BadgeSignal>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Vendor.Product"] = GlassDock.Core.Applications.BadgeSignal.Counted(3)
+            })
+        ]);
+        var badge = coordinator.ForApplication(app.Identity);
+        Assert.Equal(GlassDock.Core.Applications.BadgeKind.Count, badge.Kind);
+        Assert.Equal(3, badge.Count);
     }
 
     [Fact]
@@ -214,4 +222,19 @@ public sealed class ShellApplicationIdentityResolverTests
 
         Assert.Null(ShellApplicationIdentityResolver.Resolve(path, hints));
     }
+    private sealed class TestBadgeProvider : GlassDock.Core.Applications.IBadgeProvider
+    {
+        public TestBadgeProvider(IReadOnlyDictionary<string, GlassDock.Core.Applications.BadgeSignal> snapshot) => Snapshot = snapshot;
+        public string Id => "test";
+        public int Priority => 100;
+        public string Status => "Ready.";
+        public IReadOnlyDictionary<string, GlassDock.Core.Applications.BadgeSignal> Snapshot { get; }
+        public event EventHandler? Changed { add { } remove { } }
+        public event EventHandler? RefreshRequested { add { } remove { } }
+        public Task StartAsync(bool requestPermission = false) => Task.CompletedTask;
+        public Task RefreshAsync() => Task.CompletedTask;
+        public void Stop() { }
+        public void Dispose() { }
+    }
+
 }
