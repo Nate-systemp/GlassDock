@@ -123,8 +123,67 @@ public sealed partial class SettingsWindow : Window
         BorderThicknessBox.Value = settings.BorderThickness;
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
+        PinDockToggle.IsOn = settings.PinDock;
         LaunchAtStartupToggle.IsOn = settings.LaunchAtStartup;
+        UpdateBehaviorControlAvailability();
         populating = false;
+    }
+
+    private async void PinDockToggleToggled(object sender, RoutedEventArgs e)
+    {
+        if (populating || saving || closed || shutdown.IsRequested)
+            return;
+
+        UpdateBehaviorControlAvailability();
+        var desired = PinDockToggle.IsOn;
+        var edited = GlassDockSettings.Normalize(settingsSession.Current with { PinDock = desired });
+
+        saving = true;
+        ApplyButton.IsEnabled = false;
+        PinDockToggle.IsEnabled = false;
+
+        try
+        {
+            await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
+            if (closed || shutdown.IsRequested)
+                return;
+
+            settingsSession.Replace(edited);
+            SetStatus(desired
+                ? "Pin Dock enabled. Doky is attaching to the bottom edge."
+                : "Pin Dock disabled. Doky is returning to its floating position.",
+                success: true);
+        }
+        catch (OperationCanceledException) when (shutdown.IsRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            if (!closed)
+            {
+                populating = true;
+                PinDockToggle.IsOn = settingsSession.Current.PinDock;
+                populating = false;
+                UpdateBehaviorControlAvailability();
+                SetStatus($"Pin Dock could not be saved: {error.Message}", success: false);
+            }
+        }
+        finally
+        {
+            saving = false;
+            if (!closed && !shutdown.IsRequested)
+            {
+                ApplyButton.IsEnabled = true;
+                PinDockToggle.IsEnabled = true;
+            }
+        }
+    }
+
+    private void UpdateBehaviorControlAvailability()
+    {
+        var autoHideAvailable = !PinDockToggle.IsOn;
+        AutoHideDelayBox.IsEnabled = autoHideAvailable;
+        PeekDelayBox.IsEnabled = autoHideAvailable;
     }
 
     private void PopulateAbout()
@@ -351,7 +410,8 @@ public sealed partial class SettingsWindow : Window
                 BorderThicknessBox.Value,
                 BorderOpacityBox.Value / 100,
                 SelectedDisplayMode,
-                HoverWaveToggle.IsOn) with
+                HoverWaveToggle.IsOn,
+                PinDockToggle.IsOn) with
             {
                 DockAppearanceMode = SelectedDockAppearance,
                 LaunchAtStartup = desiredStartup
@@ -469,7 +529,8 @@ public sealed partial class SettingsWindow : Window
         var edited = GlassDockSettings.Normalize(current with
         {
             DockDisplayMode = GlassDockSettings.DefaultDockDisplayMode,
-            BottomMargin = GlassDockSettings.DefaultBottomMargin
+            BottomMargin = GlassDockSettings.DefaultBottomMargin,
+            PinDock = GlassDockSettings.DefaultPinDock
         });
 
         await SaveRecoverySettingsAsync(edited, "Dock placement reset to the primary display defaults.");

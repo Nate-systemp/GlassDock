@@ -150,11 +150,22 @@
                 <StackPanel x:Name="BehaviorPage" Spacing="18" Visibility="Collapsed">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Behavior" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
-                        <TextBlock Text="Control how Doky responds to your pointer." FontSize="13" Foreground="#FF6B6B6B"/>
+                        <TextBlock Text="Control how Doky stays visible and responds to your pointer." FontSize="13" Foreground="#FF6B6B6B"/>
                     </StackPanel>
 
                     <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
                         <StackPanel Spacing="18">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Pin dock" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Keep Doky expanded and attached to the bottom edge of the screen. Auto-hide and peek are paused while pinned." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <ToggleSwitch x:Name="PinDockToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="PinDockToggleToggled" AutomationProperties.Name="Pin Doky to the bottom edge"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
                             <Grid ColumnSpacing="24">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="3" VerticalAlignment="Center">

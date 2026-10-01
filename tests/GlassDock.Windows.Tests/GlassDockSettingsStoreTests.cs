@@ -77,6 +77,7 @@ public sealed class GlassDockSettingsStoreTests
         var expected = new GlassDockSettings
         {
             LaunchAtStartup = true,
+            PinDock = true,
             SuppressWindowsTaskbar = false,
             BottomMargin = 42,
             AutoHideDelayMilliseconds = 2500,
@@ -177,6 +178,7 @@ public sealed class GlassDockSettingsStoreTests
         var settings = await store.LoadAsync();
 
         Assert.True(settings.LaunchAtStartup);
+        Assert.False(settings.PinDock);
         Assert.False(settings.SuppressWindowsTaskbar);
         Assert.Equal(40, settings.BottomMargin);
         Assert.Equal(GlassDockSettings.DefaultIconSize, settings.IconSize);

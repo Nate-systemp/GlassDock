@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Collections.ObjectModel;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
@@ -108,6 +108,7 @@ public sealed class DesktopOverlayWindow : Window
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer displayTimer;
     private long dockWaveLastFrame;
     private CancellationTokenSource? collapseDelay;
+    private CancellationTokenSource? pinDockTransition;
 
     private CancellationTokenSource? pillHideDelay;
     private TaskbarDevelopmentSession? taskbarSession;
@@ -120,6 +121,9 @@ public sealed class DesktopOverlayWindow : Window
     private bool startingTest;
     private bool desktopStartupQueued;
     private bool desktopStarted;
+    private bool pinDockRequested;
+    private bool pinnedPlacementActive;
+    private bool pinDockTransitionActive;
     private Task? taskbarOperation;
     private Task? taskbarRestoreOperation;
     private int taskbarRevision;
@@ -174,12 +178,17 @@ public sealed class DesktopOverlayWindow : Window
 
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
+    private const double ExpandedDockCornerRadius = 34;
+    private const double PinnedDockClipDepth = ExpandedDockCornerRadius;
+    private const int PinnedDockTransitionDurationMilliseconds = 280;
     private const double PillHideDurationMilliseconds = 210;
 
     public double BottomMargin { get; private set; }
     private DockAppearanceSettings Appearance => settingsSession.Appearance;
     private bool HoverWaveEnabled => !safeMode && settingsSession.Current.HoverWaveEnabled;
     private double ExpandedDockHeight => Math.Max(68, Appearance.ButtonHeight + 24);
+    private double ExpandedContentTop => root.ActualHeight - icons.Margin.Bottom - ExpandedDockHeight;
+    private bool DockPinLock => pinDockRequested || pinnedPlacementActive || pinDockTransitionActive;
     private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => desktopBackdrop.RenderingMode;
@@ -203,6 +212,7 @@ public sealed class DesktopOverlayWindow : Window
         this.safeMode = safeMode;
         this.prepareRestart = prepareRestart;
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
+        pinDockRequested = settingsSession.Current.PinDock;
         settingsSession.Changed += SettingsChanged;
 
         Title = "Doky — Floating Dock";
@@ -254,7 +264,7 @@ public sealed class DesktopOverlayWindow : Window
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
-        previews = new(applications, root, hwnd, () => root.ActualHeight - BottomMargin - ExpandedDockHeight);
+        previews = new(applications, root, hwnd, () => ExpandedContentTop);
         previews.HoldChanged += (_, _) => OnInteractionHoldChanged();
         previews.ActionFailed += (_, message) => SetStatus(message);
         AppWindow.Changed += (_, _) =>
@@ -415,6 +425,9 @@ keyboard.RecoveryRequested +=
         applicationService.Start();
         RefreshUtilityStatus();
         utilityTimer.Start();
+
+        if (pinDockRequested)
+            await ApplyPinDockModeAsync(pin: true, animate: true);
 
         if (safeMode)
         {
@@ -782,7 +795,7 @@ keyboard.RecoveryRequested +=
             return;
         }
 
-        var top = root.ActualHeight - BottomMargin - ExpandedDockHeight;
+        var top = ExpandedContentTop;
 
         if (quickSettings is not null)
         {
@@ -857,7 +870,7 @@ keyboard.RecoveryRequested +=
         quickSettingsOpen = true;
         var anchor = UtilityAnchor(quickSettingsSource);
         quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
-            root.ActualHeight - BottomMargin - ExpandedDockHeight);
+            ExpandedContentTop);
         quickSettings.AppWindow.Show();
         quickSettings.Activate();
         quickSettings.Present();
@@ -916,7 +929,7 @@ keyboard.RecoveryRequested +=
         trayWindowOpen = true;
         var anchor = UtilityAnchor(trayWindowSource);
         trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
-            root.ActualHeight - BottomMargin - ExpandedDockHeight);
+            ExpandedContentTop);
         trayWindow.AppWindow.Show();
         trayWindow.Activate();
         trayWindow.Present();
@@ -975,7 +988,7 @@ keyboard.RecoveryRequested +=
         calendarWindowOpen = true;
         var anchor = UtilityAnchor(calendarWindowSource);
         calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
-            root.ActualHeight - BottomMargin - ExpandedDockHeight);
+            ExpandedContentTop);
         calendarWindow.AppWindow.Show();
         calendarWindow.Activate();
         calendarWindow.Present();
@@ -1855,7 +1868,7 @@ keyboard.RecoveryRequested +=
     private void Entered(object sender, PointerRoutedEventArgs e)
     {
         // Moving geometry must not simulate a new physical hover.
-        if (animation.IsPlacementAnimating) return;
+        if (animation.IsPlacementAnimating || pinDockTransitionActive) return;
         if (!windowManager.IsPointerInsideInput()) return;
         pointerInsideDock = true;
         collapseDelay?.Cancel();
@@ -1868,6 +1881,7 @@ keyboard.RecoveryRequested +=
 
     private void RaisePeek()
     {
+        if (DockPinLock) return;
         state.Enter();
         indicator.Opacity = 1;
         animation.AnimateBottom(BottomMargin, 180);
@@ -1915,7 +1929,8 @@ keyboard.RecoveryRequested +=
 
     private void RefreshHoverVisuals()
     {
-        if (previews.ContextMenuOpen ||
+        if (pinDockTransitionActive ||
+            previews.ContextMenuOpen ||
             externalDragActive ||
             reorderButton is not null ||
             SystemPopupOpen ||
@@ -2170,7 +2185,7 @@ keyboard.RecoveryRequested +=
         var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(
             (root.ActualWidth - surface.ActualWidth) / 2,
             root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight,
-            surface.ActualWidth, surface.ActualHeight, 34,
+            surface.ActualWidth, surface.ActualHeight, ExpandedDockCornerRadius,
             centerX, DockWaveHalfWidth, DockWaveRise, strength);
         static global::Windows.Foundation.Point Point(GlassDock.Core.Desktop.DockWaveGeometry.Point p) => new(p.X, p.Y);
         var figure = new PathFigure { StartPoint = Point(outline.Start), IsClosed = true };
@@ -2210,8 +2225,10 @@ keyboard.RecoveryRequested +=
             Math.Max(
                 0,
                 Math.Min(
-                    dockHeight / 2,
-                    dockWidth / 2));
+                    ExpandedDockCornerRadius,
+                    Math.Min(
+                        dockHeight / 2,
+                        dockWidth / 2)));
 
         var left =
             (root.ActualWidth -
@@ -2327,6 +2344,11 @@ keyboard.RecoveryRequested +=
             return Task.CompletedTask;
         }
 
+        if (DockPinLock)
+            return state.State is DockState.Expanded or DockState.Expanding
+                ? Task.CompletedTask
+                : ExpandDockAsync();
+
         return state.State is DockState.Expanded or DockState.Expanding
             ? CollapseDockAsync()
             : ExpandDockAsync();
@@ -2362,12 +2384,12 @@ keyboard.RecoveryRequested +=
 
     private void Exited(object sender, PointerRoutedEventArgs e)
     {
-        if (animation.IsPlacementAnimating) return;
+        if (animation.IsPlacementAnimating || pinDockTransitionActive) return;
         if (!windowManager.IsPointerInsideInput()) PointerDeparted();
     }
     private async Task CollapseDockAsync()
     {
-        if (previews.HoldsDock || SystemPopupOpen) return;
+        if (DockPinLock || previews.HoldsDock || SystemPopupOpen) return;
         previews.Hide();
 
         CancelPillHide();
@@ -2406,7 +2428,7 @@ keyboard.RecoveryRequested +=
 
     private async void SchedulePillHide()
     {
-        if (pillHideDelay is not null || closing || previews.HoldsDock ||
+        if (DockPinLock || pillHideDelay is not null || closing || previews.HoldsDock ||
             state.State is not (DockState.Idle or DockState.Hovering) ||
             surface.Margin.Bottom <= PeekRestBottom + 0.01) return;
         var delay = new CancellationTokenSource();
@@ -2431,7 +2453,7 @@ keyboard.RecoveryRequested +=
     }
     private async void ScheduleCollapse()
     {
-        if (collapseDelay is { IsCancellationRequested: false } || closing || previews.HoldsDock) return;
+        if (DockPinLock || collapseDelay is { IsCancellationRequested: false } || closing || previews.HoldsDock) return;
         var delay = new CancellationTokenSource();
         collapseDelay = delay;
         try
@@ -2445,10 +2467,167 @@ keyboard.RecoveryRequested +=
         finally { if (ReferenceEquals(collapseDelay, delay)) collapseDelay = null; delay.Dispose(); }
     }
 
+    private async Task ApplyPinDockModeAsync(bool pin, bool animate)
+    {
+        pinDockTransition?.Cancel();
+
+        var transition = new CancellationTokenSource();
+        pinDockTransition = transition;
+        pinDockTransitionActive = true;
+        collapseDelay?.Cancel();
+        CancelPillHide();
+        animation.ResetMagnification();
+        HideDockWave();
+
+        try
+        {
+            if (state.State is DockState.Expanding or DockState.Collapsing)
+                await WaitForDockTransitionAsync(transition.Token);
+
+            if (pin)
+            {
+                if (state.State != DockState.Expanded)
+                    await ExpandDockAsync();
+
+                if (state.State == DockState.Expanding)
+                    await WaitForDockTransitionAsync(transition.Token);
+
+                if (transition.IsCancellationRequested || closing || state.State != DockState.Expanded)
+                    return;
+
+                var workAreaReserved = windowManager.SetReservedBottomSpace(ExpandedDockHeight);
+
+                await AnimatePinnedPlacementAsync(true, animate, transition.Token);
+                transition.Token.ThrowIfCancellationRequested();
+                pinnedPlacementActive = true;
+                SetStatus(workAreaReserved
+                    ? "Dock pinned to the bottom edge. Maximized windows now stay above Doky."
+                    : "Dock pinned, but Windows could not reserve screen space for maximized windows.");
+            }
+            else
+            {
+                if (state.State == DockState.Expanded)
+                    await AnimatePinnedPlacementAsync(false, animate, transition.Token);
+                else
+                    SetPinnedPlacementInstant(pin: false);
+
+                transition.Token.ThrowIfCancellationRequested();
+                pinnedPlacementActive = false;
+                windowManager.ClearBottomWorkAreaReservation();
+                SetStatus($"Dock unpinned · full Windows work area restored · bottom spacing {BottomMargin:0} DIP.");
+            }
+        }
+        catch (OperationCanceledException) when (transition.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(pinDockTransition, transition))
+            {
+                pinDockTransition = null;
+                pinDockTransitionActive = false;
+
+                if (!closing && !shutdown.IsRequested)
+                {
+                    pointerInsideDock = windowManager.IsPointerInsideInput();
+                    RefreshHoverVisuals();
+                    if (!pinDockRequested && !pinnedPlacementActive && !pointerInsideDock &&
+                        state.State is DockState.Expanded or DockState.Expanding)
+                    {
+                        ScheduleCollapse();
+                    }
+                }
+            }
+
+            transition.Dispose();
+        }
+    }
+
+    private async Task WaitForDockTransitionAsync(CancellationToken cancellationToken)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (state.State is DockState.Expanding or DockState.Collapsing)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds > 1200)
+                break;
+            await Task.Delay(16, cancellationToken);
+        }
+    }
+
+    private async Task AnimatePinnedPlacementAsync(bool pin, bool animate, CancellationToken cancellationToken)
+    {
+        var startSurfaceBottom = surface.Margin.Bottom;
+        var startContentBottom = icons.Margin.Bottom;
+        var startIndicatorBottom = indicator.Margin.Bottom;
+        var startSurfaceHeight = surface.ActualHeight > 0 ? surface.ActualHeight : surface.Height;
+
+        var targetSurfaceBottom = pin ? -PinnedDockClipDepth : BottomMargin;
+        var targetContentBottom = pin ? 0 : BottomMargin;
+        var targetSurfaceHeight = ExpandedDockHeight + (pin ? PinnedDockClipDepth : 0);
+
+        if (!animate)
+        {
+            SetPinnedPlacementFrame(
+                targetSurfaceBottom,
+                targetContentBottom,
+                targetContentBottom,
+                targetSurfaceHeight);
+            return;
+        }
+
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            var progress = Math.Clamp(elapsed / PinnedDockTransitionDurationMilliseconds, 0, 1);
+            var eased = progress * progress * (3 - 2 * progress);
+
+            SetPinnedPlacementFrame(
+                Lerp(startSurfaceBottom, targetSurfaceBottom, eased),
+                Lerp(startContentBottom, targetContentBottom, eased),
+                Lerp(startIndicatorBottom, targetContentBottom, eased),
+                Lerp(startSurfaceHeight, targetSurfaceHeight, eased));
+
+            if (progress >= 1)
+                break;
+
+            await Task.Delay(16, cancellationToken);
+        }
+    }
+
+    private void SetPinnedPlacementInstant(bool pin)
+    {
+        SetPinnedPlacementFrame(
+            pin ? -PinnedDockClipDepth : BottomMargin,
+            pin ? 0 : BottomMargin,
+            pin ? 0 : BottomMargin,
+            ExpandedDockHeight + (pin ? PinnedDockClipDepth : 0));
+    }
+
+    private void SetPinnedPlacementFrame(
+        double surfaceBottom,
+        double contentBottom,
+        double indicatorBottom,
+        double surfaceHeight)
+    {
+        surface.Height = Math.Max(ExpandedDockHeight, surfaceHeight);
+        surface.Margin = new Thickness(0, 0, 0, surfaceBottom);
+        icons.Margin = new Thickness(0, 0, 0, contentBottom);
+        indicator.Margin = new Thickness(0, 0, 0, indicatorBottom);
+
+        UpdateBackdropBounds();
+        UpdateDockWaveOutline();
+        UpdateExternalDropHighlight();
+        if (SystemPopupOpen) RepositionSystemPopups();
+        previews.Reposition();
+    }
+
     private void ApplyMaterial(bool expanded, DockAppearanceMode? dockAppearance = null)
     {
         var mode = dockAppearance ?? settingsSession.Current.DockAppearanceMode;
-        var cornerRadius = expanded ? 34 : 2.5;
+        var cornerRadius = expanded ? ExpandedDockCornerRadius : 2.5;
         const double opacity = 1;
 
         // The main dock is a plain solid surface. DesktopGlassBackdrop still
@@ -2526,6 +2705,9 @@ keyboard.RecoveryRequested +=
         object? sender,
         GlassDockSettingsChangedEventArgs eventArgs)
     {
+        var pinChanged = pinDockRequested != eventArgs.Settings.PinDock;
+        pinDockRequested = eventArgs.Settings.PinDock;
+
         ApplyBottomMargin(eventArgs.Settings.BottomMargin);
         ApplyDisplayMode(eventArgs.Settings.DockDisplayMode);
         ApplyHoverWaveSetting(eventArgs.Settings.HoverWaveEnabled);
@@ -2539,6 +2721,9 @@ keyboard.RecoveryRequested +=
             eventArgs.Settings.BorderThickness,
             eventArgs.Settings.BorderOpacity),
             eventArgs.Settings.DockAppearanceMode);
+
+        if (pinChanged || (pinDockRequested && !pinnedPlacementActive && !pinDockTransitionActive))
+            _ = ApplyPinDockModeAsync(pinDockRequested, animate: true);
     }
 
     private void ApplyAppearance(DockAppearanceSettings appearance) =>
@@ -2553,6 +2738,8 @@ keyboard.RecoveryRequested +=
         cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
+        if (pinnedPlacementActive)
+            windowManager.SetReservedBottomSpace(Math.Max(68, appearance.ButtonHeight + 24));
         animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
         dockWaveRim.StrokeThickness = 0;
         dockWaveRim.Opacity = 0;
@@ -2589,7 +2776,7 @@ keyboard.RecoveryRequested +=
         if (state.State is DockState.Expanded)
         {
             surface.Width = CalculateTargetDockWidth();
-            surface.Height = ExpandedDockHeight;
+            surface.Height = ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0);
             ApplyMaterial(expanded: true, dockAppearance: dockAppearance);
         }
         else
@@ -2626,14 +2813,21 @@ keyboard.RecoveryRequested +=
             double.IsFinite(margin) ? margin : GlassDockSettings.DefaultBottomMargin,
             GlassDockSettings.MinimumBottomMargin,
             GlassDockSettings.MaximumBottomMargin);
-        icons.Margin = new Thickness(0, 0, 0, BottomMargin);
-        if (state.State == DockState.Expanded) animation.SetBottom(BottomMargin);
-        else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
+
+        if (!DockPinLock)
+        {
+            icons.Margin = new Thickness(0, 0, 0, BottomMargin);
+            if (state.State == DockState.Expanded) animation.SetBottom(BottomMargin);
+            else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
+        }
+
         windowManager.Position(0, settingsSession.DisplayMode);
         if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
         else UpdateDockWaveOutline();
         UpdateBackdropBounds();
-        SetStatus($"Expanded dock bottom margin: {BottomMargin:0} DIP.");
+        SetStatus(DockPinLock
+            ? $"Pinned dock active · normal bottom spacing remains {BottomMargin:0} DIP."
+            : $"Expanded dock bottom margin: {BottomMargin:0} DIP.");
         previews.Reposition();
     }
 
@@ -2874,6 +3068,7 @@ keyboard.RecoveryRequested +=
         state.Hide();
         heldTransition = false;
         collapseDelay?.Cancel();
+        pinDockTransition?.Cancel();
 
         CancelPillHide();
         heartbeat.Stop();

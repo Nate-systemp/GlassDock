@@ -16,6 +16,23 @@ public sealed class WindowsOverlayManager : IDisposable
     private nint inputRegion;
     private const nuint InputTimer = 0x4744;
     private const nuint TopmostTimer = 0x4745;
+
+    // Private application-defined callback used by the shell appbar contract.
+    // Registering the dock as a bottom-edge appbar lets Windows reserve work
+    // area for maximized windows while the visible Doky window stays centered.
+    private const uint AppBarCallbackMessage = 0x8044; // WM_APP + 0x44
+    private const uint AbmNew = 0x00000000;
+    private const uint AbmRemove = 0x00000001;
+    private const uint AbmQueryPos = 0x00000002;
+    private const uint AbmSetPos = 0x00000003;
+    private const uint AbnPosChanged = 0x00000001;
+    private const uint AbeBottom = 3;
+
+    private bool appBarRegistered;
+    private bool applyingAppBarReservation;
+    private double reservedBottomSpaceDips;
+    private nint reservationMonitor;
+    private int preexistingBottomWorkAreaPixels;
     private bool expandedInput;
     private bool transparentInput;
     private NativeMethods.Point? previousPointer;
@@ -84,6 +101,13 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private nint WindowMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
+        if (message == AppBarCallbackMessage)
+        {
+            if ((uint)wParam == AbnPosChanged && reservedBottomSpaceDips > 0)
+                ApplyBottomWorkAreaReservation();
+            return 0;
+        }
+
         if (message == 0x0113 && wParam == TopmostTimer)
         {
             // One-shot startup settle. Do not keep a permanent z-order polling timer.
@@ -138,6 +162,7 @@ public sealed class WindowsOverlayManager : IDisposable
     }
     public void Dispose()
     {
+        ClearBottomWorkAreaReservation();
         NativeMethods.KillTimer(hwnd, InputTimer);
         NativeMethods.KillTimer(hwnd, TopmostTimer);
         if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
@@ -207,6 +232,9 @@ public sealed class WindowsOverlayManager : IDisposable
         currentMonitorScale = scale;
         hasCurrentMonitorMetrics = true;
 
+        if (reservedBottomSpaceDips > 0)
+            ApplyBottomWorkAreaReservation();
+
         if (monitorChanged)
         {
             // The interaction polygon is stored in physical pixels. Force it to be
@@ -218,6 +246,143 @@ public sealed class WindowsOverlayManager : IDisposable
 
         EnsureTopmost();
         return rect;
+    }
+
+    /// <summary>
+    /// Reserves a full-width strip at the bottom edge of the dock's current
+    /// monitor. Windows then sizes normal maximized windows above that strip,
+    /// while Doky's own HWND remains the centered transparent overlay host.
+    /// </summary>
+    public bool SetReservedBottomSpace(double heightDips)
+    {
+        if (!double.IsFinite(heightDips) || heightDips <= 0)
+        {
+            ClearBottomWorkAreaReservation();
+            return true;
+        }
+
+        reservedBottomSpaceDips = heightDips;
+
+        if (!appBarRegistered)
+        {
+            CapturePreexistingBottomWorkArea();
+            var registration = CreateAppBarData();
+            if (NativeMethods.SHAppBarMessage(AbmNew, ref registration) == 0)
+            {
+                reservedBottomSpaceDips = 0;
+                return false;
+            }
+
+            appBarRegistered = true;
+        }
+
+        return ApplyBottomWorkAreaReservation();
+    }
+
+    /// <summary>
+    /// Removes Doky's shell appbar registration so the monitor work area is
+    /// returned to Windows immediately when Pin Dock is disabled or Doky exits.
+    /// </summary>
+    public void ClearBottomWorkAreaReservation()
+    {
+        reservedBottomSpaceDips = 0;
+
+        if (appBarRegistered)
+        {
+            var data = CreateAppBarData();
+            NativeMethods.SHAppBarMessage(AbmRemove, ref data);
+            appBarRegistered = false;
+        }
+
+        reservationMonitor = 0;
+        preexistingBottomWorkAreaPixels = 0;
+    }
+
+    private void CapturePreexistingBottomWorkArea()
+    {
+        var monitor = currentMonitor != 0
+            ? currentMonitor
+            : NativeMethods.MonitorFromWindow(hwnd, 2); // MONITOR_DEFAULTTONEAREST
+
+        if (monitor == 0)
+            return;
+
+        var info = new NativeMethods.MonitorInfo
+        {
+            Size = Marshal.SizeOf<NativeMethods.MonitorInfo>()
+        };
+
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info))
+            return;
+
+        reservationMonitor = monitor;
+        preexistingBottomWorkAreaPixels = Math.Max(0, info.Monitor.Bottom - info.Work.Bottom);
+    }
+
+    private NativeMethods.AppBarData CreateAppBarData() => new()
+    {
+        Size = (uint)Marshal.SizeOf<NativeMethods.AppBarData>(),
+        Window = hwnd,
+        CallbackMessage = AppBarCallbackMessage,
+        Edge = AbeBottom
+    };
+
+    private bool ApplyBottomWorkAreaReservation()
+    {
+        if (!appBarRegistered || reservedBottomSpaceDips <= 0 || applyingAppBarReservation)
+            return appBarRegistered;
+
+        var monitor = currentMonitor != 0
+            ? currentMonitor
+            : NativeMethods.MonitorFromWindow(hwnd, 2); // MONITOR_DEFAULTTONEAREST
+
+        if (monitor == 0)
+            return false;
+
+        var info = new NativeMethods.MonitorInfo
+        {
+            Size = Marshal.SizeOf<NativeMethods.MonitorInfo>()
+        };
+
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info))
+            return false;
+
+        if (reservationMonitor != monitor)
+            CapturePreexistingBottomWorkArea();
+
+        var scale = hasCurrentMonitorMetrics && currentMonitor == monitor
+            ? currentMonitorScale
+            : GetMonitorScale(monitor);
+
+        // The Windows taskbar may already reserve part of the monitor bottom.
+        // AppBars stack, so asking for the dock's full visible height here would
+        // reserve taskbar height + dock height and push maximized windows too far
+        // upward. Reserve only the additional pixels needed for the combined
+        // bottom work-area inset to equal Doky's visible pinned height.
+        var desiredTotalPixels = Math.Max(1,
+            (int)Math.Round(reservedBottomSpaceDips * Math.Max(scale, 0.001)));
+        var heightPixels = Math.Max(1, desiredTotalPixels - preexistingBottomWorkAreaPixels);
+
+        var data = CreateAppBarData();
+        data.Rectangle = info.Monitor;
+        data.Rectangle.Top = data.Rectangle.Bottom - heightPixels;
+
+        applyingAppBarReservation = true;
+        try
+        {
+            NativeMethods.SHAppBarMessage(AbmQueryPos, ref data);
+
+            // ABM_QUERYPOS may move the requested edge around other appbars.
+            // Preserve the shell-selected bottom edge and restore Doky's height.
+            data.Rectangle.Top = data.Rectangle.Bottom - heightPixels;
+
+            var result = NativeMethods.SHAppBarMessage(AbmSetPos, ref data);
+            return result != 0;
+        }
+        finally
+        {
+            applyingAppBarReservation = false;
+        }
     }
 
     public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode)

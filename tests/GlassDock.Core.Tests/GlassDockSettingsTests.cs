@@ -28,7 +28,7 @@ public sealed class GlassDockSettingsTests
         {
             DockAppearanceMode = (DockAppearanceMode)99
         }).DockAppearanceMode);
-        var original = new GlassDockSettings { IconSize = 36, LaunchAtStartup = true,
+        var original = new GlassDockSettings { IconSize = 36, LaunchAtStartup = true, PinDock = true,
             GlassMaterialMode = GlassMaterialMode.Clear, DockOpacity = .4 };
         var session = new GlassDockSettingsSession(original);
         var changes = 0;
@@ -41,6 +41,7 @@ public sealed class GlassDockSettingsTests
         Assert.False(session.Replace(edited));
         var reset = session.CreateDefaultEditableSettings();
         Assert.Equal(DockAppearanceMode.Dark, reset.DockAppearanceMode);
+        Assert.False(reset.PinDock);
         Assert.Equal(DockAppearanceMode.Light, session.Current.DockAppearanceMode);
         Assert.True(reset.LaunchAtStartup);
     }
@@ -52,6 +53,7 @@ public sealed class GlassDockSettingsTests
 
         Assert.Equal(1, settings.SchemaVersion);
         Assert.False(settings.LaunchAtStartup);
+        Assert.False(settings.PinDock);
         Assert.True(settings.SuppressWindowsTaskbar);
         Assert.Equal(24, settings.BottomMargin);
         Assert.Equal(1000, settings.AutoHideDelayMilliseconds);
@@ -168,7 +170,8 @@ public sealed class GlassDockSettingsTests
         var session = new GlassDockSettingsSession(new()
         {
             LaunchAtStartup = true,
-            SuppressWindowsTaskbar = false
+            SuppressWindowsTaskbar = false,
+            PinDock = true
         });
         var changes = 0;
         session.Changed += (_, _) => changes++;
@@ -181,6 +184,7 @@ public sealed class GlassDockSettingsTests
         Assert.Equal(TimeSpan.FromMilliseconds(6400), session.DockBehavior.PeekDelay);
         Assert.True(session.Current.LaunchAtStartup);
         Assert.False(session.Current.SuppressWindowsTaskbar);
+        Assert.True(session.Current.PinDock);
         Assert.Equal(1, changes);
         Assert.False(session.Replace(edited));
         Assert.Equal(1, changes);
@@ -211,6 +215,7 @@ public sealed class GlassDockSettingsTests
         Assert.Equal(GlassDockSettings.DefaultBorderThickness, reset.BorderThickness);
         Assert.Equal(GlassDockSettings.DefaultBorderOpacity, reset.BorderOpacity);
         Assert.Equal(GlassMaterialMode.Frosted, reset.GlassMaterialMode);
+        Assert.False(reset.PinDock);
         Assert.True(reset.LaunchAtStartup);
         Assert.False(reset.SuppressWindowsTaskbar);
     }

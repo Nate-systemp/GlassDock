@@ -25,6 +25,7 @@ public sealed record GlassDockSettings
     public const double DefaultBorderThickness = 1.05;
     public const double DefaultBorderOpacity = 0.78;
     public const bool DefaultHoverWaveEnabled = true;
+    public const bool DefaultPinDock = false;
     public const bool DefaultLaunchAtStartup = false;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
     public const DockAppearanceMode DefaultDockAppearanceMode = DockAppearanceMode.Dark;
@@ -65,6 +66,7 @@ public sealed record GlassDockSettings
     public double BorderThickness { get; init; } = DefaultBorderThickness;
     public double BorderOpacity { get; init; } = DefaultBorderOpacity;
     public bool HoverWaveEnabled { get; init; } = DefaultHoverWaveEnabled;
+    public bool PinDock { get; init; } = DefaultPinDock;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
     public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
