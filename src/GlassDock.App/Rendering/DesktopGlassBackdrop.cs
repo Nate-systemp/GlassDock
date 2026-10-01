@@ -16,8 +16,23 @@ namespace GlassDock.App.Rendering;
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
     public bool UseInnerEdge { get; set; }
+    // Popup-only: soften Acrylic's lightly diffused base so the 12% base stream
+    // cannot bring sharp wallpaper details back over the blurred material.
+    // The main dock and Clear composition paths never enable this option.
+    public bool UsePopupBlur { get; set; }
+    // The dock's validated CreateBackdropBrush path is the default for
+    // utility popups once their native HWNDs have the same layered DWM client.
+    // Optional host sampling can be enabled for an A/B runtime comparison on
+    // Windows versions where the regular source does not include desktop pixels.
+    public bool UseHostBackdropForPopup { get; set; }
+    private bool ConnectedSourceIsHost => UsePopupBlur && UseHostBackdropForPopup;
+    private bool connectedWithHostBackdrop;
     private GlassMaterialMode? dockStyle;
     private ClearDockSpecular? clearSpecular;
+    // An optional Clear-only composition path must not crash the entire dock
+    // when a GPU/Windows compositor rejects one of its source brush types.
+    // Keep the existing edge treatment as the supported fallback.
+    private bool clearSpecularUnavailable;
 
     public void ApplyMainDock(GlassMaterialMode style, GlassMaterial value)
     {
@@ -205,11 +220,103 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private int connectionVersion;
     private FrameworkElement? loadingRoot;
     private RoutedEventHandler? loadedHandler;
+    // Keep the WinUI SystemBackdrop attached to the Window across appearance changes.
+    // Replacing Window.SystemBackdrop during a live transition can leave its queued
+    // default-configuration callback holding an invalid native target.
+    private ICompositionSupportsSystemBackdrop? connectedTarget;
+    private FrameworkElement? connectedRoot;
+
+    /// <summary>
+    /// Rebuilds the solid/glass native pipeline under the SAME XAML backdrop
+    /// attachment. Only the underlying composition brush is swapped; WinUI's
+    /// Window.SystemBackdrop property is never detached during theme switching.
+    /// Must be called on the window's UI dispatcher after selecting the new mode.
+    /// </summary>
+    public void RebuildConnectedSurface()
+    {
+        var target = connectedTarget;
+        if (target is null || compositor is null)
+        {
+            // On initial construction the loaded callback will connect using
+            // the latest mode. Basic-rendering fallback also stays intact.
+            return;
+        }
+
+        try
+        {
+            ReleaseDesktop(target);
+            ConnectDesktop(target);
+            if (connectedRoot is not null)
+                SetSurfaceFallback(connectedRoot, false);
+        }
+        catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
+        {
+            // Recover only from native composition failures, as at first load.
+            // Do not swallow unrelated UI or application exceptions.
+            ReleaseDesktop(target);
+            if (Application.Current is App app)
+                app.DisableDesktopComposition(error);
+            RenderingMode = "Basic XAML surface · desktop composition unavailable";
+            if (connectedRoot is not null)
+                SetSurfaceFallback(connectedRoot, true);
+            RenderingModeChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Switch the sampling source directly on the existing effect brush. Never
+    /// detach or rebuild a cached utility SystemBackdrop on a mode change:
+    /// WinUI may have a queued configuration callback against its native target.
+    /// Keeping the brush, mask, specular edge, and HWND intact also preserves
+    /// live popup presentation animations.
+    /// </summary>
+    public void RefreshPopupBackdropSource()
+    {
+        // Preserve Window.SystemBackdrop and both existing composition
+        // effect objects. Only the *source brush* can change live.
+        var wantsHost = ConnectedSourceIsHost;
+        if (compositor is null || effect is null || UseSolidSurface ||
+            connectedWithHostBackdrop == wantsHost)
+            return;
+
+        W.CompositionBackdropBrush? replacement = null;
+        try
+        {
+            replacement = wantsHost
+                ? compositor.CreateHostBackdropBrush()
+                : compositor.CreateBackdropBrush();
+            effect.SetSourceParameter("Backdrop", replacement);
+            effect.SetSourceParameter("BaseBackdrop", replacement);
+            var previous = source;
+            source = replacement;
+            replacement = null;
+            connectedWithHostBackdrop = wantsHost;
+            previous?.Dispose();
+            RenderingMode = connectedWithHostBackdrop
+                ? "Native utility backdrop · opt-in host source"
+                : UsePopupBlur
+                    ? "Native utility backdrop · main-dock layered source"
+                    : "Native system backdrop · shared glass graph";
+            System.Diagnostics.Debug.WriteLine($"[UtilityBackdrop] Switched native source: {RenderingMode}");
+            StartupDiagnostics.Write($"Utility backdrop source: {RenderingMode}");
+            RenderingModeChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
+        {
+            // Do not tear down a functioning popup when optional host sampling
+            // is unsupported (e.g. DWM disabled or remote desktop session).
+            StartupDiagnostics.Write("Utility host backdrop source unavailable", error);
+            replacement?.Dispose();
+        }
+    }
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(target, xamlRoot);
+        connectedTarget = target;
+        connectedRoot = xamlRoot.Content as FrameworkElement;
         var version = ++connectionVersion;
+        StartupDiagnostics.Write($"Backdrop target connected: root={xamlRoot.Content?.GetType().Name ?? "missing"}");
         if (xamlRoot.Content is not FrameworkElement root) return;
         void QueueConnection()
         {
@@ -319,7 +426,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var stage = "backdrop source";
         try
         {
-            source = compositor.CreateBackdropBrush();
+            // Default to the same source as the WORKING main dock. Previously
+            // utility HWNDs omitted WS_EX_LAYERED, so unlike the dock they did
+            // not have a compatible desktop sampling client. The optional host
+            // brush remains available as a controlled A/B diagnostic path.
+            connectedWithHostBackdrop = ConnectedSourceIsHost;
+            source = connectedWithHostBackdrop
+                ? compositor.CreateHostBackdropBrush()
+                : compositor.CreateBackdropBrush();
             stage = "effect factory";
             // Separate named leaves keep the graph tree-shaped. The selected main-dock
             // style controls base diffusion; popups retain their fully blurred base.
@@ -389,7 +503,16 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 edgeEffect.SetSourceParameter("EdgeMask", edgeMask);
                 output.Source = edgeEffect;
             }
-            RenderingMode = "Native system backdrop · shared glass graph";
+            RenderingMode = connectedWithHostBackdrop
+                ? "Native utility backdrop · opt-in host source"
+                : UsePopupBlur
+                    ? "Native utility backdrop · main-dock layered source"
+                    : "Native system backdrop · shared glass graph";
+            System.Diagnostics.Debug.WriteLine($"[UtilityBackdrop] {RenderingMode}; " +
+                $"blur={material.BlurAmount:0.##} DIP; host={connectedWithHostBackdrop}");
+            if (UsePopupBlur)
+                StartupDiagnostics.Write($"Utility backdrop connected: {RenderingMode}, " +
+                    $"blur={material.BlurAmount:0.##} DIP");
             stage = "material parameters";
             Apply(material);
 
@@ -445,9 +568,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             foreach (var (name, scalar) in GlassEffectGraph.Scalars(material))
                 effect.Properties.InsertScalar(name, scalar);
 
-            effect.Properties.InsertScalar(
-                "BaseBlur.BlurAmount",
-                (float)DockMaterialRendering.BaseBlur(dockStyle, material.BlurAmount));
+            var baseBlur = DockMaterialRendering.BaseBlur(dockStyle, material.BlurAmount);
+            if (UsePopupBlur && dockStyle == GlassMaterialMode.Acrylic)
+            {
+                // Maintain Acrylic's two-layer texture but diffuse the
+                // backdrop sufficiently in utility popups to be noticeable.
+                baseBlur = Math.Max(baseBlur, Math.Min(material.BlurAmount, 18));
+            }
+            effect.Properties.InsertScalar("BaseBlur.BlurAmount", (float)baseBlur);
 
             effect.Properties.InsertColor(
                 "Tint.Color",
@@ -456,14 +584,33 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         if (UseInnerEdge && effect is not null && fallback is null && output is not null)
         {
-            if (dockStyle == GlassMaterialMode.Clear)
+            if (dockStyle == GlassMaterialMode.Clear && !clearSpecularUnavailable)
             {
-                clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, effect);
-                clearSpecular.Apply(material);
-                clearSpecular.SetVisible(true);
-                output.Source = clearSpecular.Brush;
-                UpdateClearBounds();
-                ApplyPresentation();
+                try
+                {
+                    clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, effect);
+                    clearSpecular.Apply(material);
+                    clearSpecular.SetVisible(true);
+                    UpdateClearBounds();
+                    ApplyPresentation();
+                    // Publish the optional result only after its initialization
+                    // and bounds update have both succeeded.
+                    output.Source = clearSpecular.Brush;
+                }
+                catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
+                {
+                    // The base effect and the existing vector edge remain valid.
+                    // Do not retry an unsupported native graph on every live switch.
+                    clearSpecularUnavailable = true;
+                    StartupDiagnostics.Write("Clear specular unavailable; using existing edge", error);
+                    try { clearSpecular?.Dispose(); }
+                    catch (Exception disposeError) when (OptionalComposition.IsRenderingFailure(disposeError))
+                    {
+                        StartupDiagnostics.Write("Clear specular cleanup failed", disposeError);
+                    }
+                    clearSpecular = null;
+                    output.Source = edgeEffect ?? effect;
+                }
             }
             else
             {
@@ -787,6 +934,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)
     {
+        connectedTarget = null;
+        connectedRoot = null;
         connectionVersion++;
         if (loadingRoot is not null && loadedHandler is not null)
             loadingRoot.Loaded -= loadedHandler;
@@ -864,5 +1013,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         source = null;
         solidSurface = null;
         compositor = null;
+        connectedWithHostBackdrop = false;
     }
 }

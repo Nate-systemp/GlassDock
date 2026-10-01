@@ -26,13 +26,14 @@ namespace GlassDock.App.Desktop;
 /// </summary>
 internal sealed class SystemTrayWindow : Window
 {
-    private const double PanelWidth = 360;
-    private const double PanelHeight = 286;
+    private const double PanelWidth = 352;
+    private const double PanelHeight = 406;
     private const double Gutter = UtilityPopupStyle.Gutter;
 
     private readonly WindowsSystemControlService controls;
     private readonly WindowsApplicationService applicationService;
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly Grid root = new() { Background = Brush(0) };
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new Thickness(Gutter) };
@@ -46,6 +47,7 @@ internal sealed class SystemTrayWindow : Window
     private readonly UtilityPopupPresentation presentation;
     private bool closed;
     private string[] itemKeys = [];
+    private IReadOnlyList<WindowsTrayAccessibility.TrayItem> displayedItems = [];
     private int refreshVersion;
     private bool refreshRunning;
     private CancellationTokenSource? iconLoadCts;
@@ -54,6 +56,7 @@ internal sealed class SystemTrayWindow : Window
         WindowsSystemControlService controls,
         WindowsApplicationService applicationService,
         DockAppearanceSettings appearance,
+        DockAppearanceMode dockMode,
         Func<bool>? utilityOwnsPointer = null)
     {
         this.controls = controls;
@@ -66,38 +69,49 @@ internal sealed class SystemTrayWindow : Window
         presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
 
-        UtilityPopupStyle.Apply(glass, backdrop, appearance);
-        SystemBackdrop = backdrop;
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, dockMode);
         root.Children.Add(glass);
-
+        root.Children.Add(new Border
+        {
+            Margin = new Thickness(Gutter),
+            CornerRadius = new CornerRadius(28),
+            Background = theme.Overlay,
+            IsHitTestVisible = false
+        });
         var content = new Grid
         {
-            Margin = new Thickness(Gutter + 20, Gutter + 18, Gutter + 20, Gutter + 18),
-            RowSpacing = 12
+            Margin = new Thickness(Gutter + 17, Gutter + 17, Gutter + 17, Gutter + 17),
+            RowSpacing = 10
         };
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(41) });
 
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new TextBlock
+        header.Children.Add(new TextBlock
         {
-            Text = "Hidden tray",
+            Text = "TRAY",
             FontFamily = new FontFamily("Segoe UI Variable Display"),
-            FontSize = 20,
+            FontSize = 10.5,
+            CharacterSpacing = 150,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = Brush(245),
+            Foreground = theme.Muted,
             VerticalAlignment = VerticalAlignment.Center
+        });
+        var headerActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5, VerticalAlignment = VerticalAlignment.Center
         };
-        header.Children.Add(title);
-        var refresh = IconButton("\uE72C", "Refresh tray", () => _ = RefreshAsync());
-        Grid.SetColumn(refresh, 1);
-        header.Children.Add(refresh);
+        headerActions.Children.Add(IconButton("\uE72C", "Refresh tray", () => _ = RefreshAsync()));
+        headerActions.Children.Add(IconButton("\uE712", "Windows tray settings", controls.OpenTraySettings));
+        Grid.SetColumn(headerActions, 1);
+        header.Children.Add(headerActions);
         content.Children.Add(header);
 
-        for (var i = 0; i < 4; i++)
+        for (var i = 0; i < 3; i++)
             trayGrid.ColumnDefinitions.Add(new ColumnDefinition());
 
         var scroll = new ScrollViewer
@@ -112,13 +126,15 @@ internal sealed class SystemTrayWindow : Window
         var footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        status.Foreground = theme.Muted;
+        status.VerticalAlignment = VerticalAlignment.Center;
+        status.FontSize = 11;
         footer.Children.Add(status);
         var settings = TextButton("Tray settings", controls.OpenTraySettings);
         Grid.SetColumn(settings, 1);
         footer.Children.Add(settings);
         Grid.SetRow(footer, 2);
         content.Children.Add(footer);
-
         root.Children.Add(content);
         Content = root;
         presentation = new UtilityPopupPresentation(
@@ -127,10 +143,16 @@ internal sealed class SystemTrayWindow : Window
             backdrop,
             utilityOwnsPointer);
 
-        host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this))
+        {
+            EnableHostBackdropBrush = true,
+            UseDockLayeredTransparency = true
+        };
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
+        SystemBackdrop = backdrop;
 
+        ApplyAppearance(appearance, dockMode);
         root.SizeChanged += (_, _) => UpdateBackdrop();
         root.Loaded += (_, _) =>
         {
@@ -167,8 +189,19 @@ internal sealed class SystemTrayWindow : Window
         remove => presentation.Dismissed -= value;
     }
 
-    public void ApplyAppearance(DockAppearanceSettings appearance) =>
-        UtilityPopupStyle.Apply(glass, backdrop, appearance);
+    public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
+    {
+        theme.Apply(mode);
+        root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        if (displayedItems.Count > 0)
+        {
+            // Rebuild only on mode change: real app icons remain loaded from
+            // their source and must not be replaced by decorative stand-ins.
+            itemKeys = [];
+            RenderItems(displayedItems);
+        }
+    }
 
     public void Present()
     {
@@ -237,6 +270,11 @@ internal sealed class SystemTrayWindow : Window
 
             RenderItems(items);
         }
+        catch (Exception)
+        {
+            if (!closed && version == refreshVersion)
+                status.Text = "Tray unavailable · open tray settings";
+        }
         finally
         {
             refreshRunning = false;
@@ -254,6 +292,9 @@ internal sealed class SystemTrayWindow : Window
             .Select(item => item.Name + "\n" + item.DefaultAction + "\n" + item.ExecutablePath + "\n" + item.Source)
             .ToArray();
 
+        status.Text = items.Count == 0
+            ? "No active tray apps"
+            : $"{items.Count} tray app{(items.Count == 1 ? "" : "s")}";
         if (itemKeys.SequenceEqual(nextKeys) && trayGrid.Children.Count > 0)
         {
             // Preserve focus, pointer capture, and scroll position during refresh.
@@ -263,6 +304,7 @@ internal sealed class SystemTrayWindow : Window
             return;
         }
 
+        displayedItems = items.ToArray();
         itemKeys = nextKeys;
         iconLoadCts?.Cancel();
         iconLoadCts?.Dispose();
@@ -273,8 +315,7 @@ internal sealed class SystemTrayWindow : Window
 
         if (items.Count == 0)
         {
-            status.Text =
-                "Windows did not expose any active hidden tray items.";
+            status.Text = "No active tray apps";
 
             trayGrid.RowDefinitions.Add(
                 new RowDefinition
@@ -286,26 +327,25 @@ internal sealed class SystemTrayWindow : Window
             {
                 Text = "No active hidden tray apps are available right now.",
                 FontSize = 13,
-                Foreground = Brush(205),
+                Foreground = theme.Secondary,
                 TextWrapping = TextWrapping.Wrap,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(12, 34, 12, 12)
             };
 
-            Grid.SetColumnSpan(empty, 4);
+            Grid.SetColumnSpan(empty, 3);
             trayGrid.Children.Add(empty);
             return;
         }
 
-        status.Text =
-            $"{items.Count} hidden tray item{(items.Count == 1 ? "" : "s")} · click to invoke";
+        status.Text = $"{items.Count} tray app{(items.Count == 1 ? "" : "s")}";
 
         for (var index = 0; index < items.Count; index++)
         {
             var item = items[index];
-            var row = index / 4;
-            var column = index % 4;
+            var row = index / 3;
+            var column = index % 3;
 
             while (trayGrid.RowDefinitions.Count <= row)
                 trayGrid.RowDefinitions.Add(
@@ -334,14 +374,14 @@ internal sealed class SystemTrayWindow : Window
         {
             Text = glyph,
             FontFamily = new FontFamily("Segoe UI Variable Display"),
-            FontSize = 14,
+            FontSize = 15,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = Brush(245),
+            Foreground = theme.Primary,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        var realIcon = new AdaptiveAppIcon(28, 1, showTile: false)
+        var realIcon = new AdaptiveAppIcon(30, 1, showTile: false)
         {
             Visibility = Visibility.Collapsed,
             IsHitTestVisible = false
@@ -349,8 +389,8 @@ internal sealed class SystemTrayWindow : Window
 
         var icon = new Grid
         {
-            Width = 28,
-            Height = 28
+            Width = 30,
+            Height = 30
         };
         icon.Children.Add(fallback);
         icon.Children.Add(realIcon);
@@ -362,11 +402,11 @@ internal sealed class SystemTrayWindow : Window
         {
             Text = item.Name,
             FontSize = 10.5,
-            Foreground = Brush(210),
+            Foreground = theme.Primary,
             TextAlignment = TextAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
-            Width = 66
+            Width = 84
         };
 
         var stack = new StackPanel
@@ -380,17 +420,17 @@ internal sealed class SystemTrayWindow : Window
         var button = new Button
         {
             Content = stack,
-            Background = Brush(0),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(11),
-            Padding = new Thickness(4, 6, 4, 6),
+            Background = theme.Tile,
+            BorderBrush = theme.TileBorder,
+            BorderThickness = new Thickness(.7),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(3, 8, 3, 8),
+            Height = 79,
             Tag = item,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
-
-        button.Resources["ButtonBackgroundPointerOver"] = Brush(32);
-        button.Resources["ButtonBackgroundPressed"] = Brush(48);
+        theme.StyleButton(button);
         ToolTipService.SetToolTip(
             button,
             string.IsNullOrWhiteSpace(item.DefaultAction)
@@ -464,25 +504,34 @@ internal sealed class SystemTrayWindow : Window
     private void UpdateBackdrop() =>
         presentation.UpdateBackdropBounds();
 
-    private static Button IconButton(string glyph, string tooltip, Action action)
+    private Button IconButton(string glyph, string tooltip, Action action)
     {
-        return SystemControlStyle.Button(SystemControlStyle.Icon(glyph, 15), tooltip, action, 34, 34);
+        var icon = SystemControlStyle.Icon(glyph, 15);
+        icon.Foreground = theme.Primary;
+        var button = SystemControlStyle.Button(icon, tooltip, action, 30, 30);
+        button.Background = theme.Tile;
+        button.BorderBrush = theme.TileBorder;
+        button.BorderThickness = new Thickness(.7);
+        button.CornerRadius = new CornerRadius(DockControlPalette.ButtonRadius);
+        theme.StyleButton(button);
+        return button;
     }
 
-    private static Button TextButton(string text, Action action)
+    private Button TextButton(string text, Action action)
     {
         var button = new Button
         {
             Content = text,
             FontSize = 11.5,
-            Foreground = Brush(225),
-            Background = Brush(18),
-            BorderBrush = Brush(54),
-            BorderThickness = new Thickness(.6),
-            CornerRadius = new CornerRadius(10),
+            Foreground = theme.Primary,
+            Background = theme.Tile,
+            BorderBrush = theme.TileBorder,
+            BorderThickness = new Thickness(.7),
+            CornerRadius = new CornerRadius(DockControlPalette.ButtonRadius),
             Padding = new Thickness(10, 5, 10, 5)
         };
         button.Click += (_, _) => action();
+        theme.StyleButton(button);
         return button;
     }
 

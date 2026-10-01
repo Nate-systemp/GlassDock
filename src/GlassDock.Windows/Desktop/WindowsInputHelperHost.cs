@@ -32,67 +32,84 @@ public static class WindowsInputHelperHost
     private static void RunConnected(NamedPipeClientStream pipe)
     {
         using var reader = new StreamReader(pipe, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
-        writer.WriteLine("HELLO2");
-        var initial = reader.ReadLine();
-        if (initial is null || reader.ReadLine() != "GO") return;
-        using var disconnected = new ManualResetEvent(false);
-        using var lifetime = new CancellationTokenSource();
-        var events = Channel.CreateBounded<InputSignal>(new BoundedChannelOptions(1)
-        { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true });
-        using var hook = new WindowsKeyHook((launcher, revision) =>
-            events.Writer.TryWrite(new InputSignal(launcher, revision, Environment.TickCount64)));
-        ApplyState(initial, hook);
-        writer.WriteLine("READY");
-        var readTask = ReadStateAsync();
-        var writeTask = WriteEventsAsync();
-        var handles = Marshal.AllocHGlobal(IntPtr.Size);
-        Marshal.WriteIntPtr(handles, disconnected.SafeWaitHandle.DangerousGetHandle());
+        // StreamWriter.Dispose flushes even when LeaveOpen is true. If Doky
+        // closes the pipe during shutdown, that flush used to crash the helper.
+        // Own disposal here so a normal disconnect is not an unhandled exception.
+        var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
         try
         {
-            // Native message delivery wakes this thread immediately; disconnect is an event.
-            while (NativeMethods.MsgWaitForMultipleObjectsEx(1, handles, uint.MaxValue, 0x04FF, 0x0004) == 1)
-                while (NativeMethods.PeekMessage(out var message, 0, 0, 0, 1))
+            writer.WriteLine("HELLO2");
+            var initial = reader.ReadLine();
+            if (initial is null || reader.ReadLine() != "GO") return;
+
+            using var disconnected = new ManualResetEvent(false);
+            using var lifetime = new CancellationTokenSource();
+            var events = Channel.CreateBounded<InputSignal>(new BoundedChannelOptions(1)
+            { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true });
+            using var hook = new WindowsKeyHook((launcher, revision) =>
+                events.Writer.TryWrite(new InputSignal(launcher, revision, Environment.TickCount64)));
+            ApplyState(initial, hook);
+            writer.WriteLine("READY");
+            var readTask = ReadStateAsync();
+            var writeTask = WriteEventsAsync();
+            var handles = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(handles, disconnected.SafeWaitHandle.DangerousGetHandle());
+            try
+            {
+                // Native message delivery wakes this thread immediately; disconnect is an event.
+                while (NativeMethods.MsgWaitForMultipleObjectsEx(1, handles, uint.MaxValue, 0x04FF, 0x0004) == 1)
+                    while (NativeMethods.PeekMessage(out var message, 0, 0, 0, 1))
+                    {
+                        NativeMethods.TranslateMessage(ref message);
+                        NativeMethods.DispatchMessage(ref message);
+                    }
+            }
+            finally
+            {
+                hook.Dispose(); // release ownership BEFORE the app can restore fallback
+                lifetime.Cancel();
+                events.Writer.TryComplete();
+                pipe.Dispose(); // unblock pending pipe reads/writes on disconnect
+                Marshal.FreeHGlobal(handles);
+                // Join workers before disposing writer, so no thread uses it after cleanup.
+                Task.WhenAll(readTask, writeTask).GetAwaiter().GetResult();
+            }
+
+            async Task ReadStateAsync()
+            {
+                try
                 {
-                    NativeMethods.TranslateMessage(ref message);
-                    NativeMethods.DispatchMessage(ref message);
+                    while (await reader.ReadLineAsync(lifetime.Token) is { } line) ApplyState(line, hook);
                 }
+                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
+                finally { disconnected.Set(); }
+            }
+            async Task WriteEventsAsync()
+            {
+                long sequence = 0;
+                try
+                {
+                    await foreach (var value in events.Reader.ReadAllAsync(lifetime.Token))
+                    {
+                        if (Environment.TickCount64 - value.Timestamp > 500) continue;
+                        await writer.WriteLineAsync($"EVENT|{++sequence}|{value.Timestamp}|{value.Revision}|{(value.Launcher ? "LAUNCHER" : "HOME")}".AsMemory(), lifetime.Token);
+                    }
+                }
+                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
+                finally { disconnected.Set(); }
+            }
         }
         finally
         {
-            hook.Dispose(); // release ownership BEFORE the app is allowed to restore fallback
-            lifetime.Cancel();
-            pipe.Dispose();
-            events.Writer.TryComplete();
-            Marshal.FreeHGlobal(handles);
-            // Workers are cancellable and outside the hook. Join before disposing their event.
-            Task.WhenAll(readTask, writeTask).GetAwaiter().GetResult();
-        }
-
-        async Task ReadStateAsync()
-        {
-            try
+            try { writer.Dispose(); }
+            catch (Exception e) when (e is IOException or ObjectDisposedException)
             {
-                while (await reader.ReadLineAsync(lifetime.Token) is { } line) ApplyState(line, hook);
+                // The peer can close the pipe between the last write and the
+                // final StreamWriter flush. That is expected, not a helper crash.
             }
-            catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
-            finally { disconnected.Set(); }
-        }
-        async Task WriteEventsAsync()
-        {
-            long sequence = 0;
-            try
-            {
-                await foreach (var value in events.Reader.ReadAllAsync(lifetime.Token))
-                {
-                    if (Environment.TickCount64 - value.Timestamp > 500) continue;
-                    await writer.WriteLineAsync($"EVENT|{++sequence}|{value.Timestamp}|{value.Revision}|{(value.Launcher ? "LAUNCHER" : "HOME")}".AsMemory(), lifetime.Token);
-                }
-            }
-            catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
-            finally { disconnected.Set(); }
         }
     }
+
     private static void ApplyState(string line, WindowsKeyHook hook)
     {
         var parts = line.Split('|');

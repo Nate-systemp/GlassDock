@@ -36,6 +36,15 @@ public sealed class OptionalCompositionTests
     }
 
     [Fact]
+    public void Unsupported_compositor_brush_is_an_optional_rendering_failure()
+    {
+        // A COM surface/effect can be rejected with ArgumentException even
+        // when the base material graph and utility controls are still usable.
+        Assert.True(OptionalComposition.IsRenderingFailure(
+            new ArgumentException("Unsupported source brush type")));
+    }
+
+    [Fact]
     public void Unrelated_errors_are_not_hidden_as_graphics_failures()
     {
         var session = new OptionalComposition(false);

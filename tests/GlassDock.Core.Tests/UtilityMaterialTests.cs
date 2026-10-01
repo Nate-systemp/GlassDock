@@ -25,7 +25,9 @@ public sealed class UtilityMaterialTests
         Assert.Equal(.3, material.BorderOpacity);
         Assert.Equal(preset.Tint, material.Tint);
         Assert.Equal(preset.Saturation, material.Saturation);
-        Assert.Equal(24, material.CornerRadius);
+        Assert.Equal(28, material.CornerRadius);
+        Assert.Equal(preset.ShadowOpacity, material.ShadowOpacity);
+        Assert.Equal(preset.ShadowBlur, material.ShadowBlur);
         Assert.Equal(0, material.EdgeHighlight);
         var borderless = UtilityMaterial.Create(session.Appearance with { BorderThickness = 0, BorderOpacity = 0 });
         Assert.Equal(0, borderless.BorderThickness);

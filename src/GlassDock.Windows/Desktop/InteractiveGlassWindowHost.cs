@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using GlassDock.Windows.Interop;
 
@@ -19,6 +20,14 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     // Optional transparent travel space below a utility popup. The dock belongs
     // to the same UI thread, so HTTRANSPARENT forwards clicks to its controls.
     public int? InputHeightPixels { get; set; }
+    // Set by utility windows before Configure(). Glass Home retains its
+    // existing native transparency behavior without a host brush opt-in.
+    public bool EnableHostBackdropBrush { get; set; }
+    // Unlike Glass Home/preview windows, the three dock utilities need the
+    // SAME layered DWM client that the main dock uses for its desktop backdrop.
+    // Configure before the XAML SystemBackdrop makes its first connection.
+    public bool UseDockLayeredTransparency { get; set; }
+    public bool HostBackdropAvailable { get; private set; }
     private bool disposed;
 
     public InteractiveGlassWindowHost(nint hwnd)
@@ -50,11 +59,19 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         exStyle |= 0x00000080L;   // WS_EX_TOOLWINDOW
         exStyle &= ~0x00040000L;  // WS_EX_APPWINDOW
         exStyle &= ~0x08000000L;  // WS_EX_NOACTIVATE (must stay OFF)
+        if (UseDockLayeredTransparency)
+            exStyle |= 0x00080000L; // WS_EX_LAYERED, as on the main dock
 
-        NativeMethods.SetWindowLongPtr(
-            hwnd,
-            -20,
-            (nint)exStyle);
+        NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)exStyle);
+        if (UseDockLayeredTransparency &&
+            !NativeMethods.SetLayeredWindowAttributes(hwnd, 0, 255, 2))
+        {
+            throw new Win32Exception(
+                "Failed to configure the Doky utility layered desktop client.");
+        }
+        System.Diagnostics.Debug.WriteLine(UseDockLayeredTransparency
+            ? "[UtilityBackdrop] Dock-matched layered desktop client enabled"
+            : "[UtilityBackdrop] Existing non-layered window client preserved");
 
         //
         // Remove the ordinary native frame.
@@ -133,6 +150,20 @@ public sealed class InteractiveGlassWindowHost : IDisposable
 
     private void ConfigureTransparency()
     {
+        // Required by DWM for CreateHostBackdropBrush on a desktop HWND.
+        // Set before WinUI's SystemBackdrop connects and repeat after DWM
+        // composition resets. Ignored on Windows versions lacking this flag.
+        if (EnableHostBackdropBrush && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            const uint DWMWA_USE_HOSTBACKDROPBRUSH = 17;
+            var enabled = 1;
+            var result = NativeMethods.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, ref enabled, sizeof(int));
+            HostBackdropAvailable = result >= 0;
+            System.Diagnostics.Debug.WriteLine(HostBackdropAvailable
+                ? "[UtilityBackdrop] DWM host backdrop sampling enabled"
+                : $"[UtilityBackdrop] DWM host backdrop unavailable (0x{result:X8})");
+        }
         // Win11's DWM outline surrounds the rectangular HWND, outside our rounded glass mask.
         // Suppress only this window's outline; unsupported Windows versions simply ignore it.
         var noBorder = unchecked((int)0xFFFFFFFE); // DWMWA_COLOR_NONE

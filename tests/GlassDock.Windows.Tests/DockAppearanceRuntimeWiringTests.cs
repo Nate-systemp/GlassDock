@@ -39,7 +39,9 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
         Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
         Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
         Assert.Contains("double targetHeight = 68", animation, StringComparison.Ordinal);
         Assert.Contains("maximumMagnificationScale - 1", animation, StringComparison.Ordinal);
     }

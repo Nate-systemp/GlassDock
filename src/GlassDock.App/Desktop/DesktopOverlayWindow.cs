@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Collections.ObjectModel;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
@@ -696,7 +696,7 @@ keyboard.RecoveryRequested +=
         button.Height = 38;
         button.Padding = new Thickness(0);
         button.Margin = new Thickness(0);
-        button.CornerRadius = new CornerRadius(9);
+        button.CornerRadius = new CornerRadius(DockControlPalette.ButtonRadius);
         button.HorizontalContentAlignment = HorizontalAlignment.Center;
         button.VerticalContentAlignment = VerticalAlignment.Center;
         button.Tag = "NoMagnify";
@@ -705,21 +705,14 @@ keyboard.RecoveryRequested +=
     }
 
     private SolidColorBrush DockForegroundBrush() => new(
-        settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light
-            ? global::Windows.UI.Color.FromArgb(255, 40, 40, 40)
-            : global::Windows.UI.Color.FromArgb(255, 240, 240, 240));
+        DockControlPalette.Foreground(settingsSession.Current.DockAppearanceMode));
 
     private void SetUtilityButtonSelected(Button button, bool selected)
     {
-        var shade = (byte)(settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light ? 0 : 255);
-        var normal = new SolidColorBrush(
-            selected
-                ? global::Windows.UI.Color.FromArgb(24, shade, shade, shade)
-                : Colors.Transparent);
-        var hover = new SolidColorBrush(
-            global::Windows.UI.Color.FromArgb((byte)(selected ? 34 : 20), shade, shade, shade));
-        var pressed = new SolidColorBrush(
-            global::Windows.UI.Color.FromArgb((byte)(selected ? 44 : 30), shade, shade, shade));
+        var mode = settingsSession.Current.DockAppearanceMode;
+        var normal = new SolidColorBrush(DockControlPalette.Normal(mode, selected));
+        var hover = new SolidColorBrush(DockControlPalette.Hover(mode, selected));
+        var pressed = new SolidColorBrush(DockControlPalette.Pressed(mode, selected));
 
         button.Background = normal;
         button.Resources["ButtonBackground"] = normal;
@@ -841,7 +834,7 @@ keyboard.RecoveryRequested +=
         var created = cachedSystemQuickSettingsWindow is null;
         try
         {
-            quickSettings = cachedSystemQuickSettingsWindow ??= new SystemQuickSettingsWindow(systemControls, Appearance, UtilityOwnsPointer);
+            quickSettings = cachedSystemQuickSettingsWindow ??= new SystemQuickSettingsWindow(systemControls, Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -900,7 +893,7 @@ keyboard.RecoveryRequested +=
         var created = cachedSystemTrayWindow is null;
         try
         {
-            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, applicationService, Appearance, UtilityOwnsPointer);
+            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, applicationService, Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -959,7 +952,7 @@ keyboard.RecoveryRequested +=
         var created = cachedCalendarPopoverWindow is null;
         try
         {
-            calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(Appearance, UtilityOwnsPointer);
+            calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -2465,9 +2458,9 @@ keyboard.RecoveryRequested +=
         var glassStyle = mode.GlassStyle();
         var solid = glassStyle is null;
         var reconnect = desktopBackdrop.UseSolidSurface != solid;
-        // Reconnect only when crossing between solid and glass. Disconnect
-        // disposes the previous effects; plain modes do no hidden glass work.
-        if (reconnect) SystemBackdrop = null;
+        // Switch the compositor source without detaching the Window's WinUI
+        // SystemBackdrop. The latter can invalidate a queued WinUI configuration
+        // callback during solid <-> glass transitions ("target" argument error).
         desktopBackdrop.UseSolidSurface = solid;
         desktopBackdrop.UseInnerEdge = !solid;
         if (glassStyle is { } style)
@@ -2484,7 +2477,7 @@ keyboard.RecoveryRequested +=
         {
             desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);
         }
-        if (reconnect) SystemBackdrop = desktopBackdrop;
+        if (reconnect) desktopBackdrop.RebuildConnectedSurface();
         ApplyIndicatorAppearance(mode);
         UpdateBackdropBounds();
     }
@@ -2555,9 +2548,9 @@ keyboard.RecoveryRequested +=
         DockAppearanceSettings appearance,
         DockAppearanceMode dockAppearance)
     {
-        cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance);
-        cachedSystemTrayWindow?.ApplyAppearance(appearance);
-        cachedCalendarPopoverWindow?.ApplyAppearance(appearance);
+        cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance);
+        cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance);
+        cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
