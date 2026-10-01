@@ -11,6 +11,7 @@ public partial class App : Application
     private Window? window;
     private readonly ApplicationShutdownState shutdown = new();
     private Mutex? singleInstanceMutex;
+    private DokyInstanceLease? instanceLease;
     private bool ownsSingleInstance;
     private bool? pendingRestartSafeMode;
 
@@ -95,6 +96,8 @@ public partial class App : Application
 
     private bool TryOwnSingleInstance()
     {
+        instanceLease = DokyInstanceLease.TryAcquire();
+        if (instanceLease is null) return false;
         singleInstanceMutex = new Mutex(
             initiallyOwned: true,
             name: @"Local\GlassDock.App.SingleInstance",
@@ -106,6 +109,7 @@ public partial class App : Application
 
         singleInstanceMutex.Dispose();
         singleInstanceMutex = null;
+        instanceLease.Dispose(); instanceLease = null;
         return false;
     }
 
@@ -125,6 +129,7 @@ public partial class App : Application
 
         singleInstanceMutex?.Dispose();
         singleInstanceMutex = null;
+        instanceLease?.Dispose(); instanceLease = null;
 
         var restartSafeMode = pendingRestartSafeMode;
         pendingRestartSafeMode = null;

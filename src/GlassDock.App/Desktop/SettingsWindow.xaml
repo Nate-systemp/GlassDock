@@ -41,6 +41,9 @@
                 <Button x:Name="BehaviorNavButton" Content="Behavior" Tag="Behavior" Click="NavigationClick"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
                         Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
+                <Button x:Name="NotificationsNavButton" Content="Notifications" Tag="Notifications" Click="NavigationClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
+                        Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
                 <Button x:Name="DisplayNavButton" Content="Display" Tag="Display" Click="NavigationClick"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="14,10"
                         Background="Transparent" Foreground="#FF333333" BorderThickness="0" CornerRadius="8"/>
@@ -196,6 +199,40 @@
                                 </StackPanel>
                                 <NumberBox x:Name="PeekDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="30" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Peek delay in seconds"/>
                             </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+
+                <!-- Notifications -->
+                <StackPanel x:Name="NotificationsPage" Spacing="18" Visibility="Collapsed">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Notifications" FontSize="28" FontWeight="SemiBold" Foreground="#FF1F1F1F"/>
+                        <TextBlock Text="Show Windows Notification Center counts directly on supported Doky app icons." FontSize="13" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Border Padding="20" CornerRadius="14" Background="White" BorderBrush="#FFE1E1E1" BorderThickness="1">
+                        <StackPanel Spacing="18">
+                            <Grid ColumnSpacing="24">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="Notification badges" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                    <TextBlock Text="Display unread-style counts from Windows Notification Center on matching dock apps. Doky reads counts only; it does not read notification text or remove notifications." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <ToggleSwitch x:Name="NotificationBadgesToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="NotificationBadgesToggleToggled" AutomationProperties.Name="Show notification badges on Doky app icons"/>
+                            </Grid>
+
+                            <Rectangle Height="1" Fill="#FFEAEAEA"/>
+
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Windows notification access" FontWeight="SemiBold" Foreground="#FF222222"/>
+                                <TextBlock x:Name="NotificationStatusText" Text="Notification badges are not enabled." FontSize="12" Foreground="#FF6B6B6B" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                                <Button x:Name="NotificationAccessButton" Content="Request / refresh Windows access" Click="RequestNotificationAccessClick" HorizontalAlignment="Left" Padding="14,8" AutomationProperties.Name="Request Windows notification access"/>
+                            </StackPanel>
+
+                            <Border Padding="14" CornerRadius="10" Background="#FFF7F7F7" BorderBrush="#FFE7E7E7" BorderThickness="1">
+                                <TextBlock Text="Windows may show a privacy prompt the first time access is requested. Doky must be launched through its registered notification identity for this permission to be available." FontSize="12" Foreground="#FF5F5F5F" TextWrapping="Wrap"/>
+                            </Border>
                         </StackPanel>
                     </Border>
                 </StackPanel>

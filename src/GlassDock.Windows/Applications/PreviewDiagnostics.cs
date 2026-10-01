@@ -10,7 +10,7 @@ internal sealed class PreviewDiagnostics
 {
     private readonly object gate = new();
     public string Path { get; } = System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlassDock", "preview-diagnostics.jsonl");
+        Settings.DokyUserData.DirectoryPath, "preview-diagnostics.jsonl");
 
     public void Write(ApplicationWindow? window, string stage, bool active, WindowFrameCache.Frame? frame, object? detail = null)
     {

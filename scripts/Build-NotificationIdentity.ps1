@@ -1,7 +1,8 @@
 param(
     [string]$CertificateThumbprint,
     [string]$AppDirectory,
-    [switch]$Register
+    [switch]$Register,
+    [switch]$DevelopmentLocation
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -21,10 +22,20 @@ if ($CertificateThumbprint) {
 }
 if ($Register) {
     if (!$CertificateThumbprint) { throw 'Registration requires a signed package trusted by Windows. No trust or security settings are modified by this script.' }
-    if (!$AppDirectory) { throw 'Specify the exact built/installed AppDirectory.' }
+    $installedApp = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Natesystemp.GlassDock\current'
+    if (!$AppDirectory) { $AppDirectory = $installedApp }
     $resolvedApp = (Resolve-Path -LiteralPath $AppDirectory).Path
+    if (!$DevelopmentLocation -and $resolvedApp.TrimEnd('\') -ne $installedApp.TrimEnd('\')) {
+        throw 'Production notification identity must point to the existing Velopack current directory. Use -DevelopmentLocation only for an explicit development registration.'
+    }
     if (!(Test-Path -LiteralPath (Join-Path $resolvedApp 'GlassDock.App.exe'))) { throw 'AppDirectory does not contain GlassDock.App.exe.' }
     Add-AppxPackage -Path $package -ExternalLocation $resolvedApp
+    $registered = Get-AppxPackage -Name 'Natesystemp.Doky.NotificationIdentity'
+    $registration = Get-ItemProperty -LiteralPath "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\$($registered.PackageFullName)"
+    if ($registration.PackageRootFolder.TrimEnd('\') -ne $resolvedApp.TrimEnd('\')) {
+        throw 'Windows did not register the requested external location; do not launch the package entry.'
+    }
+    Write-Output "Verified external executable: $(Join-Path $resolvedApp 'GlassDock.App.exe')"
 }
 Write-Output "Identity package: $package"
 if (!$CertificateThumbprint) { Write-Warning 'Unsigned build artifact only; sign with a trusted CN=Natesystemp certificate before registering.' }

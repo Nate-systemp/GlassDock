@@ -1,6 +1,7 @@
 using GlassDock.Core.Settings;
 using GlassDock.Core.Desktop;
 using GlassDock.Windows.Settings;
+using GlassDock.Windows.Applications;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -15,6 +16,7 @@ public sealed partial class SettingsWindow : Window
     private readonly GlassDockSettingsStore settingsStore;
     private readonly ApplicationShutdownState shutdown;
     private readonly WindowsStartupService startupService = new();
+    private readonly WindowsNotificationService notifications;
     private readonly bool safeMode;
     private readonly Action restoreTaskbar;
     private readonly Action resumeTaskbar;
@@ -37,7 +39,8 @@ public sealed partial class SettingsWindow : Window
         Action resumeTaskbar,
         Action restartGlassDock,
         Action restartSafeMode,
-        Action exitGlassDock)
+        Action exitGlassDock,
+        WindowsNotificationService notifications)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -48,6 +51,7 @@ public sealed partial class SettingsWindow : Window
         this.restartGlassDock = restartGlassDock;
         this.restartSafeMode = restartSafeMode;
         this.exitGlassDock = exitGlassDock;
+        this.notifications = notifications;
         updateLifetime = CancellationTokenSource.CreateLinkedTokenSource(shutdown.CancellationToken);
 
         InitializeComponent();
@@ -60,6 +64,8 @@ public sealed partial class SettingsWindow : Window
         var startupEnabled = startupService.IsEnabled();
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         PopulateAbout();
+        notifications.Changed += NotificationsChanged;
+        UpdateNotificationStatus();
         RecoveryModeStatusText.Text = safeMode
             ? "Safe Mode is active. Taskbar suppression, Doky Win-key interception, and Hover Wave are disabled for this session."
             : "Normal mode is active.";
@@ -68,6 +74,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) =>
         {
             closed = true;
+            notifications.Changed -= NotificationsChanged;
             updateLifetime.Cancel();
             updateLifetime.Dispose();
         };
@@ -124,9 +131,112 @@ public sealed partial class SettingsWindow : Window
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
         PinDockToggle.IsOn = settings.PinDock;
+        NotificationBadgesToggle.IsOn = settings.NotificationBadgesEnabled;
+        NotificationAccessButton.IsEnabled = settings.NotificationBadgesEnabled;
         LaunchAtStartupToggle.IsOn = settings.LaunchAtStartup;
         UpdateBehaviorControlAvailability();
         populating = false;
+    }
+
+    private async void NotificationBadgesToggleToggled(object sender, RoutedEventArgs e)
+    {
+        if (populating || saving || closed || shutdown.IsRequested)
+            return;
+
+        var desired = NotificationBadgesToggle.IsOn;
+        var edited = settingsSession.CreateNotificationBadgesUpdate(desired);
+
+        saving = true;
+        ApplyButton.IsEnabled = false;
+        NotificationBadgesToggle.IsEnabled = false;
+        NotificationAccessButton.IsEnabled = false;
+
+        try
+        {
+            await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
+            if (closed || shutdown.IsRequested)
+                return;
+
+            if (desired)
+                await notifications.StartAsync(requestPermission: true);
+            else
+                notifications.Stop();
+
+            settingsSession.Replace(edited);
+            UpdateNotificationStatus();
+            SetStatus(desired
+                ? "Notification badges enabled. Windows notification access was requested."
+                : "Notification badges disabled.",
+                success: true);
+        }
+        catch (OperationCanceledException) when (shutdown.IsRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            if (!closed)
+            {
+                populating = true;
+                NotificationBadgesToggle.IsOn = settingsSession.Current.NotificationBadgesEnabled;
+                populating = false;
+                UpdateNotificationStatus();
+                SetStatus($"Notification badge setting could not be saved: {error.Message}", success: false);
+            }
+        }
+        finally
+        {
+            saving = false;
+            if (!closed && !shutdown.IsRequested)
+            {
+                ApplyButton.IsEnabled = true;
+                NotificationBadgesToggle.IsEnabled = true;
+                NotificationAccessButton.IsEnabled = NotificationBadgesToggle.IsOn;
+            }
+        }
+    }
+
+    private async void RequestNotificationAccessClick(object sender, RoutedEventArgs e)
+    {
+        if (closed || shutdown.IsRequested || saving || !NotificationBadgesToggle.IsOn)
+            return;
+
+        NotificationAccessButton.IsEnabled = false;
+        NotificationStatusText.Text = "Requesting Windows notification access…";
+        try
+        {
+            await notifications.StartAsync(requestPermission: true);
+            UpdateNotificationStatus();
+            SetStatus(notifications.Status, success: notifications.Status.Contains("enabled", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception error)
+        {
+            if (!closed)
+            {
+                NotificationStatusText.Text = $"Could not request notification access: {error.Message}";
+                SetStatus("Windows notification access could not be requested.", success: false);
+            }
+        }
+        finally
+        {
+            if (!closed && !shutdown.IsRequested)
+                NotificationAccessButton.IsEnabled = NotificationBadgesToggle.IsOn;
+        }
+    }
+
+    private void NotificationsChanged(object? sender, EventArgs e)
+    {
+        if (closed) return;
+        if (DispatcherQueue.HasThreadAccess)
+            UpdateNotificationStatus();
+        else
+            DispatcherQueue.TryEnqueue(UpdateNotificationStatus);
+    }
+
+    private void UpdateNotificationStatus()
+    {
+        if (closed) return;
+        NotificationStatusText.Text = notifications.Status;
+        NotificationAccessButton.IsEnabled = NotificationBadgesToggle.IsOn && !saving;
     }
 
     private async void PinDockToggleToggled(object sender, RoutedEventArgs e)
@@ -336,6 +446,7 @@ public sealed partial class SettingsWindow : Window
     {
         AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPage.Visibility = page == "Behavior" ? Visibility.Visible : Visibility.Collapsed;
+        NotificationsPage.Visibility = page == "Notifications" ? Visibility.Visible : Visibility.Collapsed;
         DisplayPage.Visibility = page == "Display" ? Visibility.Visible : Visibility.Collapsed;
         StartupPage.Visibility = page == "Startup" ? Visibility.Visible : Visibility.Collapsed;
         AdvancedPage.Visibility = page == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
@@ -344,6 +455,7 @@ public sealed partial class SettingsWindow : Window
 
         SetNavigationState(AppearanceNavButton, page == "Appearance");
         SetNavigationState(BehaviorNavButton, page == "Behavior");
+        SetNavigationState(NotificationsNavButton, page == "Notifications");
         SetNavigationState(DisplayNavButton, page == "Display");
         SetNavigationState(StartupNavButton, page == "Startup");
         SetNavigationState(AdvancedNavButton, page == "Advanced");
@@ -414,7 +526,8 @@ public sealed partial class SettingsWindow : Window
                 PinDockToggle.IsOn) with
             {
                 DockAppearanceMode = SelectedDockAppearance,
-                LaunchAtStartup = desiredStartup
+                LaunchAtStartup = desiredStartup,
+                NotificationBadgesEnabled = NotificationBadgesToggle.IsOn
             };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);

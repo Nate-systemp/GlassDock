@@ -27,6 +27,7 @@ public sealed record GlassDockSettings
     public const bool DefaultHoverWaveEnabled = true;
     public const bool DefaultPinDock = false;
     public const bool DefaultLaunchAtStartup = false;
+    public const bool DefaultNotificationBadgesEnabled = false;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
     public const DockAppearanceMode DefaultDockAppearanceMode = DockAppearanceMode.Dark;
     public const DockDisplayMode DefaultDockDisplayMode = DockDisplayMode.Primary;
@@ -54,6 +55,7 @@ public sealed record GlassDockSettings
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
+    public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
     public bool SuppressWindowsTaskbar { get; init; } = true;
     public double BottomMargin { get; init; } = DefaultBottomMargin;
     public int AutoHideDelayMilliseconds { get; init; } = DefaultAutoHideDelayMilliseconds;

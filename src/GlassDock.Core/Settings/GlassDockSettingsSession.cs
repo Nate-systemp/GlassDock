@@ -136,13 +136,20 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultPinDock) with
         {
             DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode,
-            LaunchAtStartup = Current.LaunchAtStartup
+            LaunchAtStartup = Current.LaunchAtStartup,
+            NotificationBadgesEnabled = GlassDockSettings.DefaultNotificationBadgesEnabled
         };
 
     public GlassDockSettings CreateLaunchAtStartupUpdate(bool enabled) =>
         GlassDockSettings.Normalize(Current with
         {
             LaunchAtStartup = enabled
+        });
+
+    public GlassDockSettings CreateNotificationBadgesUpdate(bool enabled) =>
+        GlassDockSettings.Normalize(Current with
+        {
+            NotificationBadgesEnabled = enabled
         });
 
     public GlassDockSettings CreateDisplayModeUpdate(DockDisplayMode displayMode) =>

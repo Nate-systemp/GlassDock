@@ -18,10 +18,7 @@ public sealed class GlassDockSettingsStore
 
     public GlassDockSettingsStore(string? settingsFilePath = null)
     {
-        settingsFilePath ??= Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GlassDock",
-            "settings.json");
+        settingsFilePath ??= DokyUserData.SettingsPath;
 
         if (string.IsNullOrWhiteSpace(settingsFilePath))
             throw new ArgumentException("A settings file path is required.", nameof(settingsFilePath));

@@ -124,6 +124,7 @@ public sealed class DesktopOverlayWindow : Window
     private bool desktopStartupQueued;
     private bool desktopStarted;
     private bool pinDockRequested;
+    private bool notificationBadgesRequested;
     private bool pinnedPlacementActive;
     private bool pinDockTransitionActive;
     private Task? taskbarOperation;
@@ -215,6 +216,7 @@ public sealed class DesktopOverlayWindow : Window
         this.prepareRestart = prepareRestart;
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
         pinDockRequested = settingsSession.Current.PinDock;
+        notificationBadgesRequested = settingsSession.Current.NotificationBadgesEnabled;
         settingsSession.Changed += SettingsChanged;
 
         Title = "Doky — Floating Dock";
@@ -390,11 +392,7 @@ keyboard.RecoveryRequested +=
         surface.RenderingModeChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
         var menu = new MenuFlyout();
         MenuItem(menu, "Dock Settings", ShowSettings);
-        MenuItem(menu, "Enable notification badges", async () =>
-        {
-            await notifications.StartAsync(requestPermission: true);
-            if (!closing) SetStatus(notifications.Status);
-        });
+        MenuItem(menu, "Enable notification badges", async () => await EnableNotificationBadgesAsync());
         MenuItem(menu, "Open Glass Home", ShowHome);
         menu.Items.Add(new MenuFlyoutSeparator());
         MenuItem(menu, "Restore Windows taskbar", RestoreTaskbar);
@@ -423,6 +421,29 @@ keyboard.RecoveryRequested +=
         QueueDesktopStartup();
     }
 
+    private async Task EnableNotificationBadgesAsync()
+    {
+        if (closing || shutdown.IsRequested) return;
+
+        try
+        {
+            var edited = settingsSession.CreateNotificationBadgesUpdate(true);
+            await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
+            if (closing || shutdown.IsRequested) return;
+
+            await notifications.StartAsync(requestPermission: true);
+            settingsSession.Replace(edited);
+            if (!closing) SetStatus(notifications.Status);
+        }
+        catch (OperationCanceledException) when (shutdown.IsRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            if (!closing) SetStatus($"Notification badges could not be enabled: {error.Message}");
+        }
+    }
+
     private void QueueDesktopStartup()
     {
         if (desktopStartupQueued || desktopStarted || closing) return;
@@ -444,7 +465,10 @@ keyboard.RecoveryRequested +=
         indicator.Opacity = 1;
         ApplyMaterial(false);
         applicationService.Start();
-        _ = notifications.StartAsync();
+        if (notificationBadgesRequested)
+            _ = notifications.StartAsync();
+        else
+            notifications.Stop();
         RefreshUtilityStatus();
         utilityTimer.Start();
 
@@ -2745,6 +2769,8 @@ keyboard.RecoveryRequested +=
     {
         var pinChanged = pinDockRequested != eventArgs.Settings.PinDock;
         pinDockRequested = eventArgs.Settings.PinDock;
+        var notificationBadgesChanged = notificationBadgesRequested != eventArgs.Settings.NotificationBadgesEnabled;
+        notificationBadgesRequested = eventArgs.Settings.NotificationBadgesEnabled;
 
         ApplyBottomMargin(eventArgs.Settings.BottomMargin);
         ApplyDisplayMode(eventArgs.Settings.DockDisplayMode);
@@ -2759,6 +2785,14 @@ keyboard.RecoveryRequested +=
             eventArgs.Settings.BorderThickness,
             eventArgs.Settings.BorderOpacity),
             eventArgs.Settings.DockAppearanceMode);
+
+        if (notificationBadgesChanged)
+        {
+            if (notificationBadgesRequested)
+                _ = notifications.StartAsync();
+            else
+                notifications.Stop();
+        }
 
         if (pinChanged || (pinDockRequested && !pinnedPlacementActive && !pinDockTransitionActive))
             _ = ApplyPinDockModeAsync(pinDockRequested, animate: true);
@@ -2905,7 +2939,8 @@ keyboard.RecoveryRequested +=
                 ResumeTaskbarSuppression,
                 () => RestartGlassDock(inSafeMode: false),
                 () => RestartGlassDock(inSafeMode: true),
-                RequestShutdown);
+                RequestShutdown,
+                notifications);
             created.Closed += (_, _) => settingsWindow.Release(created);
             return created;
         });

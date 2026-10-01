@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -13,6 +13,7 @@ public sealed class WindowsApplicationService : IApplicationService
     private readonly AutoResetEvent refresh = new(false);
     private readonly ConcurrentDictionary<nint, long> activationTimes = new();
     private readonly WindowsApplicationLauncher launcher = new();
+    private readonly ShellApplicationIdentityResolver identityResolver = new();
     private readonly DockPinStore pinStore = new();
     private readonly WindowsApplicationIconService externalIconService =
         new(targetIconSize: 64, cacheCapacity: 64, allowLargerIcons: false);
@@ -154,16 +155,28 @@ public sealed class WindowsApplicationService : IApplicationService
                 using (var handle = ApplicationNative.OpenProcess(0x1000, false, pid))
                 {
                     uint length = 0;
-                    if (appId is null && !handle.IsInvalid && ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, null) == 122 && length < 32768)
+                    if (string.IsNullOrWhiteSpace(appId) && !handle.IsInvalid &&
+                        ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, null) == 122 &&
+                        length < 32768)
                     {
                         var text = new StringBuilder((int)length);
-                        if (ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, text) == 0) appId = text.ToString();
+                        if (ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, text) == 0 &&
+                            !string.IsNullOrWhiteSpace(text.ToString()))
+                            appId = text.ToString();
                     }
                 }
                 // Explorer folder windows often omit their Shell-assigned taskbar identity.
-                if (appId is null && className.ToString() == "CabinetWClass" &&
+                if (string.IsNullOrWhiteSpace(appId) && className.ToString() == "CabinetWClass" &&
                     Path.GetFileName(path).Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
                     appId = "Microsoft.Windows.Explorer";
+
+                // Electron/Squirrel and other Win32 applications can deliberately expose no
+                // process/window AUMID even though their Start Menu shortcut has the canonical
+                // identity used by Windows Notification Center. Resolve that identity from Shell
+                // metadata so running windows, pins and notification badges share one key.
+                if (string.IsNullOrWhiteSpace(appId))
+                    appId = identityResolver.Resolve(path);
+
                 var identity = new ApplicationIdentity(appId, path);
                 var name = FileVersionInfo.GetVersionInfo(path).FileDescription;
                 if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(path);

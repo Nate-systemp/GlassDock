@@ -7,10 +7,8 @@ namespace GlassDock.Windows.Applications;
 internal sealed class DockPinStore
 {
     private readonly object gate = new();
-    private readonly string path = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GlassDock",
-        "dock-pins.json");
+    private readonly string path = Settings.DokyUserData.PinsPath;
+    private readonly ShellApplicationIdentityResolver identityResolver = new();
 
     private sealed record SavedPin(ApplicationIdentity Identity, string Name, string Target);
 
@@ -68,6 +66,17 @@ internal sealed class DockPinStore
     {
         lock (gate)
         {
+            var normalized = NormalizeShortcutPins(preferences);
+            if (!ReferenceEquals(normalized, preferences))
+            {
+                // Canonicalize only Doky's own saved shortcut identity. The exact
+                // launch target remains unchanged, so custom arguments/profile
+                // behavior is preserved. Persist best-effort so pin/unpin/order
+                // operations use the canonical identity on later launches too.
+                if (!Save(normalized))
+                    preferences = normalized;
+            }
+
             var result = imported
                 .Where(pin => !preferences.Excluded.Contains(pin.Identity.Key))
                 .ToList();
@@ -105,6 +114,50 @@ internal sealed class DockPinStore
                 .Select(item => item.Pin)
                 .ToArray();
         }
+    }
+
+    private Preferences NormalizeShortcutPins(Preferences source)
+    {
+        Dictionary<string, string>? remap = null;
+        var pins = new List<SavedPin>(source.Pins.Count);
+
+        foreach (var pin in source.Pins)
+        {
+            var next = pin;
+            if (string.IsNullOrWhiteSpace(pin.Identity.AppUserModelId) &&
+                pin.Target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) &&
+                identityResolver.ResolveShortcut(pin.Target) is { } canonical &&
+                !string.Equals(canonical.Key, pin.Identity.Key, StringComparison.Ordinal))
+            {
+                next = pin with { Identity = canonical };
+                (remap ??= new(StringComparer.Ordinal))[pin.Identity.Key] = canonical.Key;
+            }
+
+            // If two saved shortcuts resolve to the same application identity,
+            // keep the first launch target/order entry instead of creating a
+            // duplicate dock icon.
+            if (!pins.Any(existing =>
+                    string.Equals(existing.Identity.Key, next.Identity.Key, StringComparison.Ordinal)))
+                pins.Add(next);
+        }
+
+        if (remap is null)
+            return source;
+
+        string Map(string id) => remap.TryGetValue(id, out var mapped) ? mapped : id;
+
+        return new Preferences
+        {
+            Pins = pins,
+            Excluded = source.Excluded
+                .Select(Map)
+                .ToHashSet(StringComparer.Ordinal),
+            Order = source.Order?
+                .Select(Map)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToList()
+        };
     }
 
     public bool Set(DockApplication application, bool pinned)

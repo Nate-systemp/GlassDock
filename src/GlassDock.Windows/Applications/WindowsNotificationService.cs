@@ -8,7 +8,7 @@ namespace GlassDock.Windows.Applications;
 public sealed class WindowsNotificationService : IDisposable
 {
     private UserNotificationListener? listener;
-    private bool disposed, busy, requested, subscribed;
+    private bool disposed, busy, requested, subscribed, enabled;
     public IReadOnlyDictionary<string, int> Counts { get; private set; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     public string Status { get; private set; } = "Notification badges are not enabled.";
     public event EventHandler? Changed;
@@ -17,6 +17,7 @@ public sealed class WindowsNotificationService : IDisposable
     public async Task StartAsync(bool requestPermission = false)
     {
         if (disposed || busy) return;
+        enabled = true;
         busy = true;
         try
         {
@@ -52,7 +53,7 @@ public sealed class WindowsNotificationService : IDisposable
     public async Task RefreshAsync()
     {
         requested = true;
-        if (disposed || busy || listener is null) return;
+        if (disposed || busy || listener is null || !enabled) return;
         busy = true;
         try
         {
@@ -63,7 +64,7 @@ public sealed class WindowsNotificationService : IDisposable
                 if (listener.GetAccessStatus() == UserNotificationListenerAccessStatus.Allowed)
                 {
                     var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
-                    if (disposed) return;
+                    if (disposed || !enabled) return;
                     foreach (var notification in notifications)
                     {
                         var id = notification.AppInfo?.AppUserModelId;
@@ -85,10 +86,26 @@ public sealed class WindowsNotificationService : IDisposable
         finally { busy = false; }
     }
 
+    public void Stop()
+    {
+        if (disposed) return;
+        enabled = false;
+        requested = false;
+        if (subscribed && listener is not null)
+        {
+            listener.NotificationChanged -= NotificationChanged;
+            subscribed = false;
+        }
+        Counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        Status = "Notification badges are off.";
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     public void Dispose()
     {
+        if (disposed) return;
+        Stop();
         disposed = true;
-        if (subscribed && listener is not null) listener.NotificationChanged -= NotificationChanged;
         listener = null; Changed = null; RefreshRequested = null;
     }
 }

@@ -6,8 +6,8 @@ namespace GlassDock.Windows.Desktop;
 
 internal static class TaskbarAutoHide
 {
-    private static string Journal => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GlassDock", $"taskbar-state-{Process.GetCurrentProcess().SessionId}.txt");
+    private static string Journal => Path.Combine(Settings.DokyUserData.DirectoryPath,
+        $"taskbar-state-{Process.GetCurrentProcess().SessionId}.txt");
 
     internal static uint Read()
     {

@@ -6,7 +6,7 @@ internal static class StartupDiagnostics
     {
         try
         {
-            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlassDock");
+            var folder = GlassDock.Windows.Settings.DokyUserData.DirectoryPath;
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, "startup.log");
             if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024)
