@@ -434,6 +434,7 @@ public sealed partial class SettingsWindow : Window
         {
             (int)DockDisplayMode.Pointer => DockDisplayMode.Pointer,
             (int)DockDisplayMode.Foreground => DockDisplayMode.Foreground,
+            (int)DockDisplayMode.AllDisplays => DockDisplayMode.AllDisplays,
             _ => DockDisplayMode.Primary
         };
 

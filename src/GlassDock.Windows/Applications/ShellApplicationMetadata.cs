@@ -122,9 +122,9 @@ internal static class ShellApplicationMetadata
         finally { Marshal.FreeCoTaskMem(text); }
     }
 
-    internal static (string? Path, string? Arguments) ResolveLink(string path)
+    internal static (string? Path, string? Arguments, string? WorkingDirectory) ResolveLink(string path)
     {
-        if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return (null, null);
+        if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) return (null, null, null);
         object? instance = null;
         try
         {
@@ -133,11 +133,14 @@ internal static class ShellApplicationMetadata
             var link = (ApplicationNative.IShellLink)instance;
             var target = new StringBuilder(32768);
             var arguments = new StringBuilder(32768);
+            var directory = new StringBuilder(32768);
             link.GetPath(target, target.Capacity, 0, 4);
             link.GetArguments(arguments, arguments.Capacity);
-            return (Environment.ExpandEnvironmentVariables(target.ToString()), arguments.ToString());
+            link.GetWorkingDirectory(directory, directory.Capacity);
+            return (Environment.ExpandEnvironmentVariables(target.ToString()), arguments.ToString(),
+                Environment.ExpandEnvironmentVariables(directory.ToString()));
         }
-        catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException) { return (null, null); }
+        catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException) { return (null, null, null); }
         finally { if (instance is not null) Marshal.ReleaseComObject(instance); }
     }
 

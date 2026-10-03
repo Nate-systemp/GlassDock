@@ -271,13 +271,55 @@ public sealed class WindowsApplicationService : IApplicationService
 
     public bool ReorderApplications(IReadOnlyList<string> orderedIds)
     {
-        var ids = Volatile.Read(ref currentApplications).Select(app => app.Id).ToArray();
-        if (!pinStore.Reorder(ids, orderedIds))
+        // Another monitor may have saved an order before reconciliation publishes its snapshot.
+        var ids = pinStore.ApplyOrder(Volatile.Read(ref currentApplications)).Select(app => app.Id).ToArray();
+        var mergedOrder = MergeRequestedOrder(ids, orderedIds);
+        if (mergedOrder is null || !pinStore.Reorder(ids, mergedOrder))
             return false;
 
         Interlocked.Increment(ref pinRevision);
         RequestRefresh();
         return true;
+    }
+
+    internal static IReadOnlyList<string>? MergeRequestedOrder(
+        IReadOnlyList<string> currentIds,
+        IReadOnlyList<string> orderedIds)
+    {
+        if (currentIds.Count == 0 || orderedIds.Count == 0)
+            return null;
+
+        var currentSet = currentIds.ToHashSet(StringComparer.Ordinal);
+        var requested = new List<string>(orderedIds.Count);
+        var requestedSet = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var id in orderedIds)
+        {
+            if (string.IsNullOrWhiteSpace(id) ||
+                !currentSet.Contains(id) ||
+                !requestedSet.Add(id))
+            {
+                return null;
+            }
+
+            requested.Add(id);
+        }
+
+        // A monitor-local dock only sees its own running applications plus the
+        // globally pinned applications. Preserve applications hidden by that monitor
+        // filter in their existing global slots while applying the visible order.
+        var queue = new Queue<string>(requested);
+        var merged = new string[currentIds.Count];
+
+        for (var index = 0; index < currentIds.Count; index++)
+        {
+            var currentId = currentIds[index];
+            merged[index] = requestedSet.Contains(currentId)
+                ? queue.Dequeue()
+                : currentId;
+        }
+
+        return queue.Count == 0 ? merged : null;
     }
 
     public bool RunAsAdministrator(DockApplication application)

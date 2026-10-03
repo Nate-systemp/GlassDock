@@ -47,7 +47,7 @@ public sealed class NotificationBadgeWiringTests
         var desktop = File.ReadAllText(Path.Combine(root.FullName,
             "src/GlassDock.App/Desktop/DesktopOverlayWindow.cs"));
 
-        Assert.Contains("new BadgeCoordinator([windowsToastBadges])", desktop);
+        Assert.Contains("sharedBadges ?? new BadgeCoordinator([new WindowsToastBadgeProvider()])", desktop);
         Assert.Contains("badges.ForApplication(item.Application.Identity)", desktop);
         Assert.Contains("SetNotificationBadge", desktop);
         Assert.Contains("QueueNotificationBadgeRefresh", desktop);

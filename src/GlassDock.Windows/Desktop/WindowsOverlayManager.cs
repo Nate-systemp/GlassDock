@@ -37,12 +37,30 @@ public sealed class WindowsOverlayManager : IDisposable
     private bool transparentInput;
     private NativeMethods.Point? previousPointer;
     private nint currentMonitor;
+    private nint fixedMonitor;
     private NativeMethods.Rect currentMonitorBounds;
     private double currentMonitorScale;
     private bool hasCurrentMonitorMetrics;
     public event EventHandler? PointerMovedOutsideInput;
     public event EventHandler? PointerMovedInsideInput;
-    public WindowsOverlayManager(nint hwnd) { this.hwnd = hwnd; callback = WindowMessage; }
+    public WindowsOverlayManager(nint hwnd, nint fixedMonitor = 0)
+    {
+        this.hwnd = hwnd;
+        this.fixedMonitor = fixedMonitor;
+        callback = WindowMessage;
+    }
+
+    public nint CurrentMonitor => currentMonitor;
+    public nint FixedMonitor => fixedMonitor;
+
+    public void SetFixedMonitor(nint monitor)
+    {
+        if (fixedMonitor == monitor) return;
+        fixedMonitor = monitor;
+        hasCurrentMonitorMetrics = false;
+        lastInteractionPolygon = null;
+        previousPointer = null;
+    }
     // Maximum invisible host width. The actual host is clamped to the current
     // monitor so the visible dock can grow with pinned applications without
     // ever extending beyond the display.
@@ -175,7 +193,7 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public PixelRect Position(double margin, DockDisplayMode displayMode = DockDisplayMode.Primary)
     {
-        var monitor = ResolveMonitor(displayMode);
+        var monitor = fixedMonitor != 0 ? fixedMonitor : ResolveMonitor(displayMode);
         if (monitor == 0)
             monitor = NativeMethods.MonitorFromPoint(new NativeMethods.Point(), 1);
 
@@ -387,7 +405,7 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode)
     {
-        var target = ResolveMonitor(displayMode);
+        var target = fixedMonitor != 0 ? fixedMonitor : ResolveMonitor(displayMode);
         if (target == 0)
             return false;
 

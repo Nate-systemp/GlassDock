@@ -82,9 +82,17 @@ public sealed class DesktopOverlayWindow : Window
         Opacity = 0
     };
     private readonly DockStateMachine state = new();
-    private readonly WindowsApplicationService applicationService = new();
-    private readonly WindowsToastBadgeProvider windowsToastBadges = new();
+    private readonly WindowsApplicationService applicationService;
     private readonly BadgeCoordinator badges;
+    private readonly bool ownsApplicationService;
+    private readonly bool ownsBadges;
+    private readonly bool ownsKeyboard;
+    private readonly bool ownsGlobalServices;
+    private readonly Action? requestApplicationShutdown;
+    private readonly Action<DesktopOverlayWindow>? unexpectedClosed;
+    private readonly Action? showSettingsOverride;
+    private readonly Action? restoreTaskbarOverride;
+    private readonly Action? resumeTaskbarOverride;
     private int notificationRefreshQueued;
     private readonly WindowsApplicationLauncher dropLauncher = new();
     private readonly DockApplicationsViewModel applications;
@@ -130,6 +138,7 @@ public sealed class DesktopOverlayWindow : Window
     private bool pinDockTransitionActive;
     private Task? taskbarOperation;
     private Task? taskbarRestoreOperation;
+    private Task? shutdownOperation;
     private int taskbarRevision;
 
     private bool dockWaveTimerRunning;
@@ -200,6 +209,26 @@ public sealed class DesktopOverlayWindow : Window
     public bool IsShuttingDown => shutdown.IsRequested;
     public event EventHandler? StatusChanged;
 
+    internal nint MonitorTarget => windowManager.FixedMonitor;
+    internal WindowsKeyboardService KeyboardService => keyboard;
+    internal bool OwnsGlobalServices => ownsGlobalServices;
+
+    internal void RetargetMonitor(nint monitor)
+    {
+        if (closing) return;
+        windowManager.SetFixedMonitor(monitor);
+        windowManager.Position(0, settingsSession.DisplayMode);
+        applications.RefreshFilter();
+        UpdateBackdropBounds();
+        if (state.State is DockState.Idle or DockState.Hovering)
+            UpdatePeekInput();
+        else
+            UpdateDockWaveOutline();
+        pointerInsideDock = windowManager.IsPointerInsideInput();
+        previews.Reposition();
+        RepositionSystemPopups();
+    }
+
     public DesktopOverlayWindow(
         GlassDockSettingsSession settingsSession,
         GlassDockSettingsStore settingsStore,
@@ -207,7 +236,17 @@ public sealed class DesktopOverlayWindow : Window
         Action shutdownCompleted,
         bool inspection = false,
         bool safeMode = false,
-        Action<bool>? prepareRestart = null)
+        Action<bool>? prepareRestart = null,
+        WindowsApplicationService? sharedApplicationService = null,
+        BadgeCoordinator? sharedBadges = null,
+        nint monitorTarget = 0,
+        bool ownsGlobalServices = true,
+        WindowsKeyboardService? sharedKeyboard = null,
+        Action? requestApplicationShutdown = null,
+        Action<DesktopOverlayWindow>? unexpectedClosed = null,
+        Action? showSettingsOverride = null,
+        Action? restoreTaskbarOverride = null,
+        Action? resumeTaskbarOverride = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -215,7 +254,16 @@ public sealed class DesktopOverlayWindow : Window
         this.shutdownCompleted = shutdownCompleted;
         this.safeMode = safeMode;
         this.prepareRestart = prepareRestart;
-        badges = new BadgeCoordinator([windowsToastBadges]);
+        this.ownsGlobalServices = ownsGlobalServices;
+        this.requestApplicationShutdown = requestApplicationShutdown;
+        this.unexpectedClosed = unexpectedClosed;
+        this.showSettingsOverride = showSettingsOverride;
+        this.restoreTaskbarOverride = restoreTaskbarOverride;
+        this.resumeTaskbarOverride = resumeTaskbarOverride;
+        ownsApplicationService = sharedApplicationService is null;
+        applicationService = sharedApplicationService ?? new WindowsApplicationService();
+        ownsBadges = sharedBadges is null;
+        badges = sharedBadges ?? new BadgeCoordinator([new WindowsToastBadgeProvider()]);
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
         pinDockRequested = settingsSession.Current.PinDock;
         notificationBadgesRequested = settingsSession.Current.NotificationBadgesEnabled;
@@ -238,7 +286,7 @@ public sealed class DesktopOverlayWindow : Window
         presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        windowManager = new WindowsOverlayManager(hwnd);
+        windowManager = new WindowsOverlayManager(hwnd, monitorTarget);
         windowManager.Configure(inspection);
         root.Children.Add(surface);
         // Keep the wave path for native hit-test sampling; its XAML stroke is
@@ -269,17 +317,14 @@ public sealed class DesktopOverlayWindow : Window
             RepositionSystemPopups();
         };
         desktopBackdrop.RenderingModeChanged += (_, _) => { UpdateBackdropBounds(); StatusChanged?.Invoke(this, EventArgs.Empty); };
-        applications = new DockApplicationsViewModel(applicationService, DispatcherQueue);
-        badges.Changed += (_, _) => QueueNotificationBadgeRefresh();
-        badges.RefreshRequested += (_, _) =>
-        {
-            if (Interlocked.Exchange(ref notificationRefreshQueued, 1) != 0) return;
-            if (!DispatcherQueue.TryEnqueue(async () =>
-            {
-                Interlocked.Exchange(ref notificationRefreshQueued, 0);
-                if (!closing) await badges.RefreshAsync();
-            })) Interlocked.Exchange(ref notificationRefreshQueued, 0);
-        };
+        applications = new DockApplicationsViewModel(
+            applicationService,
+            DispatcherQueue,
+            ownsService: ownsApplicationService,
+            snapshotTransform: snapshot => WindowsMonitorService.FilterSnapshotForMonitor(snapshot, windowManager.FixedMonitor));
+        badges.Changed += BadgesChanged;
+        if (ownsGlobalServices)
+            badges.RefreshRequested += BadgesRefreshRequested;
         applications.SnapshotApplied += (_, _) => QueueNotificationBadgeRefresh();
         previews = new(applications, root, hwnd, () => ExpandedContentTop, settingsSession,
             () => !closing && state.State == DockState.Expanded && reorderButton is null &&
@@ -351,36 +396,37 @@ public sealed class DesktopOverlayWindow : Window
 
 
 
-        keyboard = new WindowsKeyboardService(
-            hwnd,
-            enableDockShortcuts: !safeMode,
-            elevatedHelperPath: safeMode
-                ? null
-                : Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                    "Doky",
-                    "InputHelper",
-                    "GlassDock.InputHelper.exe"));
+        if (sharedKeyboard is null)
+        {
+            ownsKeyboard = true;
+            keyboard = new WindowsKeyboardService(
+                hwnd,
+                enableDockShortcuts: !safeMode,
+                elevatedHelperPath: safeMode
+                    ? null
+                    : Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                        "Doky",
+                        "InputHelper",
+                        "GlassDock.InputHelper.exe"));
 
-keyboard.BareWindowsRequested += async (_, _) => await ToggleDockAsync();
+            keyboard.BareWindowsRequested += async (_, _) => await ToggleDockAsync();
+            keyboard.HomeRequested += async (_, _) =>
+            {
+                // Ctrl+Alt+Space retains the explicit dock toggle.
+                if (home is { IsVisible: true })
+                    home.HideHome();
 
-keyboard.HomeRequested +=
-    async (_, _) =>
-    {
-        // Ctrl+Alt+Space retains the explicit dock toggle.
-        if (home is { IsVisible: true })
-            home.HideHome();
-
-        await ToggleDockAsync();
-    };
-
-keyboard.LauncherRequested +=
-    (_, _) =>
-        ShowHome();
-
-keyboard.RecoveryRequested +=
-    (_, _) =>
-        RestoreTaskbar();
+                await ToggleDockAsync();
+            };
+            keyboard.LauncherRequested += (_, _) => ShowHome();
+            keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
+        }
+        else
+        {
+            ownsKeyboard = false;
+            keyboard = sharedKeyboard;
+        }
 
         root.PointerEntered += Entered;
         root.PointerMoved += Moved;
@@ -466,32 +512,43 @@ keyboard.RecoveryRequested +=
         animation.SetBottom(PeekRestBottom);
         indicator.Opacity = 1;
         ApplyMaterial(false);
-        applicationService.Start();
-        if (notificationBadgesRequested)
-            _ = badges.StartAsync();
-        else
-            badges.Stop();
+        if (ownsApplicationService)
+            applicationService.Start();
+        if (ownsGlobalServices)
+        {
+            if (notificationBadgesRequested)
+                _ = badges.StartAsync();
+            else
+                badges.Stop();
+        }
         RefreshUtilityStatus();
         utilityTimer.Start();
 
         if (pinDockRequested)
             await ApplyPinDockModeAsync(pin: true, animate: true);
 
-        if (safeMode)
+        if (ownsGlobalServices)
         {
-            taskbarSuppressionPaused = true;
-            TaskbarRecovery.RestoreNow();
-            SetStatus("Safe Mode · Windows taskbar is restored · Win-key interception and Hover Wave are disabled.");
-        }
-        else if (settingsSession.Current.SuppressWindowsTaskbar)
-        {
-            await StartTaskbarTestAsync(whileAppActive: true);
+            if (safeMode)
+            {
+                taskbarSuppressionPaused = true;
+                TaskbarRecovery.RestoreNow();
+                SetStatus("Safe Mode · Windows taskbar is restored · Win-key interception and Hover Wave are disabled.");
+            }
+            else if (settingsSession.Current.SuppressWindowsTaskbar)
+            {
+                await StartTaskbarTestAsync(whileAppActive: true);
+            }
+            else
+            {
+                taskbarSuppressionPaused = true;
+                TaskbarRecovery.RestoreNow();
+                SetStatus("Windows taskbar suppression is disabled.");
+            }
         }
         else
         {
-            taskbarSuppressionPaused = true;
-            TaskbarRecovery.RestoreNow();
-            SetStatus("Windows taskbar suppression is disabled.");
+            SetStatus("Doky · per-monitor dock");
         }
     }
 
@@ -507,7 +564,7 @@ keyboard.RecoveryRequested +=
         // Keep the right-click anchor and neighboring icon positions stable.
         // The coordinator dismisses menus whose app/window membership changed;
         // the latest collection is applied when the final menu hold releases.
-        if (previews.ContextMenuOpen || reorderDragging || reorderCommitting) return;
+        if (previews.ContextMenuOpen || reorderDragging || reorderCommitting || externalDragActive) return;
         var present = VisibleDockApplications.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var id in applicationButtons.Keys.Where(id => !present.Contains(id)).ToArray())
         {
@@ -559,6 +616,18 @@ keyboard.RecoveryRequested +=
         var maximumWidth = Math.Max(120d, hostWidth - 32d);
 
         return Math.Min(maximumWidth, applicationWidth + UtilityClusterWidth);
+    }
+
+    private void BadgesChanged(object? sender, EventArgs e) => QueueNotificationBadgeRefresh();
+
+    private void BadgesRefreshRequested(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref notificationRefreshQueued, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            Interlocked.Exchange(ref notificationRefreshQueued, 0);
+            if (!closing) await badges.RefreshAsync();
+        })) Interlocked.Exchange(ref notificationRefreshQueued, 0);
     }
 
     private void QueueNotificationBadgeRefresh()
@@ -1157,7 +1226,7 @@ keyboard.RecoveryRequested +=
         PointerRoutedEventArgs e)
     {
         if (state.State != DockState.Expanded ||
-            previews.ContextMenuOpen ||
+            previews.ContextMenuOpen || externalDragActive ||
             reorderButton is not null)
         {
             return;
@@ -1620,9 +1689,11 @@ keyboard.RecoveryRequested +=
 
     private void ApplicationDragEnter(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e))
+        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
         {
             e.AcceptedOperation = DataPackageOperation.None;
+            SetExternalDropVisual(false);
+            e.Handled = true;
             return;
         }
 
@@ -1635,9 +1706,11 @@ keyboard.RecoveryRequested +=
 
     private void ApplicationDragOver(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e))
+        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
         {
             e.AcceptedOperation = DataPackageOperation.None;
+            SetExternalDropVisual(false);
+            e.Handled = true;
             return;
         }
 
@@ -1660,7 +1733,7 @@ keyboard.RecoveryRequested +=
 
     private async Task ApplicationDropAsync(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e))
+        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
         {
             e.AcceptedOperation = DataPackageOperation.None;
             SetApplicationDropTarget(button, false);
@@ -1716,7 +1789,7 @@ keyboard.RecoveryRequested +=
             else
                 SetStatus($"{item.Name} could not open the dropped item.");
         }
-        catch (Exception error) when (error is UnauthorizedAccessException or IOException or InvalidOperationException)
+        catch (Exception error) when (error is UnauthorizedAccessException or IOException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException)
         {
             SetStatus($"{item.Name} could not open the dropped item: {error.Message}");
         }
@@ -1823,7 +1896,8 @@ keyboard.RecoveryRequested +=
         }
     }
 
-    private static bool HasStorageItems(DragEventArgs e) =>
+    private bool HasStorageItems(DragEventArgs e) =>
+        !reorderDragging && !reorderCommitting && reorderButton is null &&
         e.DataView.Contains(StandardDataFormats.StorageItems);
 
     private async void ExternalDragEnter(object sender, DragEventArgs e)
@@ -1913,7 +1987,7 @@ keyboard.RecoveryRequested +=
 
             var added = 0;
 
-            foreach (var path in paths)
+            foreach (var path in paths.Where(IsDockPinTarget))
             {
                 if (applicationService.PinExternalTarget(path))
                     added++;
@@ -2780,6 +2854,8 @@ keyboard.RecoveryRequested +=
         object? sender,
         GlassDockSettingsChangedEventArgs eventArgs)
     {
+        if (closing) return;
+
         var pinChanged = pinDockRequested != eventArgs.Settings.PinDock;
         pinDockRequested = eventArgs.Settings.PinDock;
         var notificationBadgesChanged = notificationBadgesRequested != eventArgs.Settings.NotificationBadgesEnabled;
@@ -2799,7 +2875,7 @@ keyboard.RecoveryRequested +=
             eventArgs.Settings.BorderOpacity),
             eventArgs.Settings.DockAppearanceMode);
 
-        if (notificationBadgesChanged)
+        if (ownsGlobalServices && notificationBadgesChanged)
         {
             if (notificationBadgesRequested)
                 _ = badges.StartAsync();
@@ -2933,6 +3009,7 @@ keyboard.RecoveryRequested +=
         {
             DockDisplayMode.Pointer => "following the pointer",
             DockDisplayMode.Foreground => "following the active window",
+            DockDisplayMode.AllDisplays => "on all displays",
             _ => "on the primary display"
         };
         SetStatus($"Dock display mode: {label}.");
@@ -2940,6 +3017,12 @@ keyboard.RecoveryRequested +=
 
     public void ShowSettings()
     {
+        if (showSettingsOverride is not null)
+        {
+            showSettingsOverride();
+            return;
+        }
+
         if (closing || shutdown.IsRequested || settingsWindow.IsShutdown) return;
         var window = settingsWindow.GetOrCreate(() =>
         {
@@ -3009,6 +3092,9 @@ keyboard.RecoveryRequested +=
 
     public Task StartTaskbarTestAsync(bool whileAppActive = false)
     {
+        if (!ownsGlobalServices)
+            return Task.CompletedTask;
+
         if (closing ||
             shutdown.IsRequested ||
             safeMode ||
@@ -3071,6 +3157,12 @@ keyboard.RecoveryRequested +=
 
     public void RestoreTaskbar()
     {
+        if (!ownsGlobalServices && restoreTaskbarOverride is not null)
+        {
+            restoreTaskbarOverride();
+            return;
+        }
+
         if (closing || shutdown.IsRequested || taskbarRestoreOperation is { IsCompleted: false })
             return;
 
@@ -3080,6 +3172,12 @@ keyboard.RecoveryRequested +=
 
     public void ResumeTaskbarSuppression()
     {
+        if (!ownsGlobalServices && resumeTaskbarOverride is not null)
+        {
+            resumeTaskbarOverride();
+            return;
+        }
+
         if (closing || shutdown.IsRequested)
             return;
 
@@ -3111,7 +3209,7 @@ keyboard.RecoveryRequested +=
         }
 
         prepareRestart(inSafeMode);
-        BeginShutdown(closeMainWindow: true);
+        RequestShutdown();
     }
 
     private async Task RestoreTaskbarAsync()
@@ -3130,18 +3228,57 @@ keyboard.RecoveryRequested +=
 
     private void SetStatus(string value) { Status = value; StatusChanged?.Invoke(this, EventArgs.Empty); }
 
-    public void RequestShutdown() => BeginShutdown(closeMainWindow: true);
+    public void RequestShutdown()
+    {
+        if (requestApplicationShutdown is not null)
+        {
+            requestApplicationShutdown();
+            return;
+        }
 
-    private void OnClosed(object sender, WindowEventArgs e) => BeginShutdown(closeMainWindow: false);
+        BeginShutdown(closeMainWindow: true);
+    }
+
+    private void OnClosed(object sender, WindowEventArgs e)
+    {
+        if (closing) return;
+        if (unexpectedClosed is not null)
+        {
+            unexpectedClosed(this);
+            return;
+        }
+
+        BeginShutdown(closeMainWindow: false);
+    }
+
+    internal Task ShutdownForCoordinatorAsync(bool closeMainWindow = true)
+    {
+        if (shutdownOperation is not null)
+            return shutdownOperation;
+
+        closing = true;
+        shutdownOperation = ShutdownAsync(closeMainWindow, completeApplicationShutdown: false);
+        return shutdownOperation;
+    }
+
+    internal Task CleanupAfterUnexpectedCloseAsync()
+    {
+        if (shutdownOperation is not null)
+            return shutdownOperation;
+
+        closing = true;
+        shutdownOperation = ShutdownAsync(closeMainWindow: false, completeApplicationShutdown: false);
+        return shutdownOperation;
+    }
 
     private void BeginShutdown(bool closeMainWindow)
     {
         if (!shutdown.TryBegin()) return;
         closing = true;
-        _ = ShutdownAsync(closeMainWindow);
+        shutdownOperation = ShutdownAsync(closeMainWindow, completeApplicationShutdown: true);
     }
 
-    private async Task ShutdownAsync(bool closeMainWindow)
+    private async Task ShutdownAsync(bool closeMainWindow, bool completeApplicationShutdown)
     {
         // Remove every GlassDock surface immediately; native/resource cleanup follows
         // while the taskbar recovery helper is still independently protecting exit.
@@ -3149,7 +3286,11 @@ keyboard.RecoveryRequested +=
         root.ContextFlyout?.Hide();
 
         previews.Dispose();
-        badges.Dispose();
+        badges.Changed -= BadgesChanged;
+        if (ownsGlobalServices)
+            badges.RefreshRequested -= BadgesRefreshRequested;
+        if (ownsBadges)
+            badges.Dispose();
         applications.Dispose();
         taskbarRevision++;
         state.Hide();
@@ -3190,9 +3331,11 @@ keyboard.RecoveryRequested +=
         labToClose?.Close();
 
         // Restore synchronously before stopping native services or closing the last window.
-        if (taskbarSession is not null || startingTest) TaskbarRecovery.RestoreNow();
+        if (ownsGlobalServices && (taskbarSession is not null || startingTest))
+            TaskbarRecovery.RestoreNow();
         animation.Stop();
-        keyboard.Dispose();
+        if (ownsKeyboard)
+            keyboard.Dispose();
         windowManager.Dispose();
 
         if (taskbarOperation is { } pendingTaskbar)
@@ -3208,6 +3351,7 @@ keyboard.RecoveryRequested +=
         }
 
         if (closeMainWindow) Close();
-        shutdownCompleted();
+        if (completeApplicationShutdown)
+            shutdownCompleted();
     }
 }

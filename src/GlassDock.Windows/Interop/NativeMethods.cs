@@ -103,6 +103,8 @@ internal static class NativeMethods
     }
 
     internal delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal delegate bool MonitorEnumProc(nint monitor, nint hdc, ref Rect monitorRect, nint lParam);
 
     internal delegate void WinEventProc(
         nint hook,
@@ -224,6 +226,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnumWindows(EnumWindowsProc callback, nint state);
+
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool EnumDisplayMonitors(
+        nint hdc,
+        nint clip,
+        MonitorEnumProc callback,
+        nint data);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern int GetClassName(nint hwnd, StringBuilder name, int count);

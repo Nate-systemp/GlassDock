@@ -9,6 +9,7 @@ namespace GlassDock.App;
 public partial class App : Application
 {
     private Window? window;
+    private Desktop.MonitorDockCoordinator? dockCoordinator;
     private readonly ApplicationShutdownState shutdown = new();
     private Mutex? singleInstanceMutex;
     private DokyInstanceLease? instanceLease;
@@ -72,8 +73,8 @@ public partial class App : Application
             var settingsStore = new GlassDockSettingsStore();
             var settingsSession = new GlassDockSettingsSession(
                 await settingsStore.LoadAsync());
-            Rendering.StartupDiagnostics.Write("Constructing dock");
-            var dock = new Desktop.DesktopOverlayWindow(
+            Rendering.StartupDiagnostics.Write("Constructing dock coordinator");
+            dockCoordinator = new Desktop.MonitorDockCoordinator(
                 settingsSession,
                 settingsStore,
                 shutdown,
@@ -81,8 +82,9 @@ public partial class App : Application
                 inspect,
                 safeMode,
                 PrepareRestart);
+            var dock = dockCoordinator.PrimaryWindow;
             window = dock;
-            Rendering.StartupDiagnostics.Write("Dock constructed");
+            Rendering.StartupDiagnostics.Write("Dock coordinator constructed");
             // SetWindowPos shows the non-activating desktop window without taking keyboard focus.
             if (inspect) dock.ShowControls();
             return;
@@ -118,6 +120,8 @@ public partial class App : Application
 
     private void CompleteShutdown()
     {
+        dockCoordinator?.Dispose();
+        dockCoordinator = null;
         window = null;
 
         if (ownsSingleInstance && singleInstanceMutex is not null)

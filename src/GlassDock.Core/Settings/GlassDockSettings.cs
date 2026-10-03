@@ -4,7 +4,8 @@ public enum DockDisplayMode
 {
     Primary = 0,
     Pointer = 1,
-    Foreground = 2
+    Foreground = 2,
+    AllDisplays = 3
 }
 
 /// <summary>

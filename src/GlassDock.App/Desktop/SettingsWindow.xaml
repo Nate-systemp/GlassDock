@@ -250,12 +250,13 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="3" VerticalAlignment="Center">
                                     <TextBlock Text="Dock display" FontWeight="SemiBold" Foreground="#FF222222"/>
-                                    <TextBlock Text="Choose which monitor hosts Doky." FontSize="12" Foreground="#FF6B6B6B"/>
+                                    <TextBlock Text="Choose one monitor behavior or show Doky on every connected display." FontSize="12" Foreground="#FF6B6B6B"/>
                                 </StackPanel>
                                 <ComboBox x:Name="DockDisplayModeBox" Grid.Column="1" HorizontalAlignment="Stretch" AutomationProperties.Name="Dock monitor behavior">
                                     <ComboBoxItem Content="Primary display"/>
                                     <ComboBoxItem Content="Follow pointer"/>
                                     <ComboBoxItem Content="Follow active window"/>
+                                    <ComboBoxItem Content="All displays"/>
                                 </ComboBox>
                             </Grid>
 

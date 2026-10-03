@@ -37,45 +37,47 @@ public sealed class WindowsApplicationLauncher
             ? application.Identity.Arguments : null);
     }
 
-    public bool OpenWith(DockApplication application, IReadOnlyList<string> paths)
+    // Cheap metadata-only admission check; shortcut COM resolution happens only on drop.
+    public static bool CanOpenWith(DockApplication application)
     {
-        if (paths.Count == 0)
-            return false;
-
-        var existing = paths
-            .Where(path =>
-                !string.IsNullOrWhiteSpace(path) &&
-                (File.Exists(path) || Directory.Exists(path)))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (existing.Length == 0)
-            return false;
-
         var target = Target(application);
-        if (string.IsNullOrWhiteSpace(target))
-            return false;
-
-        var arguments = new List<string>();
-
-        if (application.LaunchTarget is null ||
-            string.Equals(
-                target,
-                application.Identity.ExecutablePath,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(application.Identity.Arguments))
-                arguments.Add(application.Identity.Arguments!);
-        }
-
-        arguments.AddRange(existing.Select(QuoteArgument));
-
-        return LaunchTarget(
-            target,
-            string.Join(" ", arguments));
+        return !string.IsNullOrWhiteSpace(target) && Path.IsPathFullyQualified(target) &&
+            (Path.GetExtension(target).Equals(".exe", StringComparison.OrdinalIgnoreCase) ||
+             Path.GetExtension(target).Equals(".lnk", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string QuoteArgument(string value)
+    internal sealed record FileLaunch(string Target, string Arguments, string? WorkingDirectory);
+
+    internal static FileLaunch? PrepareFileLaunch(DockApplication application, IReadOnlyList<string> paths)
+    {
+        if (!CanOpenWith(application) || paths.Count == 0) return null;
+        var existing = paths.Where(path => !string.IsNullOrWhiteSpace(path) &&
+            Path.IsPathFullyQualified(path) && (File.Exists(path) || Directory.Exists(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (existing.Length == 0) return null;
+
+        var target = Target(application)!;
+        string? directory = null;
+        var arguments = application.Identity.Arguments;
+        if (Path.GetExtension(target).Equals(".lnk", StringComparison.OrdinalIgnoreCase))
+        {
+            var link = ShellApplicationMetadata.ResolveLink(target);
+            target = link.Path ?? "";
+            arguments = link.Arguments;
+            directory = string.IsNullOrWhiteSpace(link.WorkingDirectory) ? null : link.WorkingDirectory;
+        }
+        // Never ShellExecute a document, URL, AppsFolder item or unresolved shortcut as the target.
+        if (!IsLaunchableExecutable(target)) return null;
+        var files = string.Join(" ", existing.Select(QuoteArgument));
+        return new(target, string.IsNullOrWhiteSpace(arguments) ? files : arguments + " " + files, directory);
+    }
+
+    public bool OpenWith(DockApplication application, IReadOnlyList<string> paths)
+    {
+        var launch = PrepareFileLaunch(application, paths);
+        return launch is not null && LaunchTarget(launch.Target, launch.Arguments, workingDirectory: launch.WorkingDirectory);
+    }
+    internal static string QuoteArgument(string value)
     {
         if (value.Length == 0)
             return "\"\"";
@@ -145,13 +147,13 @@ public sealed class WindowsApplicationLauncher
         return ApplicationNative.ShellExecuteEx(ref info);
     }
 
-    public bool LaunchTarget(string? target, string? arguments = null, string? verb = null)
+    public bool LaunchTarget(string? target, string? arguments = null, string? verb = null, string? workingDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(target)) return false;
         var info = new ApplicationNative.ShellExecuteInfo
         {
             Size = (uint)Marshal.SizeOf<ApplicationNative.ShellExecuteInfo>(), Mask = 0x400,
-            Verb = verb, File = target, Parameters = arguments, Show = 1
+            Verb = verb, File = target, Parameters = arguments, Directory = workingDirectory, Show = 1
         };
         // Preserve the exact shortcut or AppsFolder item, including its launch arguments.
         return ApplicationNative.ShellExecuteEx(ref info);
