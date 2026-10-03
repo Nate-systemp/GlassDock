@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -90,7 +90,7 @@ public sealed class WindowsApplicationService : IApplicationService
                     var applications = pinStore.ApplyOrder(DockApplicationCollection.Combine(pins, windows));
                     Volatile.Write(ref currentApplications, applications);
                     icons.Retain(pins.Select(pin => pin.Identity.Key).Concat(windows.Select(window => window.Identity.Key)));
-                    if (!stopping) SnapshotChanged?.Invoke(this, new(applications, pinWarning));
+                    if (!stopping) SnapshotChanged?.Invoke(this, new(pinStore.ApplyStacks(applications), pinWarning));
                 }
                 catch (Exception error) when (error is COMException or Win32Exception or InvalidOperationException)
                 {
@@ -269,10 +269,20 @@ public sealed class WindowsApplicationService : IApplicationService
         return saved;
     }
 
+    public bool MergeStack(string source, string target) => StackChanged(pinStore.MergeStack(source, target, Volatile.Read(ref currentApplications)));
+    public bool RenameStack(string id, string name) => StackChanged(pinStore.RenameStack(id, name));
+    public bool ReorderStack(string id, IReadOnlyList<string> order) => StackChanged(pinStore.ReorderStack(id, order));
+    public bool ExtractStack(string id, string? appId = null, string? beforeId = null) => StackChanged(pinStore.ExtractStack(id, appId, beforeId));
+    private bool StackChanged(bool saved)
+    {
+        if (saved) Interlocked.Increment(ref pinRevision);
+        RequestRefresh();
+        return saved;
+    }
     public bool ReorderApplications(IReadOnlyList<string> orderedIds)
     {
         // Another monitor may have saved an order before reconciliation publishes its snapshot.
-        var ids = pinStore.ApplyOrder(Volatile.Read(ref currentApplications)).Select(app => app.Id).ToArray();
+        var ids = pinStore.ApplyStacks(Volatile.Read(ref currentApplications)).Select(app => app.Id).ToArray();
         var mergedOrder = MergeRequestedOrder(ids, orderedIds);
         if (mergedOrder is null || !pinStore.Reorder(ids, mergedOrder))
             return false;

@@ -24,7 +24,7 @@ using global::Windows.ApplicationModel.DataTransfer;
 
 namespace GlassDock.App.Desktop;
 
-public sealed class DesktopOverlayWindow : Window
+public sealed partial class DesktopOverlayWindow : Window
 {
     private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
     private readonly GlassSurface surface = new()
@@ -186,7 +186,7 @@ public sealed class DesktopOverlayWindow : Window
     private bool quickSettingsOpen;
     private bool trayWindowOpen;
     private bool calendarWindowOpen;
-    private bool SystemPopupOpen => utilityTransitionPending || quickSettingsOpen || trayWindowOpen || calendarWindowOpen;
+    private bool SystemPopupOpen => utilityTransitionPending || quickSettingsOpen || trayWindowOpen || calendarWindowOpen || stackWindow?.IsOpen == true;
     private const double UtilityClusterWidth = 248;
 
     private const double DockWaveHalfWidth = 92;
@@ -565,6 +565,11 @@ public sealed class DesktopOverlayWindow : Window
         // The coordinator dismisses menus whose app/window membership changed;
         // the latest collection is applied when the final menu hold releases.
         if (previews.ContextMenuOpen || reorderDragging || reorderCommitting || externalDragActive) return;
+        if (stackWindow?.IsOpen == true)
+        {
+            var openStack = VisibleDockApplications.FirstOrDefault(app => app.Id == stackWindow.StackId);
+            if (openStack?.Application.Stack is not null) { stackWindow.Update(openStack.Application); RepositionStackPopup(); } else stackWindow.Hide();
+        }
         var present = VisibleDockApplications.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var id in applicationButtons.Keys.Where(id => !present.Contains(id)).ToArray())
         {
@@ -641,13 +646,14 @@ public sealed class DesktopOverlayWindow : Window
 
     private void RefreshNotificationBadges()
     {
+        stackWindow?.RefreshBadges();
         if (closing) return;
         foreach (var item in applications.VisibleDockApplications)
         {
             if (applicationButtons.TryGetValue(item.Id, out var button) && button.Content is Grid content &&
                 content.Children.FirstOrDefault() is AdaptiveAppIcon icon)
             {
-                var badge = badges.ForApplication(item.Application.Identity);
+                var badge = item.Application.Stack is null ? badges.ForApplication(item.Application.Identity) : StackBadge(item.Application);
                 icon.SetNotificationBadge(badge);
                 AutomationProperties.SetHelpText(button, badge.AccessibilityText);
             }
@@ -695,7 +701,7 @@ public sealed class DesktopOverlayWindow : Window
         ApplicationIcon? renderedIcon = null;
         void Update()
         {
-            var badge = badges.ForApplication(item.Application.Identity);
+            var badge = item.Application.Stack is null ? badges.ForApplication(item.Application.Identity) : StackBadge(item.Application);
             image.SetNotificationBadge(badge);
             AutomationProperties.SetName(button, item.Name);
             AutomationProperties.SetHelpText(button, badge.AccessibilityText);
@@ -704,9 +710,10 @@ public sealed class DesktopOverlayWindow : Window
             running.Visibility = item.IsRunning ? Visibility.Visible : Visibility.Collapsed;
             running.Opacity = item.IsActive ? 1 : 0.55;
             running.Width = item.IsActive ? 10 : 4;
+            if (item.Application.Stack is not null) image.SetStack(item.Application.StackApps);
             if (ReferenceEquals(renderedIcon, item.Application.Icon)) return;
             renderedIcon = item.Application.Icon;
-            image.SetIcon(renderedIcon);
+            if (item.Application.Stack is null) image.SetIcon(renderedIcon);
         }
         Update();
         item.PropertyChanged += (_, _) => Update();
@@ -763,11 +770,13 @@ public sealed class DesktopOverlayWindow : Window
                 return;
             }
 
+            if (item.Application.Stack is not null) { ToggleStack(item); return; }
             if (!applications.Activate(item))
                 SetStatus($"Windows could not launch or focus {item.Name}.");
         };
 
-        previews.Attach(button, item);
+        if (item.Application.Stack is null) previews.Attach(button, item);
+        else button.RightTapped += (_, e) => { StackContext(button, item); e.Handled = true; };
         return button;
     }
 
@@ -933,6 +942,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private void RepositionSystemPopups()
     {
+        RepositionStackPopup();
         if (root.ActualWidth <= 0 || root.ActualHeight <= 0 ||
             (quickSettings is null && trayWindow is null && calendarWindow is null))
         {
@@ -1183,6 +1193,7 @@ public sealed class DesktopOverlayWindow : Window
     private void RequestUtility()
     {
         if (closing || utilitySource is null) return;
+        stackWindow?.Hide();
         var key = utilityCluster.Children.IndexOf(utilitySource);
         if (key < 1) return;
         utilityRequests.Click(key);
@@ -1356,6 +1367,8 @@ public sealed class DesktopOverlayWindow : Window
         var currentRootX = e.GetCurrentPoint(root).Position.X;
         var draggedX = currentRootX - reorderDragStartRootX;
 
+        UpdateStackCandidate(point.Position.X, point.Position.Y);
+        if (holdStackTarget || stackDrag.Mode is DockDragMode.StackCandidate or DockDragMode.StackMerge) reorderTargetIndex = reorderSourceIndex;
         ApplyReorderVisuals(draggedX);
         e.Handled = true;
     }
@@ -1450,6 +1463,7 @@ public sealed class DesktopOverlayWindow : Window
         // PointerMoved can be coalesced/skipped near release, especially while
         // ButtonBase owns capture. Resolve the drop slot one final time from
         // the actual pointer-up position.
+        if (FinishStackMerge(button, item, e)) return;
         var releasePoint = e.GetCurrentPoint(icons).Position.X;
         if (reorderSlotCenters.Length > 0)
             reorderTargetIndex = ResolveReorderTargetIndex(releasePoint);
@@ -1676,6 +1690,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private void ClearReorderState()
     {
+        ClearStackDrag();
         reorderCandidate = null;
         reorderButton = null;
         reorderStartX = 0;
@@ -1689,11 +1704,25 @@ public sealed class DesktopOverlayWindow : Window
 
     private void ApplicationDragEnter(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
+        if (StackItemDragOver(e)) return;
+        if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
-            SetExternalDropVisual(false);
             e.Handled = true;
+            return;
+        }
+
+        // External shell drags are identified by their StorageItems payload, not by
+        // internal reorder state. If this particular app cannot accept file
+        // activation, leave the routed event available to the dock-level handler so
+        // executable/shortcut drops can still use the existing "Pin to Doky" path.
+        if (!WindowsApplicationLauncher.CanOpenWith(item.Application))
+        {
+            if (ReferenceEquals(externalDropTargetButton, button))
+                SetApplicationDropTarget(button, false);
+
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.Handled = false;
             return;
         }
 
@@ -1706,11 +1735,21 @@ public sealed class DesktopOverlayWindow : Window
 
     private void ApplicationDragOver(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
+        if (StackItemDragOver(e)) return;
+        if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
-            SetExternalDropVisual(false);
             e.Handled = true;
+            return;
+        }
+
+        if (!WindowsApplicationLauncher.CanOpenWith(item.Application))
+        {
+            if (ReferenceEquals(externalDropTargetButton, button))
+                SetApplicationDropTarget(button, false);
+
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.Handled = false;
             return;
         }
 
@@ -1726,14 +1765,17 @@ public sealed class DesktopOverlayWindow : Window
 
     private void ApplicationDragLeave(Button button, DragEventArgs e)
     {
-        if (ReferenceEquals(externalDropTargetButton, button))
-            SetApplicationDropTarget(button, false);
+        if (!ReferenceEquals(externalDropTargetButton, button))
+            return;
+
+        SetApplicationDropTarget(button, false);
         e.Handled = true;
     }
 
     private async Task ApplicationDropAsync(Button button, DockApplicationItem item, DragEventArgs e)
     {
-        if (closing || shutdown.IsRequested || !HasStorageItems(e) || !WindowsApplicationLauncher.CanOpenWith(item.Application))
+        if (await StackItemDrop(e, item.Id)) return;
+        if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
             SetApplicationDropTarget(button, false);
@@ -1762,9 +1804,8 @@ public sealed class DesktopOverlayWindow : Window
 
             // Application buttons also accept file drops ("Open with ..."). That
             // must not steal executable/shortcut drags that are intended to pin a
-            // new application to GlassDock. If every dropped target looks like a
-            // launchable app/shortcut, preserve the dock-level pin behavior even
-            // when the pointer happens to be over an existing app button.
+            // new application to Doky. Classify the dropped paths before checking
+            // whether the hovered application supports file activation.
             if (paths.All(IsDockPinTarget))
             {
                 var added = 0;
@@ -1781,6 +1822,13 @@ public sealed class DesktopOverlayWindow : Window
                     1 => "Pinned 1 item to Doky.",
                     _ => $"Pinned {added} items to Doky."
                 });
+                return;
+            }
+
+            if (!WindowsApplicationLauncher.CanOpenWith(item.Application))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                SetStatus($"{item.Name} does not expose a supported file-drop launch target.");
                 return;
             }
 
@@ -1809,7 +1857,7 @@ public sealed class DesktopOverlayWindow : Window
 
             externalDropTargetButton = button;
             externalDropHighlight.Opacity = 0;
-            externalDragActive = true;
+            externalDragActive = true; stackDrag.Begin(external: true);
             collapseDelay?.Cancel();
             CancelPillHide();
             previews.Hide();
@@ -1826,7 +1874,7 @@ public sealed class DesktopOverlayWindow : Window
         if (!ReferenceEquals(externalDropTargetButton, button)) return;
         RestoreApplicationDropTarget(button);
         externalDropTargetButton = null;
-        externalDragActive = false;
+        externalDragActive = false; if (stackDrag.Mode == DockDragMode.ExternalFiles) stackDrag.Reset();
 
         if (!closing)
         {
@@ -1871,6 +1919,8 @@ public sealed class DesktopOverlayWindow : Window
     private void SetExternalDropVisual(bool active)
     {
         externalDragActive = active;
+        if (active && stackDrag.Mode == DockDragMode.None) stackDrag.Begin(external: true);
+        else if (!active && stackDrag.Mode == DockDragMode.ExternalFiles) stackDrag.Reset();
         UpdateExternalDropHighlight();
 
         if (!active && externalDropTargetButton is not null)
@@ -1896,12 +1946,12 @@ public sealed class DesktopOverlayWindow : Window
         }
     }
 
-    private bool HasStorageItems(DragEventArgs e) =>
-        !reorderDragging && !reorderCommitting && reorderButton is null &&
+    private static bool HasStorageItems(DragEventArgs e) =>
         e.DataView.Contains(StandardDataFormats.StorageItems);
 
     private async void ExternalDragEnter(object sender, DragEventArgs e)
     {
+        if (StackItemDragOver(e)) return;
         if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
@@ -1923,6 +1973,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private async void ExternalDragOver(object sender, DragEventArgs e)
     {
+        if (StackItemDragOver(e)) return;
         if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
@@ -1959,6 +2010,7 @@ public sealed class DesktopOverlayWindow : Window
 
     private async void ExternalDrop(object sender, DragEventArgs e)
     {
+        if (await StackItemDrop(e)) return;
         if (closing || shutdown.IsRequested || !HasStorageItems(e))
         {
             e.AcceptedOperation = DataPackageOperation.None;
@@ -2485,6 +2537,7 @@ public sealed class DesktopOverlayWindow : Window
 
         if (SystemPopupOpen)
         {
+            stackWindow?.Hide();
             utilityRequests.Reset();
             utilityTransitionPending = false;
             CloseQuickSettings();
@@ -2894,6 +2947,7 @@ public sealed class DesktopOverlayWindow : Window
         DockAppearanceSettings appearance,
         DockAppearanceMode dockAppearance)
     {
+        stackWindow?.ApplyAppearance(appearance, dockAppearance);
         cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance);
         cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance);
         cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);
@@ -3285,6 +3339,7 @@ public sealed class DesktopOverlayWindow : Window
         if (closeMainWindow) AppWindow.Hide();
         root.ContextFlyout?.Hide();
 
+        ClearStackDrag(); stackWindow?.Close(); stackWindow = null;
         previews.Dispose();
         badges.Changed -= BadgesChanged;
         if (ownsGlobalServices)

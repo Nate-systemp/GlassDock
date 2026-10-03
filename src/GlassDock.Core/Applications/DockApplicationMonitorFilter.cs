@@ -22,7 +22,9 @@ public static class DockApplicationMonitorFilter
             if (!application.IsPinned && localWindows.Length == 0)
                 continue;
 
-            applications.Add(application with { Windows = localWindows });
+            applications.Add(application with { Windows = localWindows,
+                StackApps = application.Stack is null ? application.StackApps :
+                    ForMonitor(new(application.StackApps), belongsToMonitor).Applications });
         }
 
         return new ApplicationSnapshot(applications, snapshot.Warning);

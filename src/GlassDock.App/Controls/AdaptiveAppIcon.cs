@@ -33,6 +33,27 @@ internal sealed class AdaptiveAppIcon : Grid
     private ApplicationIcon? original;
     private int rasterWidth, rasterHeight;
     private NotificationBadge? badge;
+    private Grid? stackPreview;
+    private ApplicationIcon?[] stackIcons = [];
+    private double stackSize;
+
+    public void SetStack(IReadOnlyList<DockApplication> apps)
+    {
+        artwork.Visibility = Visibility.Collapsed;
+        tile.Visibility = Visibility.Visible;
+        var next = apps.Take(4).Select(app => app.Icon).ToArray();
+        if (stackPreview is not null && stackSize == Width && stackIcons.SequenceEqual(next)) return;
+        stackIcons = next; stackSize = Width;
+        if (stackPreview is not null) Children.Remove(stackPreview);
+        stackPreview = new Grid { IsHitTestVisible = false, ColumnSpacing = 2, RowSpacing = 2, Margin = new(2) };
+        for (var i = 0; i < 2; i++) { stackPreview.ColumnDefinitions.Add(new()); stackPreview.RowDefinitions.Add(new()); }
+        for (var i = 0; i < next.Length; i++)
+        {
+            var mini = new AdaptiveAppIcon(Math.Max(8, (Width - 6) / 2), 1, false);
+            mini.SetIcon(next[i]); Grid.SetRow(mini, i / 2); Grid.SetColumn(mini, i % 2); stackPreview.Children.Add(mini);
+        }
+        Children.Insert(1, stackPreview);
+    }
 
     public void SetNotificationCount(int count) =>
         SetNotificationBadge(BadgeDisplayState.Counted(count, "legacy-count"));
@@ -81,6 +102,8 @@ internal sealed class AdaptiveAppIcon : Grid
         size = double.IsFinite(size) && size > 0 ? size : 28;
         maximumHoverScale = double.IsFinite(hoverScale) && hoverScale >= 1 ? hoverScale : 1.24;
         Width = Height = size;
+        if (stackPreview is not null)
+            foreach (var mini in stackPreview.Children.OfType<AdaptiveAppIcon>()) mini.Configure(Math.Max(8, (size - 6) / 2), 1);
         tile.CornerRadius = new CornerRadius(size * 0.25);
         Fit();
     }

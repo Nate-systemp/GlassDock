@@ -19,7 +19,8 @@ public sealed class DockApplicationItem(DockApplication application) : INotifyPr
         Application = application;
         if (previous.Name != Name || previous.IsPinned != IsPinned || previous.IsRunning != IsRunning ||
             previous.IsActive != IsActive || !ReferenceEquals(previous.Icon, application.Icon) ||
-            !previous.Windows.SequenceEqual(application.Windows))
+            !previous.Windows.SequenceEqual(application.Windows) ||
+            !previous.StackApps.SequenceEqual(application.StackApps))
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
     }
 }

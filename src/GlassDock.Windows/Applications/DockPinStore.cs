@@ -12,11 +12,13 @@ internal sealed class DockPinStore
 
     private sealed record SavedPin(ApplicationIdentity Identity, string Name, string Target);
 
-    private sealed class Preferences
+    private sealed record Preferences
     {
         public List<SavedPin> Pins { get; init; } = [];
         public HashSet<string> Excluded { get; init; } = [];
         public List<string>? Order { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<DockStack>? Stacks { get; init; }
     }
 
     private Preferences preferences = new();
@@ -34,6 +36,7 @@ internal sealed class DockPinStore
 
             preferences = new Preferences
             {
+                Stacks = ValidateStacks(saved.Stacks),
                 Pins = (saved.Pins ?? [])
                     .Where(pin =>
                         pin is { Identity: not null } &&
@@ -148,6 +151,7 @@ internal sealed class DockPinStore
 
         return new Preferences
         {
+            Stacks = source.Stacks?.Select(stack => stack with { ApplicationIds = stack.ApplicationIds.Select(Map).Distinct(StringComparer.Ordinal).ToArray() }).ToArray(),
             Pins = pins,
             Excluded = source.Excluded
                 .Select(Map)
@@ -200,6 +204,7 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Stacks = preferences.Stacks,
                 Pins = pins,
                 Excluded = excluded,
                 Order = order
@@ -271,6 +276,7 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Stacks = preferences.Stacks,
                 Pins = pins,
                 Excluded = excluded,
                 Order = order
@@ -309,6 +315,7 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Stacks = preferences.Stacks,
                 Pins = preferences.Pins.ToList(),
                 Excluded = new HashSet<string>(
                     preferences.Excluded,
@@ -320,6 +327,119 @@ internal sealed class DockPinStore
         }
     }
 
+    private static IReadOnlyList<DockStack>? ValidateStacks(IReadOnlyList<DockStack>? stacks)
+    {
+        if (stacks is null) return null;
+        var members = new HashSet<string>(StringComparer.Ordinal);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var valid = new List<DockStack>();
+        foreach (var stack in stacks)
+        {
+            if (stack is null || string.IsNullOrWhiteSpace(stack.Id) || !stack.Id.StartsWith("stack:", StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(stack.Name) || stack.ApplicationIds is null || !ids.Add(stack.Id)) continue;
+            var apps = stack.ApplicationIds.Where(id => !string.IsNullOrWhiteSpace(id) && !id.StartsWith("stack:", StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal).Take(DockStack.MaximumApps).Where(members.Add).ToArray();
+            if (apps.Length > 0) valid.Add(stack with { ApplicationIds = apps });
+        }
+        return valid.Count == 0 ? null : valid;
+    }
+    public IReadOnlyList<DockApplication> ApplyStacks(IReadOnlyList<DockApplication> applications)
+    {
+        lock (gate)
+        {
+            if (preferences.Stacks is not { Count: > 0 }) return ApplyOrder(applications);
+            var byId = applications.ToDictionary(app => app.Id, StringComparer.Ordinal);
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<DockApplication>();
+            foreach (var stack in preferences.Stacks)
+            {
+                var members = stack.ApplicationIds.Where(id => byId.ContainsKey(id) && used.Add(id))
+                    .Select(id => byId[id]).ToArray();
+                if (members.Length == 0) continue;
+                if (members.Length == 1) { result.Add(members[0]); continue; }
+                result.Add(new(stack.Id, new(null, null, ShellPath: stack.Id), stack.Name, null, true,
+                    members.SelectMany(app => app.Windows).ToArray(), null) { Stack = stack, StackApps = members });
+            }
+            result.AddRange(applications.Where(app => !used.Contains(app.Id)));
+            return ApplyOrder(result);
+        }
+    }
+
+    public bool MergeStack(string sourceId, string targetId, IReadOnlyList<DockApplication> applications)
+    {
+        lock (gate)
+        {
+            var layout = ApplyStacks(applications);
+            var source = layout.FirstOrDefault(app => app.Id == sourceId);
+            var target = layout.FirstOrDefault(app => app.Id == targetId);
+            if (source is null || target is null || source == target || !source.IsPinned || !target.IsPinned || source.Stack is not null)
+                return false;
+            var members = target.Stack?.ApplicationIds.ToList() ?? [target.Id];
+            if (members.Contains(source.Id) || members.Count >= DockStack.MaximumApps) return false;
+            members.Add(source.Id);
+            var stack = new DockStack(target.Stack?.Id ?? "stack:" + Guid.NewGuid().ToString("N"), target.Stack?.Name ?? "Stack", members);
+            var stacks = (preferences.Stacks ?? []).Where(item => item.Id != stack.Id).Append(stack).ToArray();
+            // Snapshot exact imported/custom launch targets before grouping; never touch Windows pins.
+            var pins = preferences.Pins.ToList();
+            foreach (var app in applications.Where(app => members.Contains(app.Id)))
+            {
+                if (pins.Any(pin => pin.Identity.Key == app.Id)) continue;
+                var launch = WindowsApplicationLauncher.Target(app);
+                if (launch is null) return false;
+                pins.Add(new(app.Identity, app.Name, launch));
+            }
+            var order = layout.Where(app => app.Id != source.Id).Select(app => app.Id == target.Id ? stack.Id : app.Id)
+                .Concat((preferences.Order ?? []).Where(id => id != source.Id && id != target.Id && !members.Contains(id)))
+                .Distinct(StringComparer.Ordinal).ToList();
+            return Save(preferences with { Pins = pins, Stacks = stacks, Order = order });
+        }
+    }
+
+    public bool RenameStack(string id, string name)
+    {
+        lock (gate)
+        {
+            name = name.Trim();
+            if (name.Length is < 1 or > 40 || preferences.Stacks?.Any(stack => stack.Id == id) != true) return false;
+            return Save(preferences with { Stacks = preferences.Stacks.Select(stack => stack.Id == id ? stack with { Name = name } : stack).ToArray() });
+        }
+    }
+
+    public bool ReorderStack(string id, IReadOnlyList<string> order)
+    {
+        lock (gate)
+        {
+            var stack = preferences.Stacks?.FirstOrDefault(item => item.Id == id);
+            if (stack is null || order.Count != stack.ApplicationIds.Count || order.Distinct().Count() != order.Count ||
+                order.Any(item => !stack.ApplicationIds.Contains(item))) return false;
+            return Save(preferences with { Stacks = preferences.Stacks!.Select(item => item.Id == id ? item with { ApplicationIds = order.ToArray() } : item).ToArray() });
+        }
+    }
+
+    public bool ExtractStack(string id, string? appId = null, string? beforeId = null)
+    {
+        lock (gate)
+        {
+            var stack = preferences.Stacks?.FirstOrDefault(item => item.Id == id);
+            if (stack is null || (appId is not null && !stack.ApplicationIds.Contains(appId))) return false;
+            var remaining = appId is null ? [] : stack.ApplicationIds.Where(item => item != appId).ToArray();
+            var removed = appId is null ? stack.ApplicationIds.ToArray() : [appId];
+            var stacks = preferences.Stacks!.Where(item => item.Id != id).ToList();
+            if (remaining.Length > 1) stacks.Add(stack with { ApplicationIds = remaining });
+            var order = (preferences.Order ?? []).Where(item => !removed.Contains(item) && !remaining.Contains(item)).ToList();
+            var slot = order.IndexOf(id);
+            if (slot < 0) slot = order.Count;
+            if (remaining.Length <= 1)
+            {
+                order.Remove(id);
+                order.InsertRange(Math.Min(slot, order.Count), remaining);
+            }
+            var insertion = beforeId is null ? -1 : order.IndexOf(beforeId);
+            if (insertion < 0) insertion = Math.Min(slot + (remaining.Length > 0 ? 1 : 0), order.Count);
+            order.InsertRange(insertion, removed);
+            return Save(preferences with { Stacks = stacks.Count == 0 ? null : stacks, Order = order });
+        }
+    }
     private bool Save(Preferences next)
     {
         try

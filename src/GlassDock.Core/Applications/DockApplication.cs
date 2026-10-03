@@ -17,6 +17,8 @@ public sealed record ApplicationWindow(ApplicationIdentity Identity, string Name
 public sealed record DockApplication(string Id, ApplicationIdentity Identity, string Name, string? LaunchTarget,
     bool IsPinned, IReadOnlyList<ApplicationWindow> Windows, ApplicationIcon? Icon)
 {
+    public DockStack? Stack { get; init; }
+    public IReadOnlyList<DockApplication> StackApps { get; init; } = [];
     public bool IsRunning => Windows.Count > 0;
     public bool IsActive => Windows.Any(window => window.IsActive);
 }
