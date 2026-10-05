@@ -28,6 +28,13 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     // Configure before the XAML SystemBackdrop makes its first connection.
     public bool UseDockLayeredTransparency { get; set; }
     public bool HostBackdropAvailable { get; private set; }
+    // Explicit user-invoked menus need actual foreground ownership: Window.Activate
+    // alone may only show a tool window opened from a non-activating dock.
+    public bool ActivateForUserInput() => !disposed && SetForegroundWindow(hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
     private bool disposed;
 
     public InteractiveGlassWindowHost(nint hwnd)

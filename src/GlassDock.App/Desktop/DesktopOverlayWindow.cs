@@ -329,7 +329,7 @@ public sealed partial class DesktopOverlayWindow : Window
         previews = new(applications, root, hwnd, () => ExpandedContentTop, settingsSession,
             () => !closing && state.State == DockState.Expanded && reorderButton is null &&
                 !externalDragActive && !SystemPopupOpen,
-            window => keyboard?.RestoreElevatedWindowAsync(window) ?? Task.FromResult(false));
+            window => keyboard?.RestoreElevatedWindowAsync(window) ?? Task.FromResult(false), dropLauncher.OpenWithAsync);
         previews.HoldChanged += (_, _) => OnInteractionHoldChanged();
         previews.ActionFailed += (_, message) => SetStatus(message);
         AppWindow.Changed += (_, _) =>

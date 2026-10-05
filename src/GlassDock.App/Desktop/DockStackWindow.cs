@@ -46,6 +46,7 @@ internal sealed class DockStackWindow : Window
     public bool IsClosing => closing;
     public string? StackId => stack?.Id;
     public event EventHandler? Hidden;
+    public event Action<DockApplication, string, double>? AppActionsRequested;
 
     public DockStackWindow(nint dock, Func<DockApplication, bool> launch,
         Func<ApplicationIdentity, BadgeDisplayState> badge, Action<string, string> rename,
@@ -122,6 +123,16 @@ internal sealed class DockStackWindow : Window
                 VerticalAlignment = VerticalAlignment.Stretch, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 BorderThickness = new(0), AllowDrop = true };
             theme.StyleButton(button); AutomationProperties.SetName(button, app.Name);
+            button.ContextRequested += (_, e) =>
+            {
+                e.Handled = true;
+                if (dragging) return;
+                var (_, dpi, owner) = WindowPreviewPlacement.GetArea(dock);
+                var point = button.TransformToVisual(root).TransformPoint(new(button.ActualWidth / 2, 0));
+                var anchor = (AppWindow.Position.X - owner.X) / dpi + point.X;
+                Hide(immediate: true);
+                AppActionsRequested?.Invoke(app, value.Id, anchor);
+            };
             global::Windows.Foundation.Point? press = null;
             long suppressClickUntil = 0;
             button.Click += (_, _) => { if (!dragging && Environment.TickCount64 >= suppressClickUntil && launch(app)) Hide(); };
@@ -236,5 +247,17 @@ internal sealed class DockStackWindow : Window
             if (hide) { IsOpen = false; closing = false; AppWindow.Hide(); Hidden?.Invoke(this, EventArgs.Empty); } };
         batch.End();
     }
-    public void Hide() { if (!IsOpen || disposed || closing) return; closing = true; root.IsHitTestVisible = false; Animate(true); }
+    public void Hide(bool immediate = false)
+    {
+        if (!IsOpen || disposed) return;
+        root.IsHitTestVisible = false;
+        if (immediate)
+        {
+            generation++; batch?.Dispose(); batch = null; track?.Stop(); backdrop.StopPresentationAnimation();
+            IsOpen = false; closing = false; AppWindow.Hide(); Hidden?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+        if (closing) return;
+        closing = true; Animate(true);
+    }
 }

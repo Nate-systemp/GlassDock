@@ -33,6 +33,9 @@ public sealed partial class DesktopOverlayWindow
                 badges.ForApplication, (id, name) => applicationService.RenameStack(id, name),
                 (id, order) => applicationService.ReorderStack(id, order), StackSourceOwnsPointer);
             stackWindow.Hidden += (_, _) => { if (!closing) { RefreshHoverVisuals(); ScheduleCollapse(); } };
+            stackWindow.AppActionsRequested += (app, stackId, anchor) =>
+                previews.ShowAppActions(new DockApplicationItem(app), anchor,
+                    () => applicationService.ExtractStack(stackId, app.Id));
         }
         stackWindow.ApplyAppearance(Appearance, settingsSession.Current.DockAppearanceMode);
         var button = applicationButtons[item.Id];

@@ -36,6 +36,7 @@ internal sealed class AdaptiveAppIcon : Grid
     private Grid? stackPreview;
     private ApplicationIcon?[] stackIcons = [];
     private double stackSize;
+    private readonly double artworkPadding;
 
     public void SetStack(IReadOnlyList<DockApplication> apps)
     {
@@ -45,15 +46,28 @@ internal sealed class AdaptiveAppIcon : Grid
         if (stackPreview is not null && stackSize == Width && stackIcons.SequenceEqual(next)) return;
         stackIcons = next; stackSize = Width;
         if (stackPreview is not null) Children.Remove(stackPreview);
-        stackPreview = new Grid { IsHitTestVisible = false, ColumnSpacing = 2, RowSpacing = 2, Margin = new(2) };
+        stackPreview = new Grid
+        {
+            IsHitTestVisible = false,
+            ColumnSpacing = 1,
+            RowSpacing = 1,
+            Margin = new Thickness(1),
+            UseLayoutRounding = true
+        };
         for (var i = 0; i < 2; i++) { stackPreview.ColumnDefinitions.Add(new()); stackPreview.RowDefinitions.Add(new()); }
+        var miniSize = StackMiniSize(Width);
         for (var i = 0; i < next.Length; i++)
         {
-            var mini = new AdaptiveAppIcon(Math.Max(8, (Width - 6) / 2), 1, false);
+            // Stack previews are already very small. Give the source artwork almost the
+            // entire cell and pre-rasterize for the parent dock hover magnification so
+            // Windows never has to enlarge a tiny bitmap after it has been composed.
+            var mini = new AdaptiveAppIcon(miniSize, maximumHoverScale, false, 0.25);
             mini.SetIcon(next[i]); Grid.SetRow(mini, i / 2); Grid.SetColumn(mini, i % 2); stackPreview.Children.Add(mini);
         }
         Children.Insert(1, stackPreview);
     }
+
+    private static double StackMiniSize(double size) => Math.Max(9, (size - 3) / 2);
 
     public void SetNotificationCount(int count) =>
         SetNotificationBadge(BadgeDisplayState.Counted(count, "legacy-count"));
@@ -75,7 +89,14 @@ internal sealed class AdaptiveAppIcon : Grid
     }
 
     public AdaptiveAppIcon(double size, double maximumHoverScale, bool showTile = true)
+        : this(size, maximumHoverScale, showTile, 2)
     {
+    }
+
+    private AdaptiveAppIcon(double size, double maximumHoverScale, bool showTile, double artworkPadding)
+    {
+        this.artworkPadding = double.IsFinite(artworkPadding) ? Math.Max(0, artworkPadding) : 2;
+        image.UseLayoutRounding = this.artworkPadding < 1;
         Configure(size, maximumHoverScale);
         HorizontalAlignment = HorizontalAlignment.Center;
         VerticalAlignment = VerticalAlignment.Center;
@@ -103,7 +124,7 @@ internal sealed class AdaptiveAppIcon : Grid
         maximumHoverScale = double.IsFinite(hoverScale) && hoverScale >= 1 ? hoverScale : 1.24;
         Width = Height = size;
         if (stackPreview is not null)
-            foreach (var mini in stackPreview.Children.OfType<AdaptiveAppIcon>()) mini.Configure(Math.Max(8, (size - 6) / 2), 1);
+            foreach (var mini in stackPreview.Children.OfType<AdaptiveAppIcon>()) mini.Configure(StackMiniSize(size), maximumHoverScale);
         tile.CornerRadius = new CornerRadius(size * 0.25);
         Fit();
     }
@@ -148,7 +169,7 @@ internal sealed class AdaptiveAppIcon : Grid
     {
         if (pixelWidth == 0 || pixelHeight == 0) return;
         var dpi = XamlRoot?.RasterizationScale ?? 1;
-        const double padding = 2;
+        var padding = Math.Min(artworkPadding, Math.Max(0, (Math.Min(Width, Height) - 1) / 2));
         var scale = Math.Min(Math.Min((Width - padding * 2) / pixelWidth, (Height - padding * 2) / pixelHeight),
             1 / (dpi * maximumHoverScale));
         image.Width = sourceWidth * scale;

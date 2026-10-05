@@ -5,6 +5,7 @@ using GlassDock.Windows.Applications;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Input;
 
 namespace GlassDock.App.Desktop;
 
@@ -17,6 +18,9 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly GlassDockSettingsSession settings;
     private readonly Func<bool> canShow;
     private readonly Func<ApplicationWindow, Task<bool>> restoreElevated;
+    private readonly Func<DockApplication, IReadOnlyList<string>, Task<bool>> openFiles;
+    private bool filePickerActive;
+    private double? memberAnchor;
     private readonly WindowPreviewSession session = new();
     private readonly WindowFrameCache frameCache = new();
     private WindowPreviewWindow? preview;
@@ -36,15 +40,25 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     public WindowPreviewCoordinator(DockApplicationsViewModel applications, FrameworkElement dockRoot, nint dock,
         Func<double> dockTop, GlassDockSettingsSession settings, Func<bool> canShow,
-        Func<ApplicationWindow, Task<bool>> restoreElevated)
+        Func<ApplicationWindow, Task<bool>> restoreElevated,
+        Func<DockApplication, IReadOnlyList<string>, Task<bool>> openFiles)
     {
         this.applications = applications; this.dockRoot = dockRoot; this.dock = dock; this.dockTop = dockTop;
         this.settings = settings;
         this.canShow = canShow;
         this.restoreElevated = restoreElevated;
+        this.openFiles = openFiles;
         settings.Changed += SettingsChanged;
         applications.SnapshotApplied += OnSnapshot;
+        dockRoot.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(DockPointerPressed), true);
         TrackFrames();
+    }
+
+    private void DockPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        // The dock intentionally does not activate on every click. Such an outside
+        // click cannot produce the panel's Window.Activated(Deactivated) event.
+        appMenu?.Hide(immediate: true);
     }
 
     public void Attach(Button button, DockApplicationItem item)
@@ -60,18 +74,42 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         button.ContextRequested += (_, e) =>
         {
             e.Handled = true;
-            if (disposed) return;
-            appMenu ??= CreateAppMenu();
-            pendingShowAll = null;
-            menuSnapshots.Clear();
-            menuOwner = item.Id;
-            BeginContextMenu(appMenu);
-            Hide(immediate: true);
-            appMenu.ApplyAppearance(settings.Appearance, settings.Current.DockAppearanceMode);
-            var state = MenuState(item);
-            appMenu.Show(item, BuildMenu(item, state), Anchor(button), dockTop());
-            menuSnapshots[item.Id] = (appMenu, state);
+            ShowAppActions(item, Anchor(button));
         };
+    }
+
+    public void ShowAppActions(DockApplicationItem item, double anchor, Func<bool>? extract = null)
+    {
+        if (disposed || filePickerActive) return;
+        appMenu ??= CreateAppMenu();
+        pendingShowAll = null; menuSnapshots.Clear(); menuOwner = item.Id;
+        memberAnchor = extract is null ? null : anchor;
+        BeginContextMenu(appMenu);
+        Hide(immediate: true);
+        appMenu.ApplyAppearance(settings.Appearance, settings.Current.DockAppearanceMode);
+        var state = MenuState(item);
+        var model = new AppActionPanelModel(item.Application, WindowsApplicationLauncher.CanOpenWith(item.Application), extract is not null);
+        appMenu.Show(item, BuildMenu(item, state, model, extract), anchor, dockTop(), model.Status);
+        menuSnapshots[item.Id] = (appMenu, state);
+    }
+
+    private async void PickFiles(DockApplication application)
+    {
+        if (disposed || filePickerActive) return;
+        filePickerActive = true;
+        var hold = new object(); BeginContextMenu(hold);
+        try
+        {
+            var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(dock));
+            picker.FileTypeFilter.Add("*");
+            var selected = await picker.PickMultipleFilesAsync();
+            if (disposed || selected.Count == 0) return;
+            if (!await openFiles(application, selected.Select(file => file.Path).ToArray()) && !disposed)
+                ActionFailed?.Invoke(this, $"{application.Name} could not open the selected files.");
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
+        { if (!disposed) ActionFailed?.Invoke(this, "Could not open the file picker: " + error.Message); }
+        finally { filePickerActive = false; EndContextMenu(hold); }
     }
 
     private DockAppContextMenuWindow CreateAppMenu()
@@ -192,7 +230,9 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         TrackFrames();
         foreach (var (appId, snapshot) in menuSnapshots.ToArray())
         {
-            var current = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == appId);
+            var current = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == appId)
+                ?? applications.VisibleDockApplications.SelectMany(item => item.Application.StackApps)
+                    .Where(app => app.Id == appId).Select(app => new DockApplicationItem(app)).FirstOrDefault();
             if (current is null || !snapshot.State.Matches(current.Application))
                 snapshot.Menu.Hide(immediate: true);
         }
@@ -215,7 +255,8 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     public void Reposition()
     {
-        if (menuOwner is { } owner && buttons.TryGetValue(owner, out var source))
+        if (memberAnchor is { } fixedAnchor && menuOwner is not null) appMenu?.Reposition(fixedAnchor, dockTop());
+        else if (menuOwner is { } owner && buttons.TryGetValue(owner, out var source))
             appMenu?.Reposition(Anchor(source), dockTop());
         if (session.State is WindowPreviewState.Hidden or WindowPreviewState.Waiting || session.ApplicationId is not { } id) return;
         if (buttons.TryGetValue(id, out var button))
@@ -230,7 +271,8 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         WindowsApplicationLauncher.CanRunAsAdministrator(item.Application),
         WindowsApplicationLauncher.CanOpenFileLocation(item.Application));
 
-    private IReadOnlyList<DockAppMenuEntry> BuildMenu(DockApplicationItem item, DockAppMenuState state)
+    private IReadOnlyList<DockAppMenuEntry> BuildMenu(DockApplicationItem item, DockAppMenuState state,
+        AppActionPanelModel model, Func<bool>? extract)
     {
         var entries = new List<DockAppMenuEntry>();
         void Add(string title, Func<bool> action)
@@ -240,24 +282,24 @@ internal sealed class WindowPreviewCoordinator : IDisposable
                 if (!action()) ActionFailed?.Invoke(this, $"Could not complete '{title}' for {item.Name}.");
             }));
         }
-        Add(item.IsRunning ? "Activate" : "Open", () => applications.Activate(item));
+        if (model.RunningWindows.Count > 0)
+        {
+            entries.Add(new("Open Windows", "", IsHeading: true));
+            foreach (var window in model.RunningWindows.Take(4))
+                entries.Add(WindowEntry(window));
+            if (model.RunningWindows.Count > 4)
+                entries.Add(new("More windows", "\uE737", Children: model.RunningWindows.Skip(4).Select(WindowEntry).ToArray()));
+            entries.Add(new("", ""));
+        }
+        else if (state.CanLaunch) Add("Open", () => applications.Activate(item));
         if (state.ShowNewWindow) Add("New window", () => applications.Launch(item));
+        if (model.CanOpenFile) entries.Add(new("Open file…", "\uE8E5", () => PickFiles(item.Application)));
 
         if (item.IsRunning)
         {
-            Add("Show All Windows", () => { pendingShowAll = item; return true; });
+            if (extract is null) Add("Show All Windows", () => { pendingShowAll = item; return true; });
             if (state.HasMultipleWindows)
             {
-                var windows = new List<DockAppMenuEntry>();
-                foreach (var window in item.Application.Windows)
-                {
-                    var title = string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title;
-                    windows.Add(new(title, "\uE737", () =>
-                    {
-                        if (!applications.ActivateWindow(window)) ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
-                    }));
-                }
-                entries.Add(new("Windows", "\uE737", Children: windows));
                 Add("Close All Windows", () =>
                 {
                     var windowsToClose = item.Application.Windows.ToArray();
@@ -276,7 +318,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         if (state.ShowPin)
         {
             entries.Add(new("", ""));
-            Add(state.PinLabel, () => applications.SetPinned(item, !state.IsPinned));
+            Add(model.PinAction, extract ?? (() => applications.SetPinned(item, !state.IsPinned)));
         }
 
         var canElevate = state.CanElevate;
@@ -290,13 +332,20 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         return entries;
     }
 
+    private DockAppMenuEntry WindowEntry(ApplicationWindow window) => new(
+        string.IsNullOrWhiteSpace(window.Title) ? window.Name : window.Title, "\uE737", async () =>
+        {
+            var activated = applications.ActivateWindow(window) || await restoreElevated(window);
+            if (!disposed && !activated) ActionFailed?.Invoke(this, "Windows could not focus that window; it may have closed.");
+        });
+
     private static string Glyph(string title) => title switch
     {
         "Activate" or "Open" => "\uE737",
         "New window" => "\uE710",
         "Show All Windows" => "\uE8A7",
         "Close Window" or "Close All Windows" => "\uE711",
-        "Pin to Dock" or "Unpin from Dock" => "\uE718",
+        "Pin to Dock" or "Unpin from Dock" or "Pin to Doky" or "Unpin from Doky" or "Move out of stack" => "\uE718",
         "Run as Administrator" => "\uEA18",
         _ => "\uE8B7"
     };
@@ -350,6 +399,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         contextMenus.Clear();
         menuSnapshots.Clear();
         applications.SnapshotApplied -= OnSnapshot;
+        dockRoot.RemoveHandler(UIElement.PointerPressedEvent, new PointerEventHandler(DockPointerPressed));
         settings.Changed -= SettingsChanged;
         pending?.Cancel();
         preview?.Close(); preview = null;

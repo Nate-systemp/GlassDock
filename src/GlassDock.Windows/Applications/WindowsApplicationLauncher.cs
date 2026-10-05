@@ -5,6 +5,19 @@ namespace GlassDock.Windows.Applications;
 
 public sealed class WindowsApplicationLauncher
 {
+    public Task<bool> OpenWithAsync(DockApplication application, IReadOnlyList<string> paths)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { completion.SetResult(OpenWith(application, paths)); }
+            catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
+            { completion.SetResult(false); }
+        }) { IsBackground = true, Name = "Doky open selected files" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
+    }
     public Task<bool> LaunchTargetAsync(string target)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

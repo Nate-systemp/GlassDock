@@ -14,7 +14,7 @@ using Microsoft.UI.Xaml.Media;
 namespace GlassDock.App.Desktop;
 
 internal sealed record DockAppMenuEntry(string Text, string Glyph, Action? Invoke = null,
-    IReadOnlyList<DockAppMenuEntry>? Children = null);
+    IReadOnlyList<DockAppMenuEntry>? Children = null, bool IsHeading = false);
 
 /// <summary>One retained, interactive app menu using the dock's desktop glass and control palette.</summary>
 internal sealed class DockAppContextMenuWindow : Window
@@ -26,6 +26,7 @@ internal sealed class DockAppContextMenuWindow : Window
     private readonly AdaptiveAppIcon icon = new(26, 1, showTile: false);
     private readonly TextBlock title = new() { FontSize = 15, TextTrimming = TextTrimming.CharacterEllipsis,
         VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock status = new() { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new(Gutter), IsHitTestVisible = false };
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly UtilityPopupTheme theme = new();
@@ -63,8 +64,11 @@ internal sealed class DockAppContextMenuWindow : Window
         header.ColumnDefinitions.Add(new());
         header.Children.Add(icon);
         title.Foreground = theme.Primary;
-        Grid.SetColumn(title, 1);
-        header.Children.Add(title);
+        status.Foreground = theme.Secondary;
+        var heading = new StackPanel { Spacing = 2 };
+        heading.Children.Add(title); heading.Children.Add(status);
+        Grid.SetColumn(heading, 1);
+        header.Children.Add(heading);
         body.Children.Add(header);
         scroll = new ScrollViewer { Content = rows, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -114,10 +118,12 @@ internal sealed class DockAppContextMenuWindow : Window
         UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
     }
 
-    public void Show(DockApplicationItem item, IReadOnlyList<DockAppMenuEntry> commands, double anchorX, double dockTop)
+    public void Show(DockApplicationItem item, IReadOnlyList<DockAppMenuEntry> commands, double anchorX, double dockTop, string stateText = "")
     {
         entries = commands;
         title.Text = item.Name;
+        status.Text = stateText;
+        status.Visibility = string.IsNullOrEmpty(stateText) ? Visibility.Collapsed : Visibility.Visible;
         icon.SetIcon(item.Application.Icon);
         anchor = anchorX; top = dockTop;
         IsOpen = true; closing = false;
@@ -129,6 +135,7 @@ internal sealed class DockAppContextMenuWindow : Window
         BuildRows(entries);
         root.IsHitTestVisible = true;
         Activate();
+        host.ActivateForUserInput();
         var revision = ++generation;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
@@ -146,6 +153,8 @@ internal sealed class DockAppContextMenuWindow : Window
         foreach (var entry in commands)
         {
             if (entry.Text.Length == 0) Separator();
+            else if (entry.IsHeading) rows.Children.Add(new TextBlock { Text = entry.Text, FontSize = 11,
+                Foreground = theme.Secondary, Margin = new(10, 5, 10, 3) });
             else AddRow(entry);
         }
         Reposition(anchor, top);
@@ -195,7 +204,7 @@ internal sealed class DockAppContextMenuWindow : Window
         scale = dpi;
         var bounds = WindowPreviewLayout.Position(new(area.X, area.Y, area.Width, area.Height),
             new(dockBounds.X, dockBounds.Y, dockBounds.Width, dockBounds.Height), scale, anchor, top + 6,
-            240 + Gutter * 2, 56 + Gutter * 2 + rows.Children.Sum(child => child is Button ? 34 : 9));
+            240 + Gutter * 2, Math.Min(490, 68 + Gutter * 2 + rows.Children.Sum(child => child is Button ? 34 : child is TextBlock ? 24 : 9)));
         AppWindow.MoveAndResize(new((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height));
         UpdateBounds();
     }
@@ -221,12 +230,14 @@ internal sealed class DockAppContextMenuWindow : Window
         {
             var t = i / 8f; var eased = t * t * (3 - 2 * t);
             var visible = hide ? 1 - eased : eased;
-            return new PopupCompositionFrame(Matrix4x4.CreateTranslation(0, (1 - visible) * 6, 0), visible);
+            return new PopupCompositionFrame(Matrix4x4.CreateScale(0.97f + 0.03f * visible,
+                0.97f + 0.03f * visible, 1, new((float)(AppWindow.Size.Width / scale / 2),
+                    (float)(AppWindow.Size.Height / scale), 0)) * Matrix4x4.CreateTranslation(0, (1 - visible) * 4, 0), visible);
         }).ToArray();
         var revision = ++generation;
         batch = visual.Compositor.CreateScopedBatch(Microsoft.UI.Composition.CompositionBatchTypes.Animation);
-        track.Bind(); track.Start(frames, TimeSpan.FromMilliseconds(140));
-        backdrop.AnimatePresentation(frames, TimeSpan.FromMilliseconds(140));
+        track.Bind(); track.Start(frames, TimeSpan.FromMilliseconds(hide ? 110 : 150));
+        backdrop.AnimatePresentation(frames, TimeSpan.FromMilliseconds(hide ? 110 : 150));
         batch.Completed += (_, _) =>
         {
             if (disposed || revision != generation) return;
