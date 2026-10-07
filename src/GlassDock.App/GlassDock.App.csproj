@@ -25,6 +25,7 @@
     <RuntimeHostConfigurationOption Include="System.Net.DisableIPv6" Value="true" />
     <Content Include="Assets\Doky.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Doky.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Rendering\Shaders\LiquidGlass.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Ship the one-time opt-in elevated-helper registration script. NEVER
          run it automatically on every Doky launch (that would cause UAC). -->
     <Content Include="..\..\scripts\Register-InputHelper.ps1" Link="Register-InputHelper.ps1"

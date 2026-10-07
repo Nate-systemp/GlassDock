@@ -143,7 +143,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         clearSpecular?.SetTransform(matrix);
         visual.TransformMatrix = matrix;
-        visual.Opacity = (float)(presentationOpacity * lastOpacity);
+        visual.Opacity = liquidActive ? 0 : (float)(presentationOpacity * lastOpacity);
 
         if (edgeVisual is not null)
             edgeVisual.TransformMatrix = matrix;
@@ -180,6 +180,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionSpriteShape? shape;
     private CanvasDevice? canvasDevice;
     private CanvasGeometry? canvasGeometry;
+    internal CanvasGeometry? DockGeometry => canvasGeometry;
+    private bool liquidActive;
+    internal void SetLiquidActive(bool active)
+    {
+        if (liquidActive == active) return;
+        liquidActive = active;
+        ApplyPresentation();
+    }
     private readonly record struct MaskState(double WindowWidth, double WindowHeight, double Width,
         double Height, double Bottom, double Scale, double Radius, bool Wave, double Center,
         double HalfWidth, double Rise, double Strength);

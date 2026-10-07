@@ -105,6 +105,7 @@ public sealed partial class DesktopOverlayWindow : Window
         UseSolidSurface = true
     };
     private readonly WindowsOverlayManager windowManager;
+    private readonly DokyLiquidGlassSurface liquidGlass;
     private readonly WindowsKeyboardService keyboard;
     private readonly DockAnimationController animation;
     private readonly GlassDockSettingsSession settingsSession;
@@ -204,7 +205,8 @@ public sealed partial class DesktopOverlayWindow : Window
     private bool DockPinLock => pinDockRequested || pinnedPlacementActive || pinDockTransitionActive;
     private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
     public string Status { get; private set; } = "Starting desktop recovery protection.";
-    public string RenderingMode => desktopBackdrop.RenderingMode;
+    public string RenderingMode => settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Clear
+        ? liquidGlass.Status : desktopBackdrop.RenderingMode;
     public bool HotkeysAvailable => keyboard.IsRegistered;
     public bool IsShuttingDown => shutdown.IsRequested;
     public event EventHandler? StatusChanged;
@@ -289,6 +291,9 @@ public sealed partial class DesktopOverlayWindow : Window
         windowManager = new WindowsOverlayManager(hwnd, monitorTarget);
         windowManager.Configure(inspection);
         root.Children.Add(surface);
+        liquidGlass = new(hwnd, DispatcherQueue, () => desktopBackdrop.DockGeometry, desktopBackdrop.SetLiquidActive);
+        liquidGlass.StatusChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
+        root.Children.Add(liquidGlass.Panel);
         // Keep the wave path for native hit-test sampling; its XAML stroke is
         // no longer rendered over the compositor's independently sampled edge.
         root.Children.Add(indicator);
@@ -2293,6 +2298,7 @@ public sealed partial class DesktopOverlayWindow : Window
 
         UpdateDockWaveOutline();
 
+        UpdateLiquidGlass();
         var xSettled =
             Math.Abs(
                 dockWaveCurrentX -
@@ -2901,6 +2907,23 @@ public sealed partial class DesktopOverlayWindow : Window
 
             UpdateDockWaveOutline();
         }
+        UpdateLiquidGlass();
+    }
+
+    private void UpdateLiquidGlass()
+    {
+        if (liquidGlass is null || !root.IsLoaded) return;
+        var scale = (float)(root.XamlRoot?.RasterizationScale ?? 1);
+        var strength = HoverWaveEnabled ? dockWaveCurrentStrength : 0;
+        var amplitude = DockWaveRise * strength * strength * (3 - 2 * strength);
+        liquidGlass.Update(!closing && settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Clear &&
+                surface.ActualHeight > 6 && surface.Opacity > .01 && (Application.Current as App)?.BasicRendering != true,
+            surface.Opacity, scale,
+            new Vector4((float)((root.ActualWidth - surface.ActualWidth) / 2),
+                (float)(root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight),
+                (float)surface.ActualWidth, (float)surface.ActualHeight),
+            new Vector4((float)(dockWaveCurrentX > 0 ? dockWaveCurrentX : root.ActualWidth / 2),
+                (float)DockWaveHalfWidth, (float)amplitude, (float)Math.Min(ExpandedDockCornerRadius, surface.ActualHeight / 2)));
     }
 
     private void SettingsChanged(
@@ -3337,6 +3360,7 @@ public sealed partial class DesktopOverlayWindow : Window
         // Remove every GlassDock surface immediately; native/resource cleanup follows
         // while the taskbar recovery helper is still independently protecting exit.
         if (closeMainWindow) AppWindow.Hide();
+        liquidGlass.Dispose();
         root.ContextFlyout?.Hide();
 
         ClearStackDrag(); stackWindow?.Close(); stackWindow = null;
