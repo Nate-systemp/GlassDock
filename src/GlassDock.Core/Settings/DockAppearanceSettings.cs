@@ -12,6 +12,13 @@ public readonly record struct DockAppearanceSettings(
     double BorderThickness,
     double BorderOpacity)
 {
+    public double ClearRefractionStrength { get; init; } = 12;
+    public double SpecularHighlightAngle { get; init; } = 45;
+    public LiquidGlassMaterial LiquidOptics => new LiquidGlassMaterial
+    {
+        RefractionStrength = (float)ClearRefractionStrength,
+        SpecularAngleDegrees = (float)SpecularHighlightAngle
+    }.Normalize();
     private const double HorizontalPadding = 36;
     private const double MagnificationSigma = 52;
 

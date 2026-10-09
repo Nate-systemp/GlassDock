@@ -14,7 +14,21 @@ public sealed class WindowPreviewTests
         Assert.True(single.Cards[0].Height > group.Cards[0].Height);
         Assert.Equal(8, group.Cards.Count);
         Assert.True(group.Cards.Max(card => card.Y) > group.Cards.Min(card => card.Y));
-        Assert.All(group.Cards, card => Assert.True(card.Y + card.Height <= group.Height - 34));
+        Assert.All(group.Cards, card => Assert.True(card.Y + card.Height <= group.Height - 20));
+    }
+
+    [Fact]
+    public void BackgroundFitsCardsWithoutAnEmptyPagerRow()
+    {
+        var single = WindowPreviewLayout.Create(1, 1200, 700, true);
+        Assert.Equal(8, single.Cards[0].X);
+        Assert.Equal(8, single.Cards[0].Y);
+        Assert.Equal(8, single.Width - single.Cards[0].X - single.Cards[0].Width);
+        Assert.Equal(8, single.Height - 12 - single.Cards[0].Y - single.Cards[0].Height);
+        var group = WindowPreviewLayout.Create(3, 1200, 700, true);
+        Assert.Equal(12, group.Cards[1].X - group.Cards[0].X - group.Cards[0].Width);
+        var lastPage = WindowPreviewLayout.Create(1, 1200, 700, true, reservePager: true);
+        Assert.Equal(single.Height + 30, lastPage.Height);
     }
 
     [Theory]
@@ -268,7 +282,7 @@ public sealed class WindowPreviewTests
             var layout = WindowPreviewLayout.Create(8, 1680 / scale - 24, 1050 / scale - 24, expanded);
             Assert.True(Math.Ceiling(layout.Width * scale) <= 1680);
             Assert.True(Math.Ceiling(layout.Height * scale) <= 1050);
-            Assert.All(layout.Cards, card => Assert.True(card.Y + card.Height <= layout.Height - 34));
+            Assert.All(layout.Cards, card => Assert.True(card.Y + card.Height <= layout.Height - 20));
         }
     }
 }

@@ -1,4 +1,8 @@
 using GlassDock.Core.Settings;
+using GlassDock.Core.Desktop;
+using GlassDock.Windows.Settings;
+using Windows.ApplicationModel.DataTransfer;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Reflection;
@@ -21,8 +25,8 @@ namespace GlassDock.App.Desktop;
 /// <summary>
 /// GlassDock's hidden-tray surface. Windows does not expose a supported public API
 /// for enumerating every third-party notification icon, so this window uses the
-/// taskbar accessibility tree as a best-effort bridge and keeps explicit Windows
-/// settings fallbacks when Explorer does not expose usable items.
+/// existing accessibility providers as a best-effort bridge and distinguishes
+/// registry-derived application shortcuts from live actions.
 /// </summary>
 internal sealed class SystemTrayWindow : Window
 {
@@ -33,6 +37,7 @@ internal sealed class SystemTrayWindow : Window
     private readonly WindowsSystemControlService controls;
     private readonly WindowsApplicationService applicationService;
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly Grid root = new() { Background = Brush(0) };
@@ -51,6 +56,17 @@ internal sealed class SystemTrayWindow : Window
     private int refreshVersion;
     private bool refreshRunning;
     private CancellationTokenSource? iconLoadCts;
+    private readonly TrayOrderStore orderStore = new();
+    private readonly Task<TrayOrder> loadOrder;
+    private TrayOrder? order;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer refreshTimer;
+    private string? draggedKey;
+    private bool activationPending;
+    private bool menuOpen;
+    private readonly TrayActivationGate activationGate = new();
+    private const string DragFormat = "Doky.Tray.Reorder";
+    private static string Key(WindowsTrayAccessibility.TrayItem item) =>
+        TrayIdentity.Key(item.Source == WindowsTrayAccessibility.TrayItemSource.Registry, item.Name, item.ExecutablePath);
 
     public SystemTrayWindow(
         WindowsSystemControlService controls,
@@ -59,6 +75,15 @@ internal sealed class SystemTrayWindow : Window
         DockAppearanceMode dockMode,
         Func<bool>? utilityOwnsPointer = null)
     {
+        loadOrder = orderStore.LoadAsync();
+        refreshTimer = DispatcherQueue.CreateTimer();
+        refreshTimer.Interval = TimeSpan.FromSeconds(3);
+        refreshTimer.Tick += (_, _) =>
+        {
+            if (!closed && presentation?.IsVisible == true && draggedKey is null && !menuOpen && !activationPending && !refreshRunning)
+                _ = RefreshAsync();
+        };
+        trayGrid.ChildrenTransitions = new TransitionCollection { new RepositionThemeTransition() };
         this.controls = controls;
         this.applicationService = applicationService;
         Title = "Doky Hidden Tray";
@@ -143,6 +168,8 @@ internal sealed class SystemTrayWindow : Window
             backdrop,
             utilityOwnsPointer);
 
+        presentation.Hidden += (_, _) => refreshTimer.Stop();
+
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this))
         {
             EnableHostBackdropBrush = true,
@@ -151,6 +178,7 @@ internal sealed class SystemTrayWindow : Window
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
         SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
 
         ApplyAppearance(appearance, dockMode);
         root.SizeChanged += (_, _) => UpdateBackdrop();
@@ -170,6 +198,7 @@ internal sealed class SystemTrayWindow : Window
         Closed += (_, _) =>
         {
             closed = true;
+            refreshTimer.Stop();
             iconLoadCts?.Cancel();
             iconLoadCts?.Dispose();
             iconLoadCts = null;
@@ -205,6 +234,8 @@ internal sealed class SystemTrayWindow : Window
 
     public void Present()
     {
+        activationPending = false;
+        refreshTimer.Start();
         // Cached tray windows must refresh when they are shown again.
         _ = RefreshAsync();
         presentation.Present();
@@ -247,7 +278,7 @@ internal sealed class SystemTrayWindow : Window
 
     private async Task RefreshAsync()
     {
-        if (closed)
+        if (closed || draggedKey is not null || menuOpen)
             return;
 
         // Do not queue refreshes. A later request supersedes the in-flight scan.
@@ -260,12 +291,11 @@ internal sealed class SystemTrayWindow : Window
         {
             status.Text = "Reading Windows hidden tray…";
 
-            // Windows 11 does not expose hidden notification icons until the
-            // native overflow surface is made visible. The scanner opens that
-            // surface off-screen/no-activate, reads accessibility, then closes it.
+            order ??= await loadOrder;
+            // Read-only scan on an STA worker: never realize/show Explorer UI.
             var items = await WindowsTrayAccessibility.ReadHiddenItemsAsync();
 
-            if (closed || version != refreshVersion)
+            if (closed || draggedKey is not null || menuOpen || activationPending || version != refreshVersion)
                 return;
 
             RenderItems(items);
@@ -273,7 +303,7 @@ internal sealed class SystemTrayWindow : Window
         catch (Exception)
         {
             if (!closed && version == refreshVersion)
-                status.Text = "Tray unavailable · open tray settings";
+                status.Text = "Could not refresh tray apps. Try Refresh.";
         }
         finally
         {
@@ -288,19 +318,19 @@ internal sealed class SystemTrayWindow : Window
 
     private void RenderItems(IReadOnlyList<WindowsTrayAccessibility.TrayItem> items)
     {
+        var byKey = items.GroupBy(Key, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        items = (order ?? new TrayOrder()).Apply(byKey.Keys).Select(k => byKey[k]).ToArray();
+        displayedItems = items;
         var nextKeys = items
             .Select(item => item.Name + "\n" + item.DefaultAction + "\n" + item.ExecutablePath + "\n" + item.Source)
             .ToArray();
 
-        status.Text = items.Count == 0
-            ? "No active tray apps"
-            : $"{items.Count} tray app{(items.Count == 1 ? "" : "s")}";
+        status.Text = GetTrayStatus(items);
         if (itemKeys.SequenceEqual(nextKeys) && trayGrid.Children.Count > 0)
         {
             // Preserve focus, pointer capture, and scroll position during refresh.
-            var buttons = trayGrid.Children.OfType<Button>().ToArray();
-            for (var i = 0; i < buttons.Length && i < items.Count; i++)
-                buttons[i].Tag = items[i];
+            foreach (var button in trayGrid.Children.OfType<Button>())
+                button.Tag = byKey[Key((WindowsTrayAccessibility.TrayItem)button.Tag)];
             return;
         }
 
@@ -339,8 +369,6 @@ internal sealed class SystemTrayWindow : Window
             return;
         }
 
-        status.Text = $"{items.Count} tray app{(items.Count == 1 ? "" : "s")}";
-
         for (var index = 0; index < items.Count; index++)
         {
             var item = items[index];
@@ -359,6 +387,19 @@ internal sealed class SystemTrayWindow : Window
             Grid.SetColumn(tile, column);
             trayGrid.Children.Add(tile);
         }
+    }
+
+    private static string GetTrayStatus(IReadOnlyList<WindowsTrayAccessibility.TrayItem> items)
+    {
+        if (items.Count == 0)
+            return "No active tray apps";
+
+        var fallbackCount = items.Count(item =>
+            item.Source == WindowsTrayAccessibility.TrayItemSource.Registry);
+
+        return fallbackCount == 0
+            ? $"{items.Count} tray app{(items.Count == 1 ? "" : "s")}"
+            : $"{items.Count - fallbackCount} live actions · {fallbackCount} app shortcuts";
     }
 
     private Button TrayButton(
@@ -416,6 +457,11 @@ internal sealed class SystemTrayWindow : Window
         };
         stack.Children.Add(icon);
         stack.Children.Add(label);
+        stack.Children.Add(new TextBlock
+        {
+            Text = item.Source == WindowsTrayAccessibility.TrayItemSource.Registry ? "Open Application" : "Live action",
+            FontSize = 9, Foreground = theme.Muted, HorizontalAlignment = HorizontalAlignment.Center
+        });
 
         var button = new Button
         {
@@ -425,7 +471,9 @@ internal sealed class SystemTrayWindow : Window
             BorderThickness = new Thickness(.7),
             CornerRadius = new CornerRadius(14),
             Padding = new Thickness(3, 8, 3, 8),
-            Height = 79,
+            Height = 92,
+            CanDrag = true,
+            AllowDrop = true,
             Tag = item,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center
@@ -433,35 +481,139 @@ internal sealed class SystemTrayWindow : Window
         theme.StyleButton(button);
         ToolTipService.SetToolTip(
             button,
-            string.IsNullOrWhiteSpace(item.DefaultAction)
-                ? item.Name
-                : $"{item.Name} · {item.DefaultAction}");
+            item.Source == WindowsTrayAccessibility.TrayItemSource.Registry
+                ? $"{item.Name} · Open Application · app shortcut, not a live tray icon"
+                : string.IsNullOrWhiteSpace(item.DefaultAction)
+                    ? item.Name
+                    : $"{item.Name} · {item.DefaultAction}");
 
+        // For an accessibility-backed entry, click requests the actual native
+        // default action. Registry-only entries explicitly open the application;
+        // they cannot stand in for arbitrary tray-icon messages.
         button.Click += async (_, _) =>
         {
+            if (activationPending || draggedKey is not null) return;
+            if (!activationGate.TryAccept(Environment.TickCount64, WindowsTrayAccessibility.DoubleClickMilliseconds)) return;
+            activationPending = true;
             var current = (WindowsTrayAccessibility.TrayItem)button.Tag;
+            WindowsTrayAccessibility.Trace($"Click: {current.Name}; source={current.Source}");
             button.IsEnabled = false;
             try
             {
-                if (await WindowsTrayAccessibility.InvokeAsync(current))
+                var invoked = await WindowsTrayAccessibility.InvokeAsync(current);
+                WindowsTrayAccessibility.Trace($"Activation result: {invoked}");
+                if (closed)
+                    return;
+
+                if (invoked)
                     Dismiss();
                 else
-                    status.Text = $"Could not open {current.Name}.";
+                    status.Text = current.Source == WindowsTrayAccessibility.TrayItemSource.Registry
+                        ? $"Could not show {current.Name}. Its background instance may not expose a window."
+                        : $"Windows did not expose {current.Name}'s tray action.";
+            }
+            catch (Exception error)
+            {
+                WindowsTrayAccessibility.Trace($"Tray click failed: {error.GetType().Name}");
+                if (!closed)
+                    status.Text = $"Could not activate {current.Name}.";
             }
             finally
             {
                 if (!closed)
                     button.IsEnabled = true;
+                // Keep a successful activation latched until next Present, so a
+                // double-click cannot dispatch another launch during dismissal.
+                if (presentation.IsVisible) activationPending = false;
             }
         };
 
-        button.RightTapped += (_, e) =>
+        button.ContextRequested += (sender, args) =>
         {
-            e.Handled = true;
-            controls.OpenTraySettings();
+            args.Handled = true;
+            if (closed || draggedKey is not null) return;
+            var menu = new MenuFlyout();
+            menuOpen = true;
+            menu.Closed += (_, _) => { menuOpen = false; _ = RefreshAsync(); };
+            menu.Items.Add(new MenuFlyoutItem { Text = "Doky tray controls", IsEnabled = false });
+            var refresh = new MenuFlyoutItem { Text = "Refresh" };
+            refresh.Click += (_, _) => _ = RefreshAsync();
+            menu.Items.Add(refresh);
+            AddMove("Move earlier", -1);
+            AddMove("Move later", 1);
+            menu.ShowAt(button);
+
+            void AddMove(string title, int delta)
+            {
+                var index = displayedItems.ToList().FindIndex(i => Key(i) == Key((WindowsTrayAccessibility.TrayItem)button.Tag));
+                var targetIndex = index + delta;
+                var move = new MenuFlyoutItem { Text = title, IsEnabled = targetIndex >= 0 && targetIndex < displayedItems.Count };
+                move.Click += async (_, _) =>
+                {
+                    if (targetIndex >= 0 && targetIndex < displayedItems.Count)
+                        await MoveAsync(Key((WindowsTrayAccessibility.TrayItem)button.Tag), Key(displayedItems[targetIndex]), delta > 0);
+                };
+                menu.Items.Add(move);
+            }
         };
 
+        button.DragStarting += (_, args) =>
+        {
+            if (activationPending) { args.Cancel = true; return; }
+            draggedKey = Key((WindowsTrayAccessibility.TrayItem)button.Tag);
+            args.Data.SetData(DragFormat, draggedKey);
+            args.Data.RequestedOperation = DataPackageOperation.Move;
+            button.Opacity = .55;
+        };
+        button.DragOver += (_, args) =>
+        {
+            args.Handled = true;
+            if (draggedKey is null || !args.DataView.Contains(DragFormat)) { args.AcceptedOperation = DataPackageOperation.None; return; }
+            args.AcceptedOperation = DataPackageOperation.Move;
+            var after = args.GetPosition(button).X > button.ActualWidth / 2;
+            button.BorderBrush = theme.Primary;
+            button.BorderThickness = after ? new Thickness(.7, .7, 3, .7) : new Thickness(3, .7, .7, .7);
+            args.DragUIOverride.Caption = after ? "Place after" : "Place before";
+        };
+        button.DragLeave += (_, _) => ResetDropCue();
+        button.Drop += async (_, args) =>
+        {
+            args.Handled = true;
+            if (draggedKey is not { } source || !args.DataView.Contains(DragFormat)) return;
+            var after = args.GetPosition(button).X > button.ActualWidth / 2;
+            args.AcceptedOperation = DataPackageOperation.Move;
+            ResetDropCue();
+            draggedKey = null;
+            await MoveAsync(source, Key((WindowsTrayAccessibility.TrayItem)button.Tag), after);
+        };
+        button.DropCompleted += (_, _) =>
+        {
+            draggedKey = null; button.Opacity = 1;
+            foreach (var tile in trayGrid.Children.OfType<Button>()) { tile.BorderBrush = theme.TileBorder; tile.BorderThickness = new Thickness(.7); }
+            _ = RefreshAsync();
+        };
+        void ResetDropCue() { button.BorderBrush = theme.TileBorder; button.BorderThickness = new Thickness(.7); }
+
         return button;
+    }
+
+    private async Task MoveAsync(string source, string target, bool after)
+    {
+        order ??= await loadOrder;
+        if (closed) return;
+        if (!order.Move(source, target, after, displayedItems.Select(Key))) return;
+        var byKey = displayedItems.ToDictionary(Key);
+        displayedItems = order.Apply(byKey.Keys).Select(key => byKey[key]).ToArray();
+        var tiles = trayGrid.Children.OfType<Button>().ToDictionary(tile => Key((WindowsTrayAccessibility.TrayItem)tile.Tag));
+        for (var i = 0; i < displayedItems.Count; i++)
+        {
+            var tile = tiles[Key(displayedItems[i])];
+            Grid.SetRow(tile, i / 3); Grid.SetColumn(tile, i % 3);
+        }
+        itemKeys = displayedItems.Select(item => item.Name + "\n" + item.DefaultAction + "\n" + item.ExecutablePath + "\n" + item.Source).ToArray();
+        try { await orderStore.SaveAsync(order.Snapshot()); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { if (!closed) status.Text = "Order changed, but could not be saved."; }
     }
 
     private async Task LoadTrayIconAsync(
@@ -537,1080 +689,4 @@ internal sealed class SystemTrayWindow : Window
 
     private static SolidColorBrush Brush(byte alpha, byte r = 255, byte g = 255, byte b = 255) =>
         new(global::Windows.UI.Color.FromArgb(alpha, r, g, b));
-}
-
-internal static class WindowsTrayAccessibility
-{
-    internal enum TrayItemSource
-    {
-        Accessibility,
-        Registry
-    }
-
-    internal sealed record TrayItem(
-        string Name,
-        string? DefaultAction,
-        string? ExecutablePath,
-        TrayItemSource Source);
-
-    private const int ObjIdClient = -4;
-    private const int SwHide = 0;
-    private const int SwShowNoActivate = 4;
-
-    private const uint SwpNoSize = 0x0001;
-    private const uint SwpNoZOrder = 0x0004;
-    private const uint SwpNoActivate = 0x0010;
-
-    private static readonly Guid IidAccessible =
-        new("618736E0-3C3D-11CF-810C-00AA00389B71");
-
-    /// <summary>
-    /// Hidden notification icons are not exposed to accessibility while the
-    /// Windows overflow flyout is closed. Open the native overflow off-screen,
-    /// let Explorer realize its XAML children, read them, then hide it again.
-    /// </summary>
-    public static async Task<IReadOnlyList<TrayItem>> ReadHiddenItemsAsync()
-    {
-        var result = new List<TrayItem>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var session = TryOpenExistingOverflow();
-        try
-        {
-            if (!session.Opened && TryInvokeOverflowChevron())
-            {
-                // Explorer creates the Windows 11 XAML overflow asynchronously.
-                // Wait once for that explicit user-triggered scan, then move the
-                // realized native flyout off-screen before enumerating it.
-                await Task.Delay(70);
-                session = TryOpenExistingOverflow();
-            }
-
-            // Give Explorer/XAML a short realization window only when the real
-            // overflow surface is present. No background polling is introduced.
-            if (session.Opened)
-                await Task.Delay(90);
-
-            foreach (var hwnd in OverflowAccessibilityRoots())
-                ReadAccessibleRoot(hwnd, result, seen);
-
-            // Legacy/bridge fallback. Do this after the true overflow root so
-            // visible taskbar icons do not take precedence over hidden ones.
-            if (result.Count == 0)
-            {
-                foreach (var hwnd in LegacyOverflowRoots())
-                    ReadAccessibleRoot(hwnd, result, seen);
-            }
-        }
-        finally
-        {
-            session.Dispose();
-        }
-
-        var accessibleItems = result
-            .Where(item => !IsGlassDockSystemItem(item.Name))
-            .Take(32)
-            .ToArray();
-
-        if (accessibleItems.Length > 0)
-        {
-            var metadata = ReadRegistryMetadataRecords();
-            return accessibleItems
-                .Select(item => item with
-                {
-                    ExecutablePath = MatchRegistryExecutable(item.Name, metadata)
-                })
-                .ToArray();
-        }
-
-        // GlassDock deliberately suppresses/disables the native Windows taskbar.
-        // In that state Explorer may not expose the hidden-icon overflow through
-        // accessibility at all. Fall back to Windows 11's per-user tray metadata
-        // so the GlassDock panel is still useful instead of permanently empty.
-        return ReadRegistryFallbackItems();
-    }
-
-    private static IReadOnlyList<TrayItem> ReadRegistryFallbackItems()
-    {
-        var records = ReadRegistryMetadataRecords();
-
-        // Prefer Windows records explicitly marked hidden. Some current Windows
-        // 11 builds leave IsPromoted unset for active overflow icons, so if the
-        // strict hidden set produces nothing, allow only non-promoted/unknown
-        // records whose owning process is CURRENTLY running. The live-process
-        // requirement remains the guard against historical registry junk.
-        var explicitlyHidden = BuildRegistryItems(
-            records.Where(record => record.IsPromoted == 0));
-
-        if (explicitlyHidden.Count > 0)
-            return explicitlyHidden;
-
-        return BuildRegistryItems(
-            records.Where(record => record.IsPromoted != 1));
-    }
-
-    private static List<TrayMetadataRecord> ReadRegistryMetadataRecords()
-    {
-        const string keyPath = @"Control Panel\NotifyIconSettings";
-
-        using var root = Registry.CurrentUser.OpenSubKey(keyPath);
-        if (root is null)
-            return [];
-
-        var records = new List<TrayMetadataRecord>();
-
-        foreach (var subKeyName in root.GetSubKeyNames())
-        {
-            using var entry = root.OpenSubKey(subKeyName);
-            if (entry is null)
-                continue;
-
-            var executablePath = ExpandExecutablePath(
-                entry.GetValue("ExecutablePath")?.ToString());
-
-            if (string.IsNullOrWhiteSpace(executablePath))
-                continue;
-
-            var tooltip = entry.GetValue("InitialTooltip")?.ToString()?.Trim();
-            var name = !string.IsNullOrWhiteSpace(tooltip)
-                ? CleanTooltip(tooltip)
-                : Path.GetFileNameWithoutExtension(executablePath);
-
-            if (string.IsNullOrWhiteSpace(name) ||
-                IsGlassDockSystemItem(name))
-            {
-                continue;
-            }
-
-            records.Add(
-                new TrayMetadataRecord(
-                    executablePath,
-                    name,
-                    ConvertRegistryNullableInt(entry.GetValue("IsPromoted"))));
-        }
-
-        return records
-            .GroupBy(
-                record => record.ExecutablePath + "\n" + record.Name,
-                StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToList();
-    }
-
-    private static string? MatchRegistryExecutable(
-        string accessibleName,
-        IReadOnlyList<TrayMetadataRecord> metadata)
-    {
-        var normalized = NormalizeTrayName(accessibleName);
-        if (normalized.Length == 0)
-            return null;
-
-        var exact = metadata.FirstOrDefault(record =>
-            NormalizeTrayName(record.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase));
-        if (exact is not null)
-            return exact.ExecutablePath;
-
-        var contains = metadata.FirstOrDefault(record =>
-        {
-            var candidate = NormalizeTrayName(record.Name);
-            return candidate.Length >= 3 &&
-                   (normalized.Contains(candidate, StringComparison.OrdinalIgnoreCase) ||
-                    candidate.Contains(normalized, StringComparison.OrdinalIgnoreCase));
-        });
-
-        return contains?.ExecutablePath;
-    }
-
-    private static string NormalizeTrayName(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return string.Empty;
-
-        return string.Join(
-            " ",
-            value
-                .Split(
-                    [' ', '\t', '\r', '\n', '-', '–', '—', '|', ','],
-                    StringSplitOptions.RemoveEmptyEntries |
-                    StringSplitOptions.TrimEntries))
-            .Trim();
-    }
-
-    private static IReadOnlyList<TrayItem> BuildRegistryItems(
-        IEnumerable<TrayMetadataRecord> records)
-    {
-        var items = new List<TrayItem>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var record in records)
-        {
-            if (items.Count >= 32)
-                break;
-
-            var running = IsLikelyRunning(record.ExecutablePath);
-
-            // NotifyIconSettings contains historical entries. Requiring a live
-            // matching process prevents old installed versions/apps from flooding
-            // GlassDock when Explorer's accessibility tree is unavailable.
-            if (!running)
-                continue;
-
-            if (!seen.Add(record.ExecutablePath))
-                continue;
-
-            var capturedPath = record.ExecutablePath;
-            items.Add(
-                new TrayItem(
-                    record.Name,
-                    "Open app",
-                    capturedPath,
-                    TrayItemSource.Registry));
-        }
-
-        return items;
-    }
-
-    private static bool IsLikelyRunning(string executablePath)
-    {
-        var processName = Path.GetFileNameWithoutExtension(executablePath);
-        if (string.IsNullOrWhiteSpace(processName))
-            return false;
-
-        try
-        {
-            var processes = Process.GetProcessesByName(processName);
-            try
-            {
-                return processes.Length > 0;
-            }
-            finally
-            {
-                foreach (var process in processes)
-                    process.Dispose();
-            }
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private sealed record TrayMetadataRecord(
-        string ExecutablePath,
-        string Name,
-        int? IsPromoted);
-
-    private static int ConvertRegistryInt(object? value)
-    {
-        try
-        {
-            return value is null
-                ? 0
-                : Convert.ToInt32(value);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static int? ConvertRegistryNullableInt(object? value)
-    {
-        if (value is null)
-            return null;
-
-        try
-        {
-            return Convert.ToInt32(value);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string ExpandExecutablePath(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return string.Empty;
-
-        var expanded = Environment.ExpandEnvironmentVariables(raw.Trim());
-
-        // NotifyIconSettings commonly stores paths rooted at Known Folder GUIDs
-        // instead of normal drive paths. Resolve the Windows 11 forms observed
-        // on this machine before checking the executable.
-        expanded = ReplaceKnownFolderPrefix(
-            expanded,
-            "{6D809377-6AF0-444B-8957-A3773F02200E}",
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
-
-        expanded = ReplaceKnownFolderPrefix(
-            expanded,
-            "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}",
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
-
-        expanded = ReplaceKnownFolderPrefix(
-            expanded,
-            "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}",
-            Environment.GetFolderPath(Environment.SpecialFolder.System));
-
-        expanded = ReplaceKnownFolderPrefix(
-            expanded,
-            "{F38BF404-1D43-42F2-9305-67DE0B28FC23}",
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows));
-
-        // NotifyIconSettings can include a quoted executable or command-line
-        // arguments. Keep only the executable path so icon loading and ShellExecute
-        // receive a stable file identity.
-        if (expanded.StartsWith('"'))
-        {
-            var closingQuote = expanded.IndexOf('"', 1);
-            if (closingQuote > 1)
-                expanded = expanded[1..closingQuote];
-        }
-        else
-        {
-            var executableEnd = expanded.IndexOf(
-                ".exe",
-                StringComparison.OrdinalIgnoreCase);
-            if (executableEnd >= 0)
-                expanded = expanded[..(executableEnd + 4)];
-        }
-
-        return expanded.Trim();
-    }
-
-    private static string ReplaceKnownFolderPrefix(
-        string value,
-        string prefix,
-        string folder)
-    {
-        if (string.IsNullOrWhiteSpace(folder) ||
-            !value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return value;
-        }
-
-        var remainder = value[prefix.Length..]
-            .TrimStart('\\', '/');
-
-        return Path.Combine(
-            folder,
-            remainder.Replace('/', Path.DirectorySeparatorChar));
-    }
-
-    private static string CleanTooltip(string value)
-    {
-        var firstLine = value
-            .Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries)
-            .FirstOrDefault();
-
-        return string.IsNullOrWhiteSpace(firstLine)
-            ? value.Trim()
-            : firstLine;
-    }
-
-    private static Process? FindMatchingProcess(string executablePath)
-    {
-        var processName = Path.GetFileNameWithoutExtension(executablePath);
-        if (string.IsNullOrWhiteSpace(processName))
-            return null;
-
-        Process[] processes;
-        try
-        {
-            processes = Process.GetProcessesByName(processName);
-        }
-        catch
-        {
-            return null;
-        }
-
-        foreach (var process in processes)
-        {
-            try
-            {
-                if (process.HasExited)
-                {
-                    process.Dispose();
-                    continue;
-                }
-
-                // Prefer an exact module path when Windows allows it, but keep
-                // the process-name match as a fallback for packaged/protected
-                // tray apps whose MainModule cannot be queried.
-                try
-                {
-                    var candidate = process.MainModule?.FileName;
-                    if (!string.IsNullOrWhiteSpace(candidate) &&
-                        !string.Equals(
-                            candidate,
-                            executablePath,
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        process.Dispose();
-                        continue;
-                    }
-                }
-                catch
-                {
-                    // Access denied is normal for some packaged/elevated apps.
-                }
-
-                return process;
-            }
-            catch
-            {
-                process.Dispose();
-            }
-        }
-
-        return null;
-    }
-
-    private static bool OpenOrActivate(string executablePath)
-    {
-        try
-        {
-            var process = FindMatchingProcess(executablePath);
-            if (process is not null)
-            {
-                try
-                {
-                    if (process.MainWindowHandle != 0)
-                    {
-                        ShowWindowAsync(process.MainWindowHandle, 9); // SW_RESTORE
-                        SetForegroundWindow(process.MainWindowHandle);
-                        return true;
-                    }
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            }
-
-            if (!File.Exists(executablePath))
-                return false;
-
-            return Process.Start(
-                new ProcessStartInfo(executablePath)
-                {
-                    UseShellExecute = true
-                }) is not null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public static async Task<bool> InvokeAsync(TrayItem item)
-    {
-        if (item.Source == TrayItemSource.Registry)
-            return !string.IsNullOrWhiteSpace(item.ExecutablePath) &&
-                   OpenOrActivate(item.ExecutablePath);
-
-        var session = TryOpenExistingOverflow();
-        try
-        {
-            if (!session.Opened && TryInvokeOverflowChevron())
-            {
-                await Task.Delay(70);
-                session = TryOpenExistingOverflow();
-            }
-
-            if (session.Opened)
-                await Task.Delay(50);
-
-            foreach (var hwnd in OverflowAccessibilityRoots())
-            {
-                if (InvokeNamedAccessibleItem(hwnd, item.Name))
-                    return true;
-            }
-        }
-        finally
-        {
-            session.Dispose();
-        }
-
-        // Accessibility elements are only valid while the native overflow is
-        // realized. If Windows still refuses the live action, fall back to the
-        // owning application when registry metadata gave us a stable path.
-        return !string.IsNullOrWhiteSpace(item.ExecutablePath) &&
-               OpenOrActivate(item.ExecutablePath);
-    }
-
-    private static bool InvokeNamedAccessibleItem(nint hwnd, string expectedName)
-    {
-        if (hwnd == 0 || string.IsNullOrWhiteSpace(expectedName))
-            return false;
-
-        var iid = IidAccessible;
-        if (AccessibleObjectFromWindow(
-                hwnd,
-                ObjIdClient,
-                ref iid,
-                out var accessible) < 0 ||
-            accessible is null)
-        {
-            return false;
-        }
-
-        return InvokeMatching(
-            accessible,
-            0,
-            name => string.Equals(
-                NormalizeTrayName(name),
-                NormalizeTrayName(expectedName),
-                StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static void ReadAccessibleRoot(
-        nint hwnd,
-        List<TrayItem> result,
-        HashSet<string> seen)
-    {
-        if (hwnd == 0)
-            return;
-
-        var iid = IidAccessible;
-        if (AccessibleObjectFromWindow(
-                hwnd,
-                ObjIdClient,
-                ref iid,
-                out var accessible) < 0 ||
-            accessible is null)
-        {
-            return;
-        }
-
-        Walk(accessible, 0, result, seen);
-    }
-
-    private static IEnumerable<nint> OverflowAccessibilityRoots()
-    {
-        // Windows 11 modern overflow:
-        // TopLevelWindowForOverflowXamlIsland
-        var modern = FindWindowW(
-            "TopLevelWindowForOverflowXamlIsland",
-            null);
-
-        if (modern != 0)
-        {
-            // XAML accessibility is exposed by the desktop content bridge.
-            var bridge = FindWindowExW(
-                modern,
-                0,
-                "Windows.UI.Composition.DesktopWindowContentBridge",
-                null);
-
-            if (bridge != 0)
-                yield return bridge;
-
-            yield return modern;
-        }
-
-        // Older/compatibility implementation.
-        var legacy = FindWindowW(
-            "NotifyIconOverflowWindow",
-            null);
-
-        if (legacy != 0)
-            yield return legacy;
-    }
-
-    private static IEnumerable<nint> LegacyOverflowRoots()
-    {
-        var overflow = FindWindowW(
-            "NotifyIconOverflowWindow",
-            null);
-
-        if (overflow != 0)
-            yield return overflow;
-    }
-
-    private static OverflowScanSession TryOpenExistingOverflow()
-    {
-        var modern = FindWindowW(
-            "TopLevelWindowForOverflowXamlIsland",
-            null);
-
-        if (modern != 0)
-            return OverflowScanSession.Open(modern);
-
-        var legacy = FindWindowW(
-            "NotifyIconOverflowWindow",
-            null);
-
-        return legacy != 0
-            ? OverflowScanSession.Open(legacy)
-            : default;
-    }
-
-    private static bool TryInvokeOverflowChevron()
-    {
-        var shell = FindWindowW(
-            "Shell_TrayWnd",
-            null);
-
-        if (shell == 0)
-            return false;
-
-        nint trayNotify = 0;
-
-        EnumChildWindows(
-            shell,
-            (child, _) =>
-            {
-                var buffer = new StringBuilder(96);
-                var length = GetClassNameW(
-                    child,
-                    buffer,
-                    buffer.Capacity);
-
-                if (length > 0 &&
-                    buffer.ToString().Equals(
-                        "TrayNotifyWnd",
-                        StringComparison.Ordinal))
-                {
-                    trayNotify = child;
-                    return false;
-                }
-
-                return true;
-            },
-            0);
-
-        if (trayNotify == 0)
-            return false;
-
-        var iid = IidAccessible;
-        if (AccessibleObjectFromWindow(
-                trayNotify,
-                ObjIdClient,
-                ref iid,
-                out var accessible) < 0 ||
-            accessible is null)
-        {
-            return false;
-        }
-
-        return InvokeMatching(
-            accessible,
-            0,
-            name =>
-            {
-                var value = name.ToLowerInvariant();
-                return value.Contains("show hidden icons") ||
-                       value.Contains("hidden icon menu") ||
-                       value.Contains("overflow chevron") ||
-                       value.Contains("notification chevron");
-            });
-    }
-
-    private static bool InvokeMatching(
-        object accessible,
-        int depth,
-        Func<string, bool> predicate)
-    {
-        if (depth > 7)
-            return false;
-
-        var count = ConvertToInt(
-            Get(accessible, "accChildCount"));
-
-        if (count <= 0)
-            return false;
-
-        for (var childId = 1; childId <= count; childId++)
-        {
-            var name = Get(
-                    accessible,
-                    "accName",
-                    childId)
-                ?.ToString()
-                ?.Trim();
-
-            if (!string.IsNullOrWhiteSpace(name) &&
-                predicate(name) &&
-                Invoke(accessible, childId))
-            {
-                return true;
-            }
-
-            var child = Get(
-                accessible,
-                "accChild",
-                childId);
-
-            if (child is not null &&
-                Marshal.IsComObject(child) &&
-                InvokeMatching(child, depth + 1, predicate))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static void Walk(
-        object accessible,
-        int depth,
-        List<TrayItem> result,
-        HashSet<string> seen)
-    {
-        if (depth > 8 ||
-            result.Count >= 48)
-        {
-            return;
-        }
-
-        var count = ConvertToInt(
-            Get(accessible, "accChildCount"));
-
-        if (count <= 0)
-            return;
-
-        for (var childId = 1;
-             childId <= count &&
-             result.Count < 48;
-             childId++)
-        {
-            var name = Get(
-                    accessible,
-                    "accName",
-                    childId)
-                ?.ToString()
-                ?.Trim();
-
-            var action = Get(
-                    accessible,
-                    "accDefaultAction",
-                    childId)
-                ?.ToString()
-                ?.Trim();
-
-            var role = ConvertToInt(
-                Get(
-                    accessible,
-                    "accRole",
-                    childId));
-
-            // Modern Windows 11 XAML tray providers don't always report the same
-            // MSAA role as the legacy ToolbarWindow32. Prefer actionable named
-            // elements and keep the old known-role check as a strong signal.
-            var actionable =
-                IsActionRole(role) ||
-                !string.IsNullOrWhiteSpace(action);
-
-            if (!string.IsNullOrWhiteSpace(name) &&
-                actionable &&
-                !IsGlassDockSystemItem(name) &&
-                seen.Add(name))
-            {
-                result.Add(
-                    new TrayItem(
-                        name,
-                        action,
-                        null,
-                        TrayItemSource.Accessibility));
-            }
-
-            var child = Get(
-                accessible,
-                "accChild",
-                childId);
-
-            if (child is not null &&
-                Marshal.IsComObject(child))
-            {
-                Walk(
-                    child,
-                    depth + 1,
-                    result,
-                    seen);
-            }
-        }
-    }
-
-    private static object? Get(
-        object target,
-        string member,
-        params object[]? args)
-    {
-        try
-        {
-            return target
-                .GetType()
-                .InvokeMember(
-                    member,
-                    BindingFlags.GetProperty |
-                    BindingFlags.Public |
-                    BindingFlags.Instance,
-                    null,
-                    target,
-                    args is { Length: > 0 }
-                        ? args
-                        : null);
-        }
-        catch (Exception error)
-            when (error is COMException or
-                  TargetInvocationException or
-                  MissingMethodException)
-        {
-            return null;
-        }
-    }
-
-    private static bool Invoke(
-        object target,
-        int childId)
-    {
-        try
-        {
-            target
-                .GetType()
-                .InvokeMember(
-                    "accDoDefaultAction",
-                    BindingFlags.InvokeMethod |
-                    BindingFlags.Public |
-                    BindingFlags.Instance,
-                    null,
-                    target,
-                    [childId]);
-
-            return true;
-        }
-        catch (Exception error)
-            when (error is COMException or
-                  TargetInvocationException or
-                  MissingMethodException)
-        {
-            return false;
-        }
-    }
-
-    private static int ConvertToInt(object? value)
-    {
-        try
-        {
-            return value is null
-                ? 0
-                : Convert.ToInt32(value);
-        }
-        catch (Exception error)
-            when (error is FormatException or
-                  InvalidCastException or
-                  OverflowException)
-        {
-            return 0;
-        }
-    }
-
-    private static bool IsActionRole(int role) =>
-        role is
-            0x2B or // push button
-            0x2C or // check button
-            0x0C or // menu item
-            0x28 or // graphic
-            0x1E or // link
-            0x2D;   // radio button
-
-    private static bool IsGlassDockSystemItem(
-        string name)
-    {
-        var value =
-            name.ToLowerInvariant();
-
-        return
-            value.Contains("start") ||
-            value.Contains("search") ||
-            value.Contains("task view") ||
-            value.Contains("system tray") ||
-            value.Contains("notification chevron") ||
-            value.Contains("overflow chevron") ||
-            value.Contains("show hidden icons") ||
-            value.Contains("hidden icon menu") ||
-            value.Contains("clock") ||
-            value.Contains("date and time") ||
-            value.Contains("network") ||
-            value.Contains("volume") ||
-            value.Contains("battery");
-    }
-
-    private readonly struct OverflowScanSession : IDisposable
-    {
-        private readonly nint window;
-        private readonly NativeRect originalRect;
-        private readonly bool hadRect;
-        private readonly bool wasVisible;
-
-        public bool Opened =>
-            window != 0;
-
-        private OverflowScanSession(
-            nint window,
-            NativeRect originalRect,
-            bool hadRect,
-            bool wasVisible)
-        {
-            this.window = window;
-            this.originalRect = originalRect;
-            this.hadRect = hadRect;
-            this.wasVisible = wasVisible;
-        }
-
-        public static OverflowScanSession Open(
-            nint window)
-        {
-            if (window == 0)
-                return default;
-
-            var hadRect =
-                GetWindowRect(
-                    window,
-                    out var rect);
-
-            var wasVisible =
-                IsWindowVisible(window);
-
-            // Keep Windows' real overflow UI out of sight. It still becomes
-            // realized for accessibility, but GlassDock remains the visible UI.
-            SetWindowPos(
-                window,
-                0,
-                -32000,
-                -32000,
-                0,
-                0,
-                SwpNoSize |
-                SwpNoZOrder |
-                SwpNoActivate);
-
-            ShowWindowAsync(
-                window,
-                SwShowNoActivate);
-
-            return new OverflowScanSession(
-                window,
-                rect,
-                hadRect,
-                wasVisible);
-        }
-
-        public void Dispose()
-        {
-            if (window == 0)
-                return;
-
-            if (!wasVisible)
-                ShowWindowAsync(
-                    window,
-                    SwHide);
-
-            if (hadRect)
-            {
-                SetWindowPos(
-                    window,
-                    0,
-                    originalRect.Left,
-                    originalRect.Top,
-                    0,
-                    0,
-                    SwpNoSize |
-                    SwpNoZOrder |
-                    SwpNoActivate);
-            }
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    private delegate bool EnumWindowsProc(
-        nint hwnd,
-        nint lParam);
-
-    [DllImport("oleacc.dll")]
-    private static extern int AccessibleObjectFromWindow(
-        nint hwnd,
-        int objectId,
-        ref Guid riid,
-        [MarshalAs(UnmanagedType.Interface)]
-        out object? accessible);
-
-    [DllImport(
-        "user32.dll",
-        CharSet = CharSet.Unicode)]
-    private static extern nint FindWindowW(
-        string? className,
-        string? windowName);
-
-    [DllImport(
-        "user32.dll",
-        CharSet = CharSet.Unicode)]
-    private static extern nint FindWindowExW(
-        nint parent,
-        nint childAfter,
-        string? className,
-        string? windowName);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumChildWindows(
-        nint parent,
-        EnumWindowsProc callback,
-        nint lParam);
-
-    [DllImport(
-        "user32.dll",
-        CharSet = CharSet.Unicode)]
-    private static extern int GetClassNameW(
-        nint hwnd,
-        StringBuilder className,
-        int maxCount);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ShowWindowAsync(
-        nint hwnd,
-        int command);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(
-        nint hwnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(
-        nint hwnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetWindowRect(
-        nint hwnd,
-        out NativeRect rect);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowPos(
-        nint hwnd,
-        nint insertAfter,
-        int x,
-        int y,
-        int cx,
-        int cy,
-        uint flags);
 }

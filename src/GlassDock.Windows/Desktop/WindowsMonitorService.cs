@@ -21,6 +21,23 @@ public readonly record struct DesktopMonitor(
 /// </summary>
 public static class WindowsMonitorService
 {
+    public static PixelRect GetWorkAreaForWindow(nint window)
+    {
+        var monitor = NativeMethods.MonitorFromWindow(window, 2);
+        var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+
+        return new PixelRect(info.Work.Left, info.Work.Top,
+            info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top);
+    }
+
+    public static void BringWindowToFront(nint window)
+    {
+        NativeMethods.ShowWindow(window, 9); // SW_RESTORE also handles a minimized Settings window.
+        GlassDock.Windows.Applications.ApplicationNative.SetForegroundWindow(window);
+    }
+
     public static IReadOnlyList<DesktopMonitor> GetMonitors()
     {
         var result = new List<DesktopMonitor>();

@@ -13,7 +13,7 @@ public sealed class DockAppMenuWiringTests
         var desktop = Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop");
         var window = File.ReadAllText(Path.Combine(desktop, "DockAppContextMenuWindow.cs"));
         var coordinator = File.ReadAllText(Path.Combine(desktop, "WindowPreviewCoordinator.cs"));
-        Assert.Contains("UtilityPopupStyle.Apply(glass, backdrop, appearance, mode)", window);
+        Assert.Contains("UtilityPopupStyle.Apply(glass, backdrop, appearance, mode,", window);
         Assert.Contains("theme.StyleButton(button)", window);
         Assert.Contains("icon.SetIcon(item.Application.Icon)", window);
         Assert.True(window.IndexOf("host.Configure()", StringComparison.Ordinal) < window.IndexOf("SystemBackdrop = backdrop", StringComparison.Ordinal));

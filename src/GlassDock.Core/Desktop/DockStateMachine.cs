@@ -21,7 +21,8 @@ public sealed class DockStateMachine
     }
     public long Expand()
     {
-        if (State == DockState.Hovering) { State = DockState.Expanding; Revision++; }
+        if (State is DockState.Idle or DockState.Hovering or DockState.Collapsing)
+        { State = DockState.Expanding; Revision++; }
         return Revision;
     }
     public void LeavePeek()

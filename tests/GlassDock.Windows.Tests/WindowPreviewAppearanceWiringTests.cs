@@ -13,7 +13,7 @@ public sealed class WindowPreviewAppearanceWiringTests
         var desktop = Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop");
         var window = File.ReadAllText(Path.Combine(desktop, "WindowPreviewWindow.cs"));
         var controller = File.ReadAllText(Path.Combine(desktop, "WindowPreviewCoordinator.cs"));
-        Assert.Contains("UtilityPopupStyle.Apply(glass, backdrop, appearance, mode)", window, StringComparison.Ordinal);
+        Assert.Contains("UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 20)", window, StringComparison.Ordinal);
         Assert.Contains("theme.StyleButton(close)", window, StringComparison.Ordinal);
         Assert.True(window.IndexOf("SystemBackdrop = backdrop;", StringComparison.Ordinal) >
             window.IndexOf("placement = new(hwnd, inspection);", StringComparison.Ordinal));

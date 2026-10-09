@@ -15,6 +15,8 @@ public sealed class WindowsKeyGesture
 
     public bool IsWindowsHeld => held.Contains(LeftWindows) || held.Contains(RightWindows);
 
+    public void Reset() { held.Clear(); chord = false; }
+
     public bool Process(int key, bool down)
     {
         var windows = key is LeftWindows or RightWindows;

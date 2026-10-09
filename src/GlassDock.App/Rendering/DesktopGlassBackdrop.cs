@@ -15,7 +15,35 @@ namespace GlassDock.App.Rendering;
 /// <summary>The OS compositor supplies desktop pixels; the laboratory's graph supplies the material.</summary>
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
+    internal event EventHandler? PopupSurfaceChanged;
+    internal DockAppearanceMode PopupMode { get; private set; }
+    internal LiquidGlassMaterial PopupOptics { get; private set; } = new() { RefractionStrength = 12 };
+    internal void SetPopupMode(DockAppearanceMode mode, LiquidGlassMaterial optics)
+    {
+        PopupMode = mode;
+        PopupOptics = optics;
+        PopupSurfaceChanged?.Invoke(this, EventArgs.Empty);
+    }
+    internal (Vector4 Bounds, float Radius, float Scale) PopupGeometry =>
+        (new((float)((lastWindowWidth - lastWidth) / 2),
+            (float)(lastWindowHeight - lastBottom - lastHeight), (float)lastWidth, (float)lastHeight),
+            (float)Math.Min(material.CornerRadius, Math.Min(lastWidth, lastHeight) / 2), (float)lastScale);
+    private GlassDock.Core.Desktop.HomeCardRect[]? surfaceRegions;
+    private double surfaceRegionScale = 1;
+
+    /// <summary>Optional disjoint cards share one desktop effect, without a full-window glass/shadow.</summary>
+    public void SetSurfaceRegions(IEnumerable<GlassDock.Core.Desktop.HomeCardRect> regions, double contentScale = 1)
+    {
+        var next = regions.ToArray();
+        if (surfaceRegions is not null && surfaceRegions.SequenceEqual(next) && surfaceRegionScale == contentScale) return;
+        surfaceRegions = next;
+        surfaceRegionScale = contentScale;
+        renderedMask = null;
+        UpdateMaskPath();
+    }
     public bool UseInnerEdge { get; set; }
+    public bool UseDockSpecular { get; set; }
+    public double SpecularHighlightAngle { get; set; } = 45;
     // Popup-only: soften Acrylic's lightly diffused base so the 12% base stream
     // cannot bring sharp wallpaper details back over the blurred material.
     // The main dock and Clear composition paths never enable this option.
@@ -180,7 +208,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionSpriteShape? shape;
     private CanvasDevice? canvasDevice;
     private CanvasGeometry? canvasGeometry;
-    internal CanvasGeometry? DockGeometry => canvasGeometry;
+    internal CanvasGeometry? DockGeometry => surfaceRegions is null ? canvasGeometry : null;
     private bool liquidActive;
     internal void SetLiquidActive(bool active)
     {
@@ -416,6 +444,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 EdgeHighlight = 0
             };
             RenderingMode = "Solid dock surface";
+            Apply(material);
             if (hasBounds)
                 ApplyBounds(
                     lastWindowWidth,
@@ -590,14 +619,20 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 GlassEffectGraph.Tint(material));
         }
 
-        if (UseInnerEdge && effect is not null && fallback is null && output is not null)
+        W.CompositionBrush? specularBody = UseSolidSurface ? solidSurface : effect;
+        if ((UseInnerEdge || UseDockSpecular) && specularBody is not null && fallback is null && output is not null)
         {
-            if (dockStyle == GlassMaterialMode.Clear && !clearSpecularUnavailable)
+            if ((UseDockSpecular || dockStyle == GlassMaterialMode.Clear) && surfaceRegions is null && !clearSpecularUnavailable)
             {
                 try
                 {
-                    clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, effect);
-                    clearSpecular.Apply(material);
+                    clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, specularBody);
+                    // Solid surfaces keep their opaque body; only the shared rim
+                    // receives lighting. A white catch needs more contrast on Light.
+                    clearSpecular.Apply(UseDockSpecular
+                        ? material with { BorderThickness = .35, BorderOpacity = UseSolidSurface
+                            ? (solidAppearance == DockAppearanceMode.Light ? .45 : .24) : .28 }
+                        : material, diagonalCatches: UseDockSpecular);
                     clearSpecular.SetVisible(true);
                     UpdateClearBounds();
                     ApplyPresentation();
@@ -617,13 +652,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                         StartupDiagnostics.Write("Clear specular cleanup failed", disposeError);
                     }
                     clearSpecular = null;
-                    output.Source = edgeEffect ?? effect;
+                    output.Source = edgeEffect ?? specularBody;
                 }
             }
             else
             {
                 clearSpecular?.SetVisible(false);
-                output.Source = edgeEffect ?? effect;
+                output.Source = edgeEffect ?? specularBody;
             }
         }
         UpdateMaskPath();
@@ -633,7 +668,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     {
         if (!hasBounds || clearSpecular is null) return;
         clearSpecular.SetBounds(lastWindowWidth, lastWindowHeight,
-            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale);
+            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale, lastWidth, SpecularHighlightAngle);
     }
 
     public void SetSolidAppearance(
@@ -658,15 +693,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         if (solidSurface is not null)
             solidSurface.Color = SolidColor(solidAppearance, solidOpacity);
 
-        UpdateMaskPath();
+        Apply(material);
     }
 
     private static global::Windows.UI.Color SolidColor(DockAppearanceMode appearance, double opacity)
     {
         var alpha = (byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255);
-        return appearance == DockAppearanceMode.Light
-            ? global::Windows.UI.Color.FromArgb(alpha, 243, 243, 243)
-            : global::Windows.UI.Color.FromArgb(alpha, 36, 36, 36);
+        return Desktop.DockControlPalette.SolidSurface(appearance, alpha);
     }
 
     public void SetBounds(
@@ -695,6 +728,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             bottom,
             scale,
             opacity);
+        PopupSurfaceChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ApplyBounds(
@@ -908,6 +942,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             waveHalfWidth, waveRise, waveStrength);
         if (renderedMask == state) return;
 
+        if (surfaceRegions is not null)
+        {
+            UpdateRegionPaths();
+            renderedMask = state;
+            return;
+        }
+
         var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(
             (lastWindowWidth - lastWidth) / 2,
             lastWindowHeight - lastBottom - lastHeight, lastWidth, lastHeight,
@@ -938,6 +979,41 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             nextGeometry;
 
         previousGeometry?.Dispose();
+    }
+
+    private void UpdateRegionPaths()
+    {
+        // The same continuous vector contours define the blur mask and optical rim.
+        using var body = new CanvasPathBuilder(canvasDevice!);
+        using var upper = new CanvasPathBuilder(canvasDevice!);
+        Vector2 Pixel(GlassDock.Core.Desktop.DockWaveGeometry.Point p) =>
+            new((float)(p.X * lastScale), (float)(p.Y * lastScale));
+        foreach (var rect in surfaceRegions!)
+        {
+            var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(rect.X, rect.Y,
+                rect.Width, rect.Height, material.CornerRadius * surfaceRegionScale, 0, 24, 0, 0);
+            body.BeginFigure(Pixel(outline.Start));
+            foreach (var s in outline.Segments)
+                if (s.IsLine) body.AddLine(Pixel(s.End));
+                else body.AddCubicBezier(Pixel(s.Control1), Pixel(s.Control2), Pixel(s.End));
+            body.EndFigure(CanvasFigureLoop.Closed);
+            var slice = GlassDock.Core.Desktop.DockEdgeSlice.Upper(outline,
+                rect.X + Math.Min(28, rect.Width / 4), rect.X + rect.Width * .72);
+            upper.BeginFigure(Pixel(slice.Start));
+            foreach (var s in slice.Segments)
+                upper.AddCubicBezier(Pixel(s.Control1), Pixel(s.Control2), Pixel(s.End));
+            upper.EndFigure(CanvasFigureLoop.Open);
+        }
+        var next = CanvasGeometry.CreatePath(body);
+        geometry!.Path = new W.CompositionPath(next);
+        var previous = canvasGeometry; canvasGeometry = next; previous?.Dispose();
+        if (specularLeftTopGeometry is not null)
+        {
+            var top = CanvasGeometry.CreatePath(upper);
+            specularLeftTopGeometry.Path = new W.CompositionPath(top);
+            var old = specularLeftTopCanvas; specularLeftTopCanvas = top; old?.Dispose();
+            // Other glint geometries remain empty: there is no full-window rim between cards.
+        }
     }
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop target)

@@ -26,7 +26,10 @@ public sealed record GlassDockSettings
     public const double DefaultBorderThickness = 1.05;
     public const double DefaultBorderOpacity = 0.78;
     public const bool DefaultHoverWaveEnabled = true;
+    public const bool DefaultHoverToExpandOnly = false;
     public const bool DefaultPinDock = false;
+    public const double DefaultClearRefractionStrength = 12;
+    public const double DefaultSpecularHighlightAngle = 45;
     public const bool DefaultLaunchAtStartup = false;
     public const bool DefaultNotificationBadgesEnabled = false;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
@@ -69,7 +72,10 @@ public sealed record GlassDockSettings
     public double BorderThickness { get; init; } = DefaultBorderThickness;
     public double BorderOpacity { get; init; } = DefaultBorderOpacity;
     public bool HoverWaveEnabled { get; init; } = DefaultHoverWaveEnabled;
+    public bool HoverToExpandOnly { get; init; } = DefaultHoverToExpandOnly;
     public bool PinDock { get; init; } = DefaultPinDock;
+    public double ClearRefractionStrength { get; init; } = DefaultClearRefractionStrength;
+    public double SpecularHighlightAngle { get; init; } = DefaultSpecularHighlightAngle;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
     public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
@@ -89,6 +95,8 @@ public sealed record GlassDockSettings
         return settings with
         {
             SchemaVersion = CurrentSchemaVersion,
+            ClearRefractionStrength = Bound(settings.ClearRefractionStrength, 0, 20, DefaultClearRefractionStrength),
+            SpecularHighlightAngle = Bound(settings.SpecularHighlightAngle, 0, 360, DefaultSpecularHighlightAngle),
             BottomMargin = bottomMargin,
             AutoHideDelayMilliseconds = Math.Clamp(
                 settings.AutoHideDelayMilliseconds,

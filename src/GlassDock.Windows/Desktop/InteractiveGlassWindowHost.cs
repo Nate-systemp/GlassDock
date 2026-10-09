@@ -27,6 +27,10 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     // SAME layered DWM client that the main dock uses for its desktop backdrop.
     // Configure before the XAML SystemBackdrop makes its first connection.
     public bool UseDockLayeredTransparency { get; set; }
+    // Settings uses the same desktop client with a normal resizable window frame.
+    public bool PreserveWindowChrome { get; set; }
+    public int MinimumWidthDips { get; set; }
+    public int MinimumHeightDips { get; set; }
     public bool HostBackdropAvailable { get; private set; }
     // Explicit user-invoked menus need actual foreground ownership: Window.Activate
     // alone may only show a tool window opened from a non-activating dock.
@@ -63,8 +67,11 @@ public sealed class InteractiveGlassWindowHost : IDisposable
                 .GetWindowLongPtr(hwnd, -20)
                 .ToInt64();
 
-        exStyle |= 0x00000080L;   // WS_EX_TOOLWINDOW
-        exStyle &= ~0x00040000L;  // WS_EX_APPWINDOW
+        if (!PreserveWindowChrome)
+        {
+            exStyle |= 0x00000080L;   // WS_EX_TOOLWINDOW
+            exStyle &= ~0x00040000L;  // WS_EX_APPWINDOW
+        }
         exStyle &= ~0x08000000L;  // WS_EX_NOACTIVATE (must stay OFF)
         if (UseDockLayeredTransparency)
             exStyle |= 0x00080000L; // WS_EX_LAYERED, as on the main dock
@@ -88,7 +95,7 @@ public sealed class InteractiveGlassWindowHost : IDisposable
                 .GetWindowLongPtr(hwnd, -16)
                 .ToInt64();
 
-        NativeMethods.SetWindowLongPtr(
+        if (!PreserveWindowChrome) NativeMethods.SetWindowLongPtr(
             hwnd,
             -16,
             (nint)(style & ~0x00CF0000L));
@@ -98,7 +105,7 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         //
         var noCorner = 1;
 
-        NativeMethods.DwmSetWindowAttribute(
+        if (!PreserveWindowChrome) NativeMethods.DwmSetWindowAttribute(
             hwnd,
             33,
             ref noCorner,
@@ -244,6 +251,16 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         nuint id,
         nuint data)
     {
+        if (message == 0x0024 && (MinimumWidthDips > 0 || MinimumHeightDips > 0)) // WM_GETMINMAXINFO
+        {
+            var result = NativeMethods.DefSubclassProc(window, message, wParam, lParam);
+            var limits = Marshal.PtrToStructure<WindowSizeLimits>(lParam);
+            var dpiScale = NativeMethods.GetDpiForWindow(hwnd) / 96d;
+            limits.MinimumX = (int)Math.Round(MinimumWidthDips * dpiScale);
+            limits.MinimumY = (int)Math.Round(MinimumHeightDips * dpiScale);
+            Marshal.StructureToPtr(limits, lParam, false);
+            return result;
+        }
         if (message == 0x0084 && InputHeightPixels is { } height &&
             NativeMethods.GetWindowRect(hwnd, out var bounds))
         {
@@ -295,5 +312,12 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         }
 
         GC.KeepAlive(callback);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowSizeLimits
+    {
+        public int ReservedX, ReservedY, MaximumX, MaximumY, PositionX, PositionY;
+        public int MinimumX, MinimumY, MaximumTrackX, MaximumTrackY;
     }
 }

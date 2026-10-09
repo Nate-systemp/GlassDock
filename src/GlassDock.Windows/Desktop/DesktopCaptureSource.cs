@@ -10,7 +10,11 @@ namespace GlassDock.Windows.Desktop;
 public sealed class DesktopCaptureSource : IDisposable
 {
     public readonly record struct Placement(nint Monitor, int X, int Y, int Width, int Height,
-        int MonitorWidth, int MonitorHeight);
+        int MonitorWidth, int MonitorHeight)
+    {
+        public bool SameCaptureSource(Placement other) => Monitor == other.Monitor &&
+            MonitorWidth == other.MonitorWidth && MonitorHeight == other.MonitorHeight;
+    }
     private readonly nint window;
     private readonly uint previousAffinity;
     private GraphicsCaptureItem? item;
@@ -45,10 +49,10 @@ public sealed class DesktopCaptureSource : IDisposable
             item.Closed += ItemClosed;
             session = pool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
+            CaptureBorderPermission.Configure(session);
             if (global::Windows.Foundation.Metadata.ApiInformation.IsPropertyPresent(
                 "Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
                 session.MinUpdateInterval = TimeSpan.FromSeconds(1d / 60);
-            // Keep Windows' capture indicator. Borderless capture requires explicit consent.
             session.StartCapture();
         }
         catch { Dispose(); throw; }

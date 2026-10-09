@@ -33,8 +33,7 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     {
         desktopFallback = enabled;
         MaterialShape.Fill = new SolidColorBrush(enabled
-            ? (plainAppearance == DockAppearanceMode.Light
-                ? Color.FromArgb(245, 243, 243, 243) : Color.FromArgb(245, 36, 36, 36))
+            ? Desktop.DockControlPalette.SolidSurface(plainAppearance, 245)
             : Colors.Transparent);
         if (!enabled && IsLoaded && !UsePlainSurface && shadow is null)
             OnLoaded(this, new RoutedEventArgs());
@@ -158,9 +157,7 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
 
         if (!UseDesktopBackdrop || desktopFallback)
         {
-            var color = plainAppearance == DockAppearanceMode.Light
-                ? Color.FromArgb((byte)(plainOpacity * 255), 243, 243, 243)
-                : Color.FromArgb((byte)(plainOpacity * 255), 36, 36, 36);
+            var color = Desktop.DockControlPalette.SolidSurface(plainAppearance, (byte)(plainOpacity * 255));
             MaterialShape.Fill = new SolidColorBrush(color);
         }
 

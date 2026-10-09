@@ -33,41 +33,106 @@ internal sealed class AdaptiveAppIcon : Grid
     private ApplicationIcon? original;
     private int rasterWidth, rasterHeight;
     private NotificationBadge? badge;
-    private Grid? stackPreview;
+    private Canvas? stackPreview;
     private ApplicationIcon?[] stackIcons = [];
-    private double stackSize;
     private readonly double artworkPadding;
+    private bool isStackLayer;
+    private GlassDock.Core.Settings.DockAppearanceMode stackAppearance = GlassDock.Core.Settings.DockAppearanceMode.Dark;
+
+    internal void SetDockAppearance(GlassDock.Core.Settings.DockAppearanceMode mode)
+    {
+        stackAppearance = mode;
+        UpdateStackCard();
+        if (stackPreview is not null)
+            foreach (var child in stackPreview.Children)
+                ((AdaptiveAppIcon)child).SetDockAppearance(mode);
+    }
+
+    // Supplies the same native artwork and fitted Image to the GPU drag-lens scene.
+    // Called once per drag, not once per frame; no UI screenshot/readback is needed.
+    internal void VisitLensArtwork(Action<ApplicationIcon?, FrameworkElement, Border> visit)
+    {
+        if (stackPreview is not null)
+        {
+            foreach (var child in stackPreview.Children)
+                if (child is AdaptiveAppIcon mini) mini.VisitLensArtwork(visit);
+        }
+        else visit(original, image, tile);
+    }
+
+    internal NotificationBadge? LensBadge => badge;
 
     public void SetStack(IReadOnlyList<DockApplication> apps)
     {
         artwork.Visibility = Visibility.Collapsed;
-        tile.Visibility = Visibility.Visible;
-        var next = apps.Take(4).Select(app => app.Icon).ToArray();
-        if (stackPreview is not null && stackSize == Width && stackIcons.SequenceEqual(next)) return;
-        stackIcons = next; stackSize = Width;
-        if (stackPreview is not null) Children.Remove(stackPreview);
-        stackPreview = new Grid
+        tile.Visibility = Visibility.Collapsed;
+        var count = Math.Min(3, apps.Count);
+        if (stackPreview is null)
         {
-            IsHitTestVisible = false,
-            ColumnSpacing = 1,
-            RowSpacing = 1,
-            Margin = new Thickness(1),
-            UseLayoutRounding = true
-        };
-        for (var i = 0; i < 2; i++) { stackPreview.ColumnDefinitions.Add(new()); stackPreview.RowDefinitions.Add(new()); }
-        var miniSize = StackMiniSize(Width);
-        for (var i = 0; i < next.Length; i++)
-        {
-            // Stack previews are already very small. Give the source artwork almost the
-            // entire cell and pre-rasterize for the parent dock hover magnification so
-            // Windows never has to enlarge a tiny bitmap after it has been composed.
-            var mini = new AdaptiveAppIcon(miniSize, maximumHoverScale, false, 0.25);
-            mini.SetIcon(next[i]); Grid.SetRow(mini, i / 2); Grid.SetColumn(mini, i % 2); stackPreview.Children.Add(mini);
+            stackPreview = new Canvas { IsHitTestVisible = false };
+            Children.Insert(1, stackPreview);
         }
-        Children.Insert(1, stackPreview);
+        if (stackIcons.Length != count)
+        {
+            stackPreview.Children.Clear();
+            stackIcons = new ApplicationIcon?[count];
+            // Paint back to front. The same order is visited by the drag-lens
+            // sampler, so overlap agrees between XAML and the refracted artwork.
+            for (var depth = count - 1; depth >= 0; depth--)
+            {
+                var layer = new AdaptiveAppIcon(Width * StackLayerScale(depth),
+                    maximumHoverScale, false, artworkPadding * StackLayerScale(depth)) { isStackLayer = true };
+                layer.SetDockAppearance(stackAppearance);
+                stackPreview.Children.Add(layer);
+            }
+            LayoutStackLayers();
+        }
+        for (var depth = 0; depth < count; depth++)
+        {
+            var next = apps[depth].Icon;
+            if (ReferenceEquals(stackIcons[depth], next)) continue;
+            stackIcons[depth] = next;
+            ((AdaptiveAppIcon)stackPreview.Children[count - 1 - depth]).SetIcon(next);
+        }
     }
 
-    private static double StackMiniSize(double size) => Math.Max(9, (size - 3) / 2);
+    private static double StackLayerScale(int depth) => depth == 0 ? 1 : depth == 1 ? .85 : .72;
+
+    private void UpdateStackCard()
+    {
+        if (!isStackLayer) return;
+        // ActualTheme only distinguishes Light/Dark; it cannot represent glass.
+        // Use the selected dock appearance explicitly, including after reparenting.
+        var color = stackAppearance switch
+        {
+            GlassDock.Core.Settings.DockAppearanceMode.Light or GlassDock.Core.Settings.DockAppearanceMode.Dark
+                => Desktop.DockControlPalette.SolidSurface(stackAppearance),
+            GlassDock.Core.Settings.DockAppearanceMode.Frosted => global::Windows.UI.Color.FromArgb(190, 42, 49, 59),
+            GlassDock.Core.Settings.DockAppearanceMode.Acrylic => global::Windows.UI.Color.FromArgb(150, 42, 49, 59),
+            _ => global::Windows.UI.Color.FromArgb(100, 42, 49, 59)
+        };
+        tile.Background = new SolidColorBrush(color);
+        tile.BorderBrush = new SolidColorBrush(Desktop.DockControlPalette.Surface(stackAppearance, 36));
+        tile.Opacity = 1;
+        tile.Visibility = Visibility.Visible;
+    }
+
+    private void LayoutStackLayers()
+    {
+        if (stackPreview is null) return;
+        // Rear centers move up/right by 3.75 DIP per layer at the default 28 DIP
+        // icon size. Only the artwork overhangs slightly; the dock slot is fixed.
+        var step = Math.Clamp(Width * (3.75 / 28), 2.5, 6);
+        for (var index = 0; index < stackPreview.Children.Count; index++)
+        {
+            var depth = stackPreview.Children.Count - 1 - index;
+            var layer = (AdaptiveAppIcon)stackPreview.Children[index];
+            var size = Width * StackLayerScale(depth);
+            layer.Configure(size, maximumHoverScale);
+            Canvas.SetLeft(layer, (Width - size) / 2 + depth * step);
+            Canvas.SetTop(layer, (Height - size) / 2 - depth * step);
+        }
+    }
 
     public void SetNotificationCount(int count) =>
         SetNotificationBadge(BadgeDisplayState.Counted(count, "legacy-count"));
@@ -123,8 +188,7 @@ internal sealed class AdaptiveAppIcon : Grid
         size = double.IsFinite(size) && size > 0 ? size : 28;
         maximumHoverScale = double.IsFinite(hoverScale) && hoverScale >= 1 ? hoverScale : 1.24;
         Width = Height = size;
-        if (stackPreview is not null)
-            foreach (var mini in stackPreview.Children.OfType<AdaptiveAppIcon>()) mini.Configure(StackMiniSize(size), maximumHoverScale);
+        LayoutStackLayers();
         tile.CornerRadius = new CornerRadius(size * 0.25);
         Fit();
     }
@@ -159,7 +223,7 @@ internal sealed class AdaptiveAppIcon : Grid
         sourceHeight = icon.Height;
         original = icon;
         // Already-filled artwork needs less of a backing plate than an open silhouette.
-        tile.Opacity = alphaTotal / (255d * pixelWidth * pixelHeight) > 0.85 ? 0.45 : 1;
+        tile.Opacity = !isStackLayer && alphaTotal / (255d * pixelWidth * pixelHeight) > 0.85 ? 0.45 : 1;
         Fit();
     }
 

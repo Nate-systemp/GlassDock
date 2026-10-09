@@ -103,7 +103,10 @@ internal sealed class MonitorDockCoordinator : IDisposable
             UnexpectedWindowClosed,
             showSettingsOverride,
             restoreTaskbarOverride,
-            resumeTaskbarOverride);
+            resumeTaskbarOverride)
+        {
+            ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome()
+        };
 
     private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs e)
     {

@@ -21,6 +21,7 @@ internal sealed class SystemQuickSettingsWindow : Window
     private const double PanelWidth = 474, PanelHeight = 336, Gutter = 16;
     private readonly WindowsSystemControlService controls;
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly Grid root = new() { Background = Brush(0) };
@@ -177,6 +178,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
         SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
         ApplyAppearance(appearance, dockMode);
         root.SizeChanged += (_, _) => UpdateBackdrop();
         root.Loaded += (_, _) =>

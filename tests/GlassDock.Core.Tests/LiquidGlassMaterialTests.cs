@@ -6,6 +6,31 @@ namespace GlassDock.Core.Tests;
 public sealed class LiquidGlassMaterialTests
 {
     [Fact]
+    public void DispersionDefaultIsRestrainedAndNormalizationPreservesDefaults()
+    {
+        var material = new LiquidGlassMaterial();
+        Assert.Equal(.65f, material.ChromaticDispersion);
+        Assert.Equal(material, material.Normalize());
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(-1, 0)]
+    [InlineData(.85f, .85f)]
+    [InlineData(1, 1)]
+    [InlineData(float.MaxValue, 1)]
+    [InlineData(float.NaN, .65f)]
+    [InlineData(float.PositiveInfinity, .65f)]
+    [InlineData(float.NegativeInfinity, .65f)]
+    public void DispersionIsFiniteBoundedAndCanBeDisabled(float input, float expected)
+    {
+        var baseline = new LiquidGlassMaterial();
+        var normalized = (baseline with { ChromaticDispersion = input }).Normalize();
+        Assert.Equal(expected, normalized.ChromaticDispersion);
+        Assert.Equal(baseline, normalized with { ChromaticDispersion = baseline.ChromaticDispersion });
+    }
+
+    [Fact]
     public void DefaultsKeepRecognizableBackdropAndBoundedLensRadius()
     {
         var m = new LiquidGlassMaterial().Normalize();

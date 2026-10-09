@@ -13,17 +13,21 @@ internal static class UtilityPopupStyle
     public const double Padding = 20;
 
     public static void Apply(GlassSurface glass, DesktopGlassBackdrop backdrop,
-        DockAppearanceSettings appearance, DockAppearanceMode mode = DockAppearanceMode.Dark)
+        DockAppearanceSettings appearance, DockAppearanceMode mode = DockAppearanceMode.Dark,
+        double cornerRadius = 28)
     {
         // Material/visual mode is derived from the authoritative Appearance choice,
         // never from a second user-facing Material selector. Solid modes are
         // overlaid by the XAML chrome; glass modes get their own compositor preset.
-        var material = UtilityMaterial.CreateForPopup(appearance, mode);
+        var material = UtilityMaterial.CreateForPopup(appearance, mode) with { CornerRadius = cornerRadius };
         glass.Apply(material with { BorderOpacity = 0, EdgeHighlight = 0 });
         // Keep the edge pipeline available for live appearance switching. All
         // three glass modes use the SAME optical branch as the main dock,
         // including Clear's geometry-aware edge treatment.
         backdrop.UseInnerEdge = true;
+        // Clear fallback uses the same thin directional catches as its GPU rim.
+        backdrop.UseDockSpecular = mode == DockAppearanceMode.Clear;
+        backdrop.SpecularHighlightAngle = appearance.SpecularHighlightAngle;
         // Match the dock's diffusion exactly, including Acrylic's base layer.
         backdrop.UsePopupBlur = false;
         // The utility HWND is configured with the dock's layered DWM client.
@@ -37,12 +41,13 @@ internal static class UtilityPopupStyle
             // The retained overlay palette is fully opaque for the two solid
             // dock finishes. Keep the shared compositor alive behind it so
             // switching Dark/Light -> glass doesn't require window recreation.
-            backdrop.SetSolidAppearance(mode, 1, 28);
+            backdrop.SetSolidAppearance(mode, 1, cornerRadius);
             backdrop.Apply(material with { BorderOpacity = 0, EdgeHighlight = 0 });
         }
         // Rebind only when the optional diagnostic source changes. Never
         // detach the live Window.SystemBackdrop (previous theme-switch crash).
         backdrop.RefreshPopupBackdropSource();
+        backdrop.SetPopupMode(mode, appearance.LiquidOptics);
     }
 
     public static void Position(AppWindow popup, AppWindow owner, double scale,

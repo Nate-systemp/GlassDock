@@ -769,6 +769,8 @@ public sealed class WindowFrameCache : IDisposable
                 session.IsCursorCaptureEnabled =
                     false;
 
+                Desktop.CaptureBorderPermission.Configure(session);
+
                 pool.FrameArrived +=
                     OnFrame;
             }

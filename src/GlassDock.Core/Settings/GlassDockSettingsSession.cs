@@ -39,7 +39,11 @@ public sealed class GlassDockSettingsSession
         Current.GlassBlurAmount,
         Current.DockOpacity,
         Current.BorderThickness,
-        Current.BorderOpacity);
+        Current.BorderOpacity)
+    {
+        ClearRefractionStrength = Current.ClearRefractionStrength,
+        SpecularHighlightAngle = Current.SpecularHighlightAngle
+    };
 
     public event EventHandler<GlassDockSettingsChangedEventArgs>? Changed;
 
@@ -74,7 +78,8 @@ public sealed class GlassDockSettingsSession
         double borderOpacity,
         DockDisplayMode? dockDisplayMode = null,
         bool? hoverWaveEnabled = null,
-        bool? pinDock = null) =>
+        bool? pinDock = null,
+        bool? hoverToExpandOnly = null) =>
         GlassDockSettings.Normalize(Current with
         {
             BottomMargin = bottomMargin,
@@ -90,7 +95,8 @@ public sealed class GlassDockSettingsSession
             BorderOpacity = borderOpacity,
             DockDisplayMode = dockDisplayMode ?? Current.DockDisplayMode,
             HoverWaveEnabled = hoverWaveEnabled ?? Current.HoverWaveEnabled,
-            PinDock = pinDock ?? Current.PinDock
+            PinDock = pinDock ?? Current.PinDock,
+            HoverToExpandOnly = hoverToExpandOnly ?? Current.HoverToExpandOnly
         });
 
     public GlassDockSettings CreateAppearanceUpdate(
@@ -133,9 +139,12 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultBorderOpacity,
             GlassDockSettings.DefaultDockDisplayMode,
             GlassDockSettings.DefaultHoverWaveEnabled,
-            GlassDockSettings.DefaultPinDock) with
+            GlassDockSettings.DefaultPinDock,
+            GlassDockSettings.DefaultHoverToExpandOnly) with
         {
             DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode,
+            ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
+            SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle,
             LaunchAtStartup = Current.LaunchAtStartup,
             NotificationBadgesEnabled = GlassDockSettings.DefaultNotificationBadgesEnabled
         };

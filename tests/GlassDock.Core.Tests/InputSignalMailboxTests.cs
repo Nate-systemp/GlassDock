@@ -6,14 +6,22 @@ namespace GlassDock.Core.Tests;
 public sealed class InputSignalMailboxTests
 {
     [Fact]
-    public void Burst_posts_once_and_keeps_only_latest_intent()
+    public void Burst_delivers_every_distinct_release_in_order_without_coalescing()
     {
         var mailbox = new InputSignalMailbox();
-        Assert.True(mailbox.Publish(new(false, 1, 100)));
-        for (var i = 101; i < 1000; i++) Assert.False(mailbox.Publish(new(true, 2, i)));
-        Assert.Equal(new InputSignal(true, 2, 999), mailbox.Take(1000));
-        Assert.Null(mailbox.Take(1000));
+        for (var i = 100; i < 200; i++) Assert.True(mailbox.Publish(new(false, 1, i)));
+        for (var i = 100; i < 200; i++) Assert.Equal(new InputSignal(false, 1, i), mailbox.Take(200));
+        Assert.Null(mailbox.Take(200));
         Assert.True(mailbox.Publish(new(false, 2, 1001)));
+    }
+    [Fact]
+    public void Ownership_change_discards_pending_input()
+    {
+        var mailbox = new InputSignalMailbox();
+        mailbox.Publish(new(false, 1, 100));
+        mailbox.Publish(new(false, 1, 101));
+        mailbox.Clear();
+        Assert.Null(mailbox.Take(102));
     }
     [Fact]
     public void Stalled_ui_discards_old_input_instead_of_replaying_it()
@@ -45,5 +53,75 @@ public sealed class InputSignalMailboxTests
             Assert.True(gesture.Process(win, false));
             Assert.False(gesture.Process(win, false));
         }
+    }
+
+    [Fact]
+    public void Lifecycle_gate_coalesces_resume_and_unlock_until_the_next_boundary()
+    {
+        var gate = new InputLifecycleRecoveryGate();
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery());
+
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery());
+    }
+
+    [Fact]
+    public void Lifecycle_gate_recovers_when_resume_arrives_without_a_suspend_event()
+    {
+        var gate = new InputLifecycleRecoveryGate();
+        Assert.True(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery());
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+    }
+
+    [Fact]
+    public void Gesture_reset_releases_a_key_stuck_down_across_lock_or_sleep()
+    {
+        var gesture = new WindowsKeyGesture();
+        gesture.Process(0x5B, true);
+        gesture.Process(0x45, true); // Win+E disqualifies the gesture.
+        gesture.Reset();
+
+        gesture.Process(0x5B, true);
+        Assert.True(gesture.Process(0x5B, false));
+        Assert.False(gesture.IsWindowsHeld);
+    }
+
+    [Fact]
+    public void Sleep_wake_requests_one_toggle_recovery_then_accepts_the_next_cycle()
+    {
+        var gate = new InputLifecycleRecoveryGate();
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery()); // paired resume notification
+
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+    }
+
+    [Fact]
+    public void Lock_unlock_and_display_wake_share_the_same_recovery_boundary()
+    {
+        var gate = new InputLifecycleRecoveryGate();
+        gate.MarkBoundary(); // lock or display off
+        Assert.True(gate.RequestRecovery()); // unlock or display on
+        Assert.False(gate.RequestRecovery()); // second resume broadcast
+    }
+
+    [Fact]
+    public void Shutdown_cancels_recovery_that_is_still_pending()
+    {
+        var gate = new InputLifecycleRecoveryGate();
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+        gate.Shutdown();
+        Assert.False(gate.RequestRecovery());
+        gate.MarkBoundary();
+        Assert.False(gate.RequestRecovery());
     }
 }

@@ -14,7 +14,7 @@ public sealed class AppActionPanelWiringTests
         Assert.Contains("previews.ShowAppActions", stack);
         Assert.Contains("applicationService.ExtractStack(stackId, app.Id)", stack);
         Assert.Contains("AppActionsRequested?.Invoke(app, value.Id, anchor)", grid);
-        Assert.Contains("MenuItem(menu, \"Ungroup\"", stack);
+        Assert.Contains("MenuItem(menu, \"Unstack all apps\"", stack);
         Assert.Contains("applications.ActivateWindow(window) || await restoreElevated(window)", coordinator);
         Assert.Contains("applications.CloseWindow(window)", coordinator);
         Assert.Contains("applications.SetPinned(item, !state.IsPinned)", coordinator);

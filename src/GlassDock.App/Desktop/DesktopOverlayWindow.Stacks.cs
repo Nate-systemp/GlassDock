@@ -11,12 +11,47 @@ namespace GlassDock.App.Desktop;
 public sealed partial class DesktopOverlayWindow
 {
     private readonly DockStackDrag stackDrag = new();
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? stackDwellTimer;
+    private readonly DockDragIntent dragIntent = new();
+    private bool suppressDragContext;
+    private DockDragBounds[] reorderHitBounds = [];
+    private DockPointerTarget dragPointerTarget = new(DockPointerMode.Outside, -1);
     private Button? mergeHighlight;
     private Border? mergeCue;
     private TextBlock? mergeReadyMark;
     private bool holdStackTarget;
     private DockStackWindow? stackWindow;
+    private readonly Dictionary<Button, (Microsoft.UI.Xaml.Media.Animation.Storyboard Story, double Target)> reorderShifts = new();
+
+    private void AnimateReorderShift(Button button, double target)
+    {
+        if (reorderShifts.TryGetValue(button, out var previous) && previous.Target == target) return;
+        var transform = button.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        var current = transform.X;
+        previous.Story?.Stop();
+        transform.X = current;
+        button.RenderTransform = transform;
+        if (!new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+        { transform.X = target; reorderShifts.Remove(button); return; }
+        var story = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+        var motion = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            From = current, To = target, Duration = TimeSpan.FromMilliseconds(130), EnableDependentAnimation = true,
+            EasingFunction = new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut }
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(motion, transform);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(motion, "X");
+        story.Children.Add(motion); reorderShifts[button] = (story, target); story.Begin();
+    }
+
+    private void StopReorderShifts()
+    {
+        foreach (var (button, shift) in reorderShifts)
+        {
+            if (button.RenderTransform is not TranslateTransform transform) { shift.Story.Stop(); continue; }
+            var current = transform.X; shift.Story.Stop(); transform.X = current;
+        }
+        reorderShifts.Clear();
+    }
 
     private BadgeDisplayState StackBadge(DockApplication app) => app.Stack is null ? badges.ForApplication(app.Identity) :
         app.StackApps.Any(child => badges.ForApplication(child.Identity).IsVisible) ? BadgeDisplayState.Activity("stack") : BadgeDisplayState.None;
@@ -65,50 +100,37 @@ public sealed partial class DesktopOverlayWindow
     private void StackContext(Button button, DockApplicationItem item)
     {
         var menu = new MenuFlyout();
+        menu.Opening += (_, _) => previews.BeginContextMenu(menu);
+        menu.Closed += (_, _) => previews.EndContextMenu(menu);
         MenuItem(menu, "Open", () => ToggleStack(item));
         MenuItem(menu, "Rename", () => ToggleStack(item, true));
-        MenuItem(menu, "Ungroup", () => { stackWindow?.Hide(); applicationService.ExtractStack(item.Id); });
+        MenuItem(menu, "Unstack all apps", () =>
+        {
+            stackWindow?.Hide();
+            SetStatus(applicationService.ExtractStack(item.Id)
+                ? "All apps returned to the dock."
+                : "Could not unstack apps. Please try again.");
+        });
         menu.ShowAt(button);
     }
 
     private void UpdateStackCandidate(double pointerX, double pointerY)
     {
-        holdStackTarget = false;
         if (!reorderDragging || reorderCandidate is null) return;
+        var previous = dragPointerTarget.Mode == DockPointerMode.Stack ? dragPointerTarget.Index : -1;
+        dragPointerTarget = dragIntent.Resolve(pointerX, pointerY, reorderHitBounds,
+            reorderSourceIndex, index => reorderCandidate.IsPinned && reorderCandidate.Application.Stack is null &&
+                index < VisibleDockApplications.Count && VisibleDockApplications[index].IsPinned &&
+                VisibleDockApplications[index].Application.StackApps.Count < DockStack.MaximumApps, previous);
+        holdStackTarget = dragPointerTarget.Mode == DockPointerMode.Stack;
+        reorderTargetIndex = dragPointerTarget.Mode == DockPointerMode.Reorder ? dragPointerTarget.Index : reorderSourceIndex;
         if (stackDrag.Mode == DockDragMode.None) stackDrag.Begin();
-        string? target = null;
-        if (reorderCandidate.IsPinned && reorderCandidate.Application.Stack is null && pointerY >= 0 && pointerY <= icons.ActualHeight)
-        {
-            var index = ResolveReorderTargetIndex(pointerX);
-            if (index >= 0 && index < VisibleDockApplications.Count && index != reorderSourceIndex)
-            {
-                var candidate = VisibleDockApplications[index];
-                if (candidate.IsPinned && candidate.Application.StackApps.Count < DockStack.MaximumApps)
-                {
-                    // Freeze an existing stack throughout its slot so it cannot slide away
-                    // before the pointer reaches the narrower centered merge region.
-                    holdStackTarget = candidate.Application.Stack is not null;
-                    if (Math.Abs(pointerX - reorderSlotCenters[index]) <= Appearance.ButtonWidth * 0.30) target = candidate.Id;
-                }
-            }
-        }
-        stackDrag.Hover(target, Environment.TickCount64);
-        if (target is null) { stackDwellTimer?.Stop(); ClearMergeHighlight(); return; }
-        stackDwellTimer ??= CreateStackTimer();
-        if (!stackDwellTimer.IsRunning) stackDwellTimer.Start();
-        ShowMergeReady();
+        var target = holdStackTarget ? VisibleDockApplications[dragPointerTarget.Index].Id : null;
+        // Preview is immediate; persistence happens only on pointer release.
+        stackDrag.PreviewTarget(target);
+        if (target is null) ClearMergeHighlight(); else ShowMergeReady();
     }
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateStackTimer()
-    {
-        var timer = DispatcherQueue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(60);
-        timer.Tick += (_, _) =>
-        {
-            if (!reorderDragging || stackDrag.TargetId is null) { timer.Stop(); return; }
-            stackDrag.Hover(stackDrag.TargetId, Environment.TickCount64); ShowMergeReady();
-            if (stackDrag.Mode == DockDragMode.StackMerge) timer.Stop();
-        };
-        return timer;
-    }
+
     private void ShowMergeReady()
     {
         if (stackDrag.TargetId is null) return;
@@ -143,12 +165,12 @@ public sealed partial class DesktopOverlayWindow
             mergeHighlight = null;
         }
     }
-    private void ClearStackDrag() { stackDwellTimer?.Stop(); stackDrag.Reset(); holdStackTarget = false; ClearMergeHighlight(); }
+    private void ClearStackDrag() { dragIntent.Reset(); stackDrag.Reset(); holdStackTarget = false; reorderHitBounds = []; dragPointerTarget = new(DockPointerMode.Outside, -1); ClearMergeHighlight(); }
     private bool FinishStackMerge(Button button, DockApplicationItem item, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(icons).Position;
         UpdateStackCandidate(point.X, point.Y);
-        if (stackDrag.Mode != DockDragMode.StackMerge || stackDrag.TargetId is not { } target) return false;
+        if (!dragIntent.StackMode || stackDrag.Mode != DockDragMode.StackMerge || stackDrag.TargetId is not { } target) return false;
         var saved = applicationService.MergeStack(item.Id, target);
         suppressClickUntil[item.Id] = DateTime.UtcNow.AddMilliseconds(750);
         CancelReorder(); button.ReleasePointerCapture(e.Pointer); e.Handled = true;
@@ -185,3 +207,5 @@ public sealed partial class DesktopOverlayWindow
         return true;
     }
 }
+
+

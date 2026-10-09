@@ -1,6 +1,7 @@
 using System.Numerics;
 using GlassDock.App.Controls;
 using GlassDock.Core.Settings;
+using GlassDock.Core.Desktop;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -9,7 +10,7 @@ using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Desktop;
 
-internal sealed class DockAnimationController
+internal sealed class DockAnimationController : IDisposable
 {
     private double maximumMagnificationScale = GlassDockSettings.DefaultMagnificationScale;
     private const double MagnificationSigma = 52;
@@ -18,6 +19,7 @@ internal sealed class DockAnimationController
 
     private readonly GlassSurface surface;
     private readonly Panel icons;
+    private readonly DockIconTransition iconTransition;
     private readonly FrameworkElement indicator;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer magnificationTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer placementTimer;
@@ -28,6 +30,34 @@ internal sealed class DockAnimationController
     private Storyboard? active;
     private Storyboard? indicatorFade;
     private TaskCompletionSource<bool>? completion;
+    private bool disposed;
+    private double expandedWidth = 560, expandedHeight = 68;
+    private double pathStartProgress, pathStartBottom, pathTargetBottom;
+    private double collapsedBottom;
+    private bool pathExpanded;
+    // A built-in XAML dependency property provides the one storyboard clock.
+    // It is never inserted into the visual tree and cannot affect hit testing.
+    private readonly Slider progressClock = new() { Minimum = 0, Maximum = 1 };
+    private double Progress { get => progressClock.Value; set => progressClock.Value = value; }
+    private void ProgressChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs args) => ApplyProgress();
+
+    private void ApplyProgress()
+    {
+        if (disposed) return;
+        var p = Math.Clamp(Progress, 0, 1);
+        var frame = DockTransitionGeometry.At(p, expandedWidth, expandedHeight);
+        surface.Width = indicator.Width = frame.Width;
+        surface.Height = indicator.Height = frame.Height;
+        if (indicator is Border pill) pill.CornerRadius = new CornerRadius(frame.CornerRadius);
+        var remaining = (pathExpanded ? 1 : 0) - pathStartProgress;
+        var fraction = Math.Abs(remaining) < .000001 ? 1 : Math.Clamp((p - pathStartProgress) / remaining, 0, 1);
+        var bottom = pathStartBottom + (pathTargetBottom - pathStartBottom) * fraction;
+        icons.Margin = new Thickness(0, 0, 0, bottom);
+        ApplyBottom(bottom);
+        // The retained pill and material share a silhouette, including during blending.
+        indicator.Opacity = 1 - frame.MaterialBlend;
+        surface.Opacity = frame.MaterialBlend;
+    }
 
     private bool magnificationRequested;
     private bool interactionHeld;
@@ -39,8 +69,10 @@ internal sealed class DockAnimationController
         Panel icons,
         FrameworkElement indicator)
     {
+        progressClock.ValueChanged += ProgressChanged;
         this.surface = surface;
         this.icons = icons;
+        iconTransition = new(icons, surface);
         this.indicator = indicator;
 
         magnificationTimer =
@@ -55,6 +87,7 @@ internal sealed class DockAnimationController
         placementTimer.Interval = TimeSpan.FromMilliseconds(16);
         placementTimer.Tick += (_, _) =>
         {
+            if (disposed) return;
             var t = Math.Clamp((Environment.TickCount64 - placementStarted) / placementDuration, 0, 1);
             if (t == 1) { placementTimer.Stop(); IsPlacementAnimating = false; }
 
@@ -77,6 +110,12 @@ internal sealed class DockAnimationController
 
     public void AnimateBottom(double bottom, double milliseconds)
     {
+        if (disposed) return;
+        if (!new UISettings().AnimationsEnabled || milliseconds <= 0)
+        {
+            SetBottom(bottom);
+            return;
+        }
         placementFrom = surface.Margin.Bottom;
         placementTarget = bottom;
         placementStarted = Environment.TickCount64;
@@ -94,10 +133,16 @@ internal sealed class DockAnimationController
     /// <summary>Fades the collapsed indicator without interrupting dock animation.</summary>
     public void AnimateIndicatorOpacity(double target, double milliseconds)
     {
+        if (disposed) return;
+        var from = indicator.Opacity;
         indicatorFade?.Stop();
         indicatorFade = null;
-
-        var from = indicator.Opacity;
+        indicator.Opacity = from;
+        if (!new UISettings().AnimationsEnabled)
+        {
+            indicator.Opacity = target;
+            return;
+        }
         if (Math.Abs(from - target) < 0.001)
         {
             indicator.Opacity = target;
@@ -139,6 +184,17 @@ internal sealed class DockAnimationController
         else StartMagnificationTimer();
     }
 
+    /// <summary>Resize a settled open dock without interpreting removed slots as collapse progress.</summary>
+    public void ResizeExpanded(double width, double height)
+    {
+        if (disposed) return;
+        expandedWidth = width;
+        expandedHeight = height;
+        iconTransition.SetExpandedSize(width, height);
+        surface.Width = indicator.Width = width;
+        surface.Height = indicator.Height = height;
+    }
+
     public void SetMaximumMagnificationScale(double value)
     {
         maximumMagnificationScale = double.IsFinite(value)
@@ -157,146 +213,65 @@ internal sealed class DockAnimationController
     public Task<bool> AnimateAsync(
         bool expanded,
         double targetWidth = 560,
-        double targetHeight = 68)
+        double targetHeight = 68,
+        double? bottom = null)
     {
+        if (!icons.DispatcherQueue.HasThreadAccess)
+            throw new InvalidOperationException("Dock transitions must run on the UI thread.");
+        ObjectDisposedException.ThrowIf(disposed, this);
         var started =
             System.Diagnostics.Stopwatch.StartNew();
 
         Trace(
             $"AnimateAsync({expanded}, targetWidth={targetWidth}), previousPending={completion is { Task.IsCompleted: false }}");
 
-        var width = surface.ActualWidth;
-        var height = surface.ActualHeight;
-        var opacity = icons.Opacity;
-        var surfaceOpacity = surface.Opacity;
-        var indicatorOpacity = indicator.Opacity;
-        var indicatorWidth = indicator.ActualWidth;
-
-        active?.Stop();
+        // Sample the rendered geometry before releasing its single animation clock.
+        var progress = DockTransitionTiming.Progress(surface.Width, surface.Height, targetWidth, targetHeight);
+        var currentBottom = surface.Margin.Bottom;
+        if (expanded && progress <= .000001) collapsedBottom = currentBottom;
+        var previous = active;
+        active = null;
+        previous?.Stop();
         completion?.TrySetResult(false);
+        completion = null;
+        StopIndicatorOpacityAnimation();
+        placementTimer.Stop();
+        IsPlacementAnimating = false;
 
-        surface.Width = width;
-        surface.Height = height;
-        icons.Opacity = opacity;
-        surface.Opacity = surfaceOpacity;
-        indicator.Opacity = indicatorOpacity;
-        indicator.Width = indicatorWidth;
+        expandedWidth = targetWidth;
+        expandedHeight = targetHeight;
+        pathStartProgress = progress;
+        pathStartBottom = currentBottom;
+        pathTargetBottom = expanded ? bottom ?? currentBottom : collapsedBottom;
+        pathExpanded = expanded;
+        iconTransition.SetExpandedSize(targetWidth, targetHeight);
+        Progress = progress;
+        ApplyProgress();
 
-        var animationsEnabled =
-            new UISettings().AnimationsEnabled;
+        var animationsEnabled = new UISettings().AnimationsEnabled;
+        Trace($"AnimationsEnabled={animationsEnabled}");
+        if (!animationsEnabled)
+        {
+            ResetMagnification(immediate: true);
+            Progress = expanded ? 1 : 0;
+            ApplyProgress();
+            return Task.FromResult(true);
+        }
 
-        Trace(
-            $"AnimationsEnabled={animationsEnabled}");
-
+        if (!expanded) ResetMagnification();
         active = new Storyboard();
-
-        // Keep this explicitly requested transformation visible even when Windows
-        // disables optional animations. Other UI animations retain their OS policy.
-        if (expanded)
-        {
-            Add(
-                indicator,
-                "Opacity",
-                indicatorOpacity,
-                EasingMode.EaseOut,
-                (100, indicatorOpacity),
-                (220, 0));
-
-            Add(
-                surface,
-                "Width",
-                width,
-                EasingMode.EaseOut,
-                (320, targetWidth));
-
-            Add(
-                surface,
-                "Height",
-                height,
-                EasingMode.EaseOut,
-                (320, targetHeight));
-
-            Add(
-                surface,
-                "Opacity",
-                surfaceOpacity,
-                EasingMode.EaseOut,
-                (90, surfaceOpacity),
-                (320, 1));
-
-            Add(
-                icons,
-                "Opacity",
-                opacity,
-                EasingMode.EaseOut,
-                (220, opacity),
-                (380, 1));
-        }
-        else
-        {
-            ResetMagnification();
-
-            // Collapse choreography:
-            // content recedes immediately, then the glass shell follows.
-            // This prevents the dock body from shrinking while icons still look
-            // fully present inside it.
-            Add(
-                icons,
-                "Opacity",
-                opacity,
-                EasingMode.EaseOut,
-                (0, opacity),
-                (145, 0));
-
-            Add(
-                surface,
-                "Width",
-                width,
-                EasingMode.EaseIn,
-                (32, width),
-                (300, 120));
-
-            Add(
-                surface,
-                "Height",
-                height,
-                EasingMode.EaseIn,
-                (32, height),
-                (280, 5));
-
-            Add(
-                surface,
-                "Opacity",
-                surfaceOpacity,
-                EasingMode.EaseIn,
-                (180, surfaceOpacity),
-                (300, 0));
-
-            Add(
-                indicator,
-                "Width",
-                indicatorWidth,
-                EasingMode.EaseIn,
-                (180, indicatorWidth),
-                (300, 120));
-
-            Add(
-                indicator,
-                "Opacity",
-                indicatorOpacity,
-                EasingMode.EaseIn,
-                (200, indicatorOpacity),
-                (300, 1));
-        }
-
+        var duration = (int)Math.Round(DockTransitionTiming.Duration(expanded, progress));
+        Add(progressClock, "Value", progress, EasingMode.EaseInOut, (duration, expanded ? 1 : 0));
         var pending =
-            new TaskCompletionSource<bool>();
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         completion = pending;
 
-        active.Completed +=
+        var storyboard = active;
+        storyboard.Completed +=
             (_, _) =>
             {
+                if (!ReferenceEquals(active, storyboard) || !ReferenceEquals(completion, pending)) return;
                 Trace(
                     $"Completed({expanded}) elapsed={started.ElapsedMilliseconds}ms width={surface.ActualWidth} height={surface.ActualHeight} icons={icons.Opacity}");
 
@@ -306,7 +281,7 @@ internal sealed class DockAnimationController
         Trace(
             $"Begin({expanded})");
 
-        active.Begin();
+        storyboard.Begin();
 
         return pending.Task;
     }
@@ -365,6 +340,7 @@ internal sealed class DockAnimationController
 
     private void TickMagnification()
     {
+        if (disposed) return;
         var settled = true;
 
         foreach (var element in IconElements())
@@ -552,7 +528,7 @@ internal sealed class DockAnimationController
 
     private void StartMagnificationTimer()
     {
-        if (magnificationTimerRunning || interactionHeld)
+        if (disposed || magnificationTimerRunning || interactionHeld)
             return;
 
         magnificationTimerRunning = true;
@@ -636,28 +612,30 @@ internal sealed class DockAnimationController
     /// </summary>
     public bool FreezeCurrentTransitions()
     {
+        var progress = Progress;
         var hadTransition = IsPlacementAnimating || active is not null || indicatorFade is not null;
         var bottom = surface.Margin.Bottom;
-        var width = surface.ActualWidth;
-        var height = surface.ActualHeight;
+        var width = double.IsFinite(surface.Width) ? surface.Width : surface.ActualWidth;
+        var height = double.IsFinite(surface.Height) ? surface.Height : surface.ActualHeight;
         var surfaceOpacity = surface.Opacity;
-        var iconsOpacity = icons.Opacity;
-        var indicatorWidth = indicator.ActualWidth;
+        var indicatorWidth = double.IsFinite(indicator.Width) ? indicator.Width : indicator.ActualWidth;
         var indicatorOpacity = indicator.Opacity;
 
         placementTimer.Stop();
         IsPlacementAnimating = false;
-        active?.Stop();
+        var previous = active;
         active = null;
+        previous?.Stop();
         completion?.TrySetResult(false);
         completion = null;
         indicatorFade?.Stop();
         indicatorFade = null;
 
+        Progress = progress;
+        ApplyProgress();
         surface.Width = width;
         surface.Height = height;
         surface.Opacity = surfaceOpacity;
-        icons.Opacity = iconsOpacity;
         indicator.Width = indicatorWidth;
         indicator.Opacity = indicatorOpacity;
         ApplyBottom(bottom);
@@ -667,13 +645,26 @@ internal sealed class DockAnimationController
     public void Stop()
     {
         placementTimer.Stop(); IsPlacementAnimating = false;
-        active?.Stop();
+        var previous = active;
+        active = null;
+        previous?.Stop();
         StopIndicatorOpacityAnimation();
         completion?.TrySetResult(false);
+        completion = null;
 
         ResetMagnification(
             immediate: true);
 
         active = null;
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        Stop();
+        disposed = true;
+        progressClock.ValueChanged -= ProgressChanged;
+        iconTransition.Dispose();
+        PlacementChanged = null;
     }
 }

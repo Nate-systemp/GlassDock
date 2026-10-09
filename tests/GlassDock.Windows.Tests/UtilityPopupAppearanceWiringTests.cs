@@ -7,6 +7,27 @@ namespace GlassDock.Windows.Tests;
 public sealed class UtilityPopupAppearanceWiringTests
 {
     [Fact]
+    public void Liquid_popups_share_renderer_and_release_hidden_capture_without_sampling_controls()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "GlassDock.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        var app = Path.Combine(directory.FullName, "src", "GlassDock.App");
+        foreach (var name in new[] { "CalendarPopoverWindow", "SystemQuickSettingsWindow", "SystemTrayWindow",
+            "DockAppContextMenuWindow", "DockStackWindow", "WindowPreviewWindow" })
+            Assert.Contains("liquid = new(this, root, backdrop)", File.ReadAllText(Path.Combine(app, "Desktop", name + ".cs")));
+        var adapter = File.ReadAllText(Path.Combine(app, "Rendering", "PopupLiquidGlassSurface.cs"));
+        Assert.Contains("DokyLiquidGlassSurface liquid", adapter);
+        Assert.Contains("window.AppWindow.IsVisible", adapter);
+        Assert.Contains("backdrop.PopupMode == DockAppearanceMode.Clear", adapter);
+        Assert.Contains("liquid.Dispose()", adapter);
+        Assert.DoesNotContain("Thumbnail", File.ReadAllText(Path.Combine(app, "Rendering", "DokyLiquidGlassSurface.cs")));
+        var previews = File.ReadAllText(Path.Combine(app, "Desktop", "WindowPreviewWindow.cs"));
+        Assert.Equal(2, previews.Split("liquid.Attach();").Length - 1);
+    }
+
+    [Fact]
     public void All_popup_windows_receive_the_current_dock_appearance()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -56,12 +77,20 @@ public sealed class UtilityPopupAppearanceWiringTests
         var backdrop = File.ReadAllText(Path.Combine(directory.FullName, "src",
             "GlassDock.App", "Rendering", "DesktopGlassBackdrop.cs"));
 
-        // The solid dock is #242424 dark and #F3F3F3 light. Don't let utility
+        // The solid dock is #242424 dark and warm #D8CCB8 light. Don't let utility
         // popups quietly revert to a separate navy material/theme.
-        Assert.Contains("Color.FromArgb(255, 36, 36, 36)", theme, StringComparison.Ordinal);
-        Assert.Contains("Color.FromArgb(255, 243, 243, 243)", theme, StringComparison.Ordinal);
-        Assert.Contains("alpha, 36, 36, 36", backdrop, StringComparison.Ordinal);
-        Assert.Contains("243, 243, 243", backdrop, StringComparison.Ordinal);
+        var palette = File.ReadAllText(Path.Combine(directory.FullName, "src",
+            "GlassDock.App", "Desktop", "DockControlPalette.cs"));
+        Assert.Contains("DockControlPalette.SolidSurface(mode)", theme, StringComparison.Ordinal);
+        Assert.Contains("Color.FromArgb(alpha, 36, 36, 36)", palette, StringComparison.Ordinal);
+        Assert.Contains("Color.FromArgb(alpha, 216, 204, 184)", palette, StringComparison.Ordinal);
+        Assert.Contains("DockControlPalette.SolidSurface(appearance, alpha)", backdrop, StringComparison.Ordinal);
+        var lens = File.ReadAllText(Path.Combine(directory.FullName, "src",
+            "GlassDock.App", "Rendering", "DokyLiquidGlassSurface.cs"));
+        var surface = File.ReadAllText(Path.Combine(directory.FullName, "src",
+            "GlassDock.App", "Controls", "GlassSurface.xaml.cs"));
+        Assert.Contains("DockControlPalette.SolidSurface(appearanceMode)", lens, StringComparison.Ordinal);
+        Assert.Contains("DockControlPalette.SolidSurface(plainAppearance,", surface, StringComparison.Ordinal);
     }
 
     [Fact]

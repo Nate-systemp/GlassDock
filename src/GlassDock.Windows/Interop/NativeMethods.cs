@@ -371,6 +371,24 @@ internal static class NativeMethods
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnregisterHotKey(nint hwnd, int id);
 
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool WTSRegisterSessionNotification(nint hwnd, uint flags);
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool WTSUnRegisterSessionNotification(nint hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nint RegisterPowerSettingNotification(
+        nint recipient,
+        ref Guid powerSettingGuid,
+        uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnregisterPowerSettingNotification(nint handle);
+
     [DllImport("comctl32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowSubclass(
         nint hwnd,

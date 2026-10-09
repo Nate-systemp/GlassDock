@@ -3,9 +3,10 @@
  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+ xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
- IgnorableNamespaces="uap uap3 uap10 rescap desktop6">
+ IgnorableNamespaces="uap uap3 uap10 uap11 rescap desktop6">
  <Identity Name="Natesystemp.Doky.NotificationIdentity" Publisher="CN=Natesystemp" Version="1.0.0.1" ProcessorArchitecture="x64" />
  <Properties>
   <DisplayName>Doky</DisplayName><PublisherDisplayName>Natesystemp</PublisherDisplayName>
@@ -24,6 +25,7 @@
  <Capabilities>
   <rescap:Capability Name="runFullTrust" /><rescap:Capability Name="unvirtualizedResources" />
   <uap3:Capability Name="userNotificationListener" />
+  <uap11:Capability Name="graphicsCaptureWithoutBorder" />
  </Capabilities>
 </Package>
 

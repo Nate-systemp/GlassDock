@@ -15,6 +15,9 @@ internal readonly record struct WindowsSystemSnapshot(
 
 internal sealed class WindowsSystemControlService
 {
+    public (int Percent, bool Muted)? ReadMasterVolume() => TryGetVolume(out var value, out var muted)
+        ? ((int)Math.Round(Math.Clamp(value, 0, 1) * 100), muted) : null;
+
     public WindowsSystemSnapshot GetSnapshot()
     {
         var networkAvailable = NetworkInterface.GetIsNetworkAvailable();

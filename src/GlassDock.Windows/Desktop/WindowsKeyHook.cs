@@ -22,6 +22,37 @@ internal sealed class WindowsKeyHook : IDisposable
     // brief fallback/helper handoff before the latest UI state arrives.
     private State state = new(false, true, 0);
     private uint pressRevision;
+    public void RecoverAfterResume()
+    {
+        // Must run on the owning message-pump thread. Re-register because Windows
+        // does not expose whether a low-level hook was silently removed.
+        // Install the replacement before releasing the existing hook. If Windows
+        // rejects re-registration during a resume transition, retaining the old
+        // hook is safer than leaving Doky without any Win-key interception.
+        // Both handles belong to this message-pump thread, so no keyboard event
+        // can be dispatched between installation and the old hook's removal.
+        var replacement = NativeMethods.SetWindowsHookExW(13, keyboardCallback, 0, 0);
+        if (replacement == 0)
+            throw new InvalidOperationException("Cannot recover Doky keyboard handling after resume; previous hook retained.");
+
+        var previous = keyboardHook;
+        keyboardHook = replacement;
+        if (previous != 0) NativeMethods.UnhookWindowsHookEx(previous);
+        ResetInputState();
+        for (var key = 8; key < 256; key++)
+            if (NativeMethods.GetAsyncKeyState(key) < 0) gesture.Process(key, true);
+    }
+
+    public void ResetInputState()
+    {
+        gesture.Reset();
+        launcherChordActive = false;
+        spaceHeld = false;
+        suppressCurrentWindowsPress = false;
+        capturedWindowsDown = false;
+        capturedWindowsKey = 0;
+        pressRevision = 0;
+    }
     public void UpdateState(bool suppress, bool capture, uint revision) =>
         Volatile.Write(ref state, new(suppress, capture, revision));
     public WindowsKeyHook(Action<bool, uint> signal)

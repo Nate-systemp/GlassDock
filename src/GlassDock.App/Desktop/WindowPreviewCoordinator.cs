@@ -61,7 +61,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         appMenu?.Hide(immediate: true);
     }
 
-    public void Attach(Button button, DockApplicationItem item)
+    public void Attach(Button button, DockApplicationItem item, Func<bool>? suppressContext = null)
     {
         buttons[item.Id] = button;
         button.PointerEntered += (_, _) => { pointerOwner = button; Enter(item); };
@@ -74,6 +74,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         button.ContextRequested += (_, e) =>
         {
             e.Handled = true;
+            if (suppressContext?.Invoke() == true) return;
             ShowAppActions(item, Anchor(button));
         };
     }
@@ -361,6 +362,13 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         }
         session.Hide(); preview?.Hide(immediate);
         if (held != HoldsDock) HoldChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void DismissForFullscreen()
+    {
+        Hide(immediate: true);
+        foreach (var menu in contextMenus.OfType<MenuFlyout>().ToArray()) menu.Hide();
+        appMenu?.Hide(immediate: true);
     }
 
     public void BeginContextMenu(object source)

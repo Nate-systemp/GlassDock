@@ -42,6 +42,9 @@ internal sealed class NotificationBadge : Grid
     private int revision;
     private bool awaitingLoad;
 
+    internal FrameworkElement LensBody => body;
+    internal string LensText => number.Visibility == Visibility.Visible ? number.Text : string.Empty;
+
     public NotificationBadge()
     {
         Width = Height = 20;

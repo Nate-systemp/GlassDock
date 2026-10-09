@@ -41,6 +41,34 @@ public sealed class WindowsOverlayManager : IDisposable
     private NativeMethods.Rect currentMonitorBounds;
     private double currentMonitorScale;
     private bool hasCurrentMonitorMetrics;
+    public bool FullscreenSuppressed { get; private set; }
+
+    public void RefreshFullscreenPolicy()
+    {
+        if (!NativeMethods.IsWindow(hwnd)) return;
+        var foreground = NativeMethods.GetForegroundWindow();
+        var suppressed = false;
+        if (foreground != 0 && foreground != hwnd)
+        {
+            NativeMethods.GetWindowThreadProcessId(foreground, out var owner);
+            var name = new System.Text.StringBuilder(256);
+            NativeMethods.GetClassName(foreground, name, name.Capacity);
+            var eligible = owner != Environment.ProcessId &&
+                name.ToString() is not ("Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd");
+            var monitor = NativeMethods.MonitorFromWindow(hwnd, 2);
+            var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
+            if (NativeMethods.GetMonitorInfo(monitor, ref info) && NativeMethods.GetWindowRect(foreground, out var bounds))
+                suppressed = FullscreenPolicy.CoversMonitor(eligible,
+                    NativeMethods.MonitorFromWindow(foreground, 2) == monitor, NativeMethods.IsIconic(foreground),
+                    bounds.Left, bounds.Top, bounds.Right, bounds.Bottom,
+                    info.Monitor.Left, info.Monitor.Top, info.Monitor.Right, info.Monitor.Bottom);
+        }
+        if (FullscreenSuppressed == suppressed) return;
+        FullscreenSuppressed = suppressed;
+        // Only our HWND changes. Pinning and logical transition state remain intact.
+        NativeMethods.SetWindowPos(hwnd, suppressed ? -2 : -1, 0, 0, 0, 0,
+            0x0001 | 0x0002 | 0x0010 | (suppressed ? 0x0080u : 0x0040u));
+    }
     public event EventHandler? PointerMovedOutsideInput;
     public event EventHandler? PointerMovedInsideInput;
     public WindowsOverlayManager(nint hwnd, nint fixedMonitor = 0)
@@ -163,6 +191,8 @@ public sealed class WindowsOverlayManager : IDisposable
 
    private void EnsureTopmost()
     {
+        RefreshFullscreenPolicy();
+        if (FullscreenSuppressed) return;
         if (!NativeMethods.IsWindow(hwnd))
             return;
 

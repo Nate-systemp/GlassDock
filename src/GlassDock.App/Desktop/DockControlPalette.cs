@@ -8,6 +8,8 @@ namespace GlassDock.App.Desktop;
 internal static class DockControlPalette
 {
     public const double ButtonRadius = 9;
+    public static Color SolidSurface(DockAppearanceMode mode, byte alpha = 255) => mode == DockAppearanceMode.Light
+        ? Color.FromArgb(alpha, 216, 204, 184) : Color.FromArgb(alpha, 36, 36, 36);
     public static Color Foreground(DockAppearanceMode mode) => mode == DockAppearanceMode.Light
         ? Color.FromArgb(255, 40, 40, 40) : Color.FromArgb(255, 240, 240, 240);
     public static Color Surface(DockAppearanceMode mode, byte alpha)

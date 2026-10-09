@@ -6,6 +6,19 @@ namespace GlassDock.Windows.Tests;
 public sealed class InputHelperProtocolTests
 {
     [Fact]
+    public void Five_hundred_helper_events_preserve_order_and_reject_duplicate_delivery()
+    {
+        long sequence = 0;
+        for (var i = 1; i <= 500; i++)
+        {
+            var command = $"EVENT|{i}|{1000 + i}|4|HOME";
+            Assert.NotNull(WindowsInputHelperProtocol.ReadEvent(command, ref sequence, 1000 + i));
+            Assert.Null(WindowsInputHelperProtocol.ReadEvent(command, ref sequence, 1000 + i));
+            Assert.Equal(i, sequence);
+        }
+    }
+
+    [Fact]
     public void RestoreRequestsRequireIdentityAndRejectExpiredOrMalformedCommands()
     {
         var id = Guid.NewGuid().ToString("N");
@@ -35,6 +48,20 @@ public sealed class InputHelperProtocolTests
         Assert.Null(WindowsInputHelperProtocol.ReadEvent("EVENT|3|602|0|BAD", ref sequence, 602));
         Assert.True(WindowsInputHelperProtocol.ReadEvent("EVENT|3|602|4|LAUNCHER", ref sequence, 602)!.Launcher);
         Assert.Equal(3, sequence);
+    }
+
+    [Fact]
+    public void Recovery_command_carries_the_latest_input_state_before_rearming()
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var command = WindowsInputHelperProtocol.CreateRecoveryCommand(id, "STATE|1|0|47");
+        var recovery = WindowsInputHelperProtocol.ReadRecovery(command);
+        Assert.NotNull(recovery);
+        Assert.Equal(id, recovery.Id);
+        Assert.Equal("STATE|1|0|47", recovery.State);
+        Assert.Null(WindowsInputHelperProtocol.ReadRecovery($"RECOVER|{id}|1|2|47"));
+        Assert.Null(WindowsInputHelperProtocol.ReadRecovery("RECOVER|invalid"));
+        Assert.NotNull(WindowsInputHelperProtocol.ReadRecovery($"RECOVER|{id}"));
     }
     [Fact]
     public void Session_mutex_rejects_a_second_helper_instance()

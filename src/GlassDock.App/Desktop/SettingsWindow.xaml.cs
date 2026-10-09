@@ -3,6 +3,7 @@ using GlassDock.Core.Settings;
 using GlassDock.Core.Desktop;
 using GlassDock.Windows.Settings;
 using GlassDock.Windows.Applications;
+using GlassDock.Windows.Desktop;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,13 +19,19 @@ public sealed partial class SettingsWindow : Window
     private readonly ApplicationShutdownState shutdown;
     private readonly WindowsStartupService startupService = new();
     private readonly BadgeCoordinator badges;
+    private readonly IReadOnlyList<DockApplication> previewApplications;
     private readonly bool safeMode;
     private readonly Action restoreTaskbar;
     private readonly Action resumeTaskbar;
     private readonly Action restartGlassDock;
     private readonly Action restartSafeMode;
     private readonly Action exitGlassDock;
-    private bool saving;
+    private bool saveInProgress;
+    private bool saving
+    {
+        get => saveInProgress;
+        set { saveInProgress = value; if (PageScroll is not null) PageScroll.IsEnabled = !value; }
+    }
     private bool closed;
     private bool populating;
     private ManualUpdateService? updates;
@@ -41,7 +48,8 @@ public sealed partial class SettingsWindow : Window
         Action restartGlassDock,
         Action restartSafeMode,
         Action exitGlassDock,
-        BadgeCoordinator badges)
+        BadgeCoordinator badges,
+        IReadOnlyList<DockApplication> previewApplications)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -53,17 +61,19 @@ public sealed partial class SettingsWindow : Window
         this.restartSafeMode = restartSafeMode;
         this.exitGlassDock = exitGlassDock;
         this.badges = badges;
+        this.previewApplications = previewApplications;
         updateLifetime = CancellationTokenSource.CreateLinkedTokenSource(shutdown.CancellationToken);
 
         InitializeComponent();
         ConfigureNumberFormatting();
         Title = "Doky Settings";
         WindowBranding.Apply(this);
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(940, 700));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1080, 800));
 
-        ShowSettingsPage("Appearance");
+
         var startupEnabled = startupService.IsEnabled();
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
+        InitializeSettingsShell();
         PopulateAbout();
         badges.Changed += NotificationsChanged;
         UpdateNotificationStatus();
@@ -81,6 +91,17 @@ public sealed partial class SettingsWindow : Window
         };
     }
 
+    public void ShowCentered(nint owner)
+    {
+        var area = WindowsMonitorService.GetWorkAreaForWindow(owner);
+        var size = AppWindow.Size;
+        AppWindow.Move(new global::Windows.Graphics.PointInt32(
+            area.X + (area.Width - size.Width) / 2,
+            area.Y + (area.Height - size.Height) / 2));
+        Activate();
+        WindowsMonitorService.BringWindowToFront(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    }
+
     private void ConfigureNumberFormatting()
     {
         // Format text only: NumberBox.Value and persisted doubles retain precision.
@@ -95,6 +116,8 @@ public sealed partial class SettingsWindow : Window
         SetNumberFormat(BorderOpacityBox, 1);
         SetNumberFormat(AutoHideDelayBox, 2);
         SetNumberFormat(PeekDelayBox, 2);
+        SetNumberFormat(ClearRefractionStrengthBox, 1);
+        SetNumberFormat(SpecularHighlightAngleBox, 0);
     }
 
     private static void SetNumberFormat(NumberBox box, int decimals)
@@ -130,7 +153,10 @@ public sealed partial class SettingsWindow : Window
         DockOpacityBox.Value = settings.DockOpacity * 100;
         BorderThicknessBox.Value = settings.BorderThickness;
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
+        ClearRefractionStrengthBox.Value = settings.ClearRefractionStrength;
+        SpecularHighlightAngleBox.Value = settings.SpecularHighlightAngle;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
+        HoverToExpandOnlyToggle.IsOn = settings.HoverToExpandOnly;
         PinDockToggle.IsOn = settings.PinDock;
         NotificationBadgesToggle.IsOn = settings.NotificationBadgesEnabled;
         NotificationAccessButton.IsEnabled = settings.NotificationBadgesEnabled;
@@ -322,6 +348,18 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    private async void RequestCaptureBorderPermissionClick(object sender, RoutedEventArgs e)
+    {
+        CaptureBorderPermissionButton.IsEnabled = false;
+        CaptureBorderStatusText.Text = "Requesting Windows permission…";
+        try
+        {
+            var result = await CaptureBorderPermission.RequestAsync();
+            if (!closed) CaptureBorderStatusText.Text = result;
+        }
+        finally { if (!closed) CaptureBorderPermissionButton.IsEnabled = true; }
+    }
+
     private async void CheckUpdatesClick(object sender, RoutedEventArgs e)
     {
         if (closed || shutdown.IsRequested || updateBusy || updates is null) return;
@@ -396,24 +434,20 @@ public sealed partial class SettingsWindow : Window
 
     private void DockAppearanceChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (populating)
-            return;
-
+        if (populating || !editingReady || saving || closed) return;
         var mode = SelectedDockAppearance;
         UpdateDockAppearanceDescription(mode);
-
-        // Selecting one of the main-dock glass styles restores that style's
-        // material preset into the editable glass controls. The dock itself
-        // changes after Apply, matching the rest of this settings window.
-        if (mode.GlassStyle() is not { } style)
-            return;
-
-        var preset = DockMaterialStylePresets.Create(style);
-        GlassBlurAmountBox.Value = preset.BlurAmount;
-        DockOpacityBox.Value = preset.Opacity * 100;
-        BorderThicknessBox.Value = preset.BorderThickness;
-        BorderOpacityBox.Value = preset.BorderOpacity * 100;
-        SetStatus($"{mode} selected. Select Apply to use it on the dock.", success: true);
+        populating = true;
+        if (mode.GlassStyle() is { } style)
+        {
+            var preset = DockMaterialStylePresets.Create(style);
+            GlassBlurAmountBox.Value = preset.BlurAmount;
+            DockOpacityBox.Value = preset.Opacity * 100;
+            BorderThicknessBox.Value = preset.BorderThickness;
+            BorderOpacityBox.Value = preset.BorderOpacity * 100;
+        }
+        populating = false;
+        ApplyClick(this, new RoutedEventArgs());
     }
 
     private void UpdateDockAppearanceDescription(DockAppearanceMode mode)
@@ -446,41 +480,35 @@ public sealed partial class SettingsWindow : Window
 
     private void ShowSettingsPage(string page)
     {
-        AppearancePage.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        BehaviorPage.Visibility = page == "Behavior" ? Visibility.Visible : Visibility.Collapsed;
-        NotificationsPage.Visibility = page == "Notifications" ? Visibility.Visible : Visibility.Collapsed;
-        DisplayPage.Visibility = page == "Display" ? Visibility.Visible : Visibility.Collapsed;
-        StartupPage.Visibility = page == "Startup" ? Visibility.Visible : Visibility.Collapsed;
-        AdvancedPage.Visibility = page == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
-        RecoveryPage.Visibility = page == "Recovery" ? Visibility.Visible : Visibility.Collapsed;
-        AboutPage.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
-
-        SetNavigationState(AppearanceNavButton, page == "Appearance");
-        SetNavigationState(BehaviorNavButton, page == "Behavior");
-        SetNavigationState(NotificationsNavButton, page == "Notifications");
-        SetNavigationState(DisplayNavButton, page == "Display");
-        SetNavigationState(StartupNavButton, page == "Startup");
-        SetNavigationState(AdvancedNavButton, page == "Advanced");
-        SetNavigationState(RecoveryNavButton, page == "Recovery");
-        SetNavigationState(AboutNavButton, page == "About");
+        if (!navigation.ContainsKey(page)) return;
+        selectedPage = page;
+        foreach (var definition in SettingsCatalog.Pages)
+        {
+            if (SettingsRoot.FindName(definition.Id + "Page") is FrameworkElement content)
+                content.Visibility = definition.Id == page ? Visibility.Visible : Visibility.Collapsed;
+            SetNavigationState(navigation[definition.Id], definition.Id == page);
+        }
+        PageScroll.ChangeView(null, 0, null, true);
+        if (page == "System")
+            HelperStatusText.Text = "The helper is managed by the active dock session. Settings does not have a live helper connection status; use recovery actions below if elevated apps do not respond.";
     }
 
-    private static void SetNavigationState(Button button, bool selected)
+    private void SetNavigationState(Button button, bool selected)
     {
-        button.Background = new SolidColorBrush(selected
-            ? ColorHelper.FromArgb(255, 231, 241, 255)
-            : Colors.Transparent);
-        button.Foreground = new SolidColorBrush(selected
-            ? ColorHelper.FromArgb(255, 15, 95, 168)
-            : ColorHelper.FromArgb(255, 51, 51, 51));
+        button.Background = selected ? Brush("SelectionBrush") : new SolidColorBrush(Colors.Transparent);
+        button.Foreground = Brush("PrimaryBrush");
+        button.Resources["ButtonBackgroundPointerOver"] = Brush("CardBrush");
+        button.Resources["ButtonForegroundPointerOver"] = Brush("PrimaryBrush");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(button, selected ? "Selected" : "");
     }
 
-    private void ResetClick(object sender, RoutedEventArgs e)
+    private async void ResetClick(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmResetAsync("editable preferences")) return;
         var defaults = settingsSession.CreateDefaultEditableSettings();
         Populate(defaults);
         ShowSettingsPage("Appearance");
-        SetStatus("Defaults are ready. Select Apply to save them.", success: true);
+        ApplyClick(this, new RoutedEventArgs());
     }
 
     private async void ApplyClick(object sender, RoutedEventArgs e)
@@ -525,11 +553,14 @@ public sealed partial class SettingsWindow : Window
                 BorderOpacityBox.Value / 100,
                 SelectedDisplayMode,
                 HoverWaveToggle.IsOn,
-                PinDockToggle.IsOn) with
+                PinDockToggle.IsOn,
+                HoverToExpandOnlyToggle.IsOn) with
             {
                 DockAppearanceMode = SelectedDockAppearance,
                 LaunchAtStartup = desiredStartup,
-                NotificationBadgesEnabled = NotificationBadgesToggle.IsOn
+                NotificationBadgesEnabled = NotificationBadgesToggle.IsOn,
+                ClearRefractionStrength = ClearRefractionStrengthBox.Value,
+                SpecularHighlightAngle = SpecularHighlightAngleBox.Value
             };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
@@ -551,7 +582,11 @@ public sealed partial class SettingsWindow : Window
                 TryRestoreStartupRegistration(previousStartupRegistration);
 
             if (!closed)
+            {
+                Populate(settingsSession.Current);
+                ApplySettingsAppearance();
                 SetStatus($"Settings could not be saved: {error.Message}", success: false);
+            }
         }
         finally
         {
@@ -618,6 +653,8 @@ public sealed partial class SettingsWindow : Window
         if (saving || closed || shutdown.IsRequested)
             return;
 
+        if (!await ConfirmResetAsync("appearance")) return;
+
         var current = settingsSession.Current;
         var edited = GlassDockSettings.Normalize(current with
         {
@@ -629,7 +666,9 @@ public sealed partial class SettingsWindow : Window
             GlassBlurAmount = GlassDockSettings.DefaultGlassBlurAmount,
             DockOpacity = GlassDockSettings.DefaultDockOpacity,
             BorderThickness = GlassDockSettings.DefaultBorderThickness,
-            BorderOpacity = GlassDockSettings.DefaultBorderOpacity
+            BorderOpacity = GlassDockSettings.DefaultBorderOpacity,
+            ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
+            SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle
         });
 
         await SaveRecoverySettingsAsync(edited, "Appearance reset to defaults.");
@@ -639,6 +678,8 @@ public sealed partial class SettingsWindow : Window
     {
         if (saving || closed || shutdown.IsRequested)
             return;
+
+        if (!await ConfirmResetAsync("dock placement")) return;
 
         var current = settingsSession.Current;
         var edited = GlassDockSettings.Normalize(current with
@@ -708,7 +749,7 @@ public sealed partial class SettingsWindow : Window
     {
         StatusText.Text = message;
         StatusText.Foreground = new SolidColorBrush(success
-            ? ColorHelper.FromArgb(255, 55, 120, 98)
+            ? (settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light ? ColorHelper.FromArgb(255, 36, 98, 68) : ColorHelper.FromArgb(255, 145, 220, 182))
             : Colors.IndianRed);
     }
 }

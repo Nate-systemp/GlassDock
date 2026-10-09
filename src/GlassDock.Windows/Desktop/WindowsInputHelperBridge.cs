@@ -28,6 +28,46 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     private sealed record RestorePending(string Id, TaskCompletionSource<bool> Completion);
     private RestorePending? restorePending;
     private int restoreHelperPid;
+    private CancellationTokenSource? attempt;
+    private Task runTask = Task.CompletedTask;
+    private int recovering, supportsRecovery;
+    private RestorePending? recoveryPending;
+
+    public async Task RecoverAsync()
+    {
+        if (lifetime.IsCancellationRequested || Interlocked.Exchange(ref recovering, 1) != 0) return;
+        try
+        {
+            if (Volatile.Read(ref supportsRecovery) != 0 && !runTask.IsCompleted)
+            {
+                var request = new RestorePending(Guid.NewGuid().ToString("N"),
+                    new(TaskCreationOptions.RunContinuationsAsynchronously));
+                Volatile.Write(ref recoveryPending, request);
+                try
+                {
+                    var recoveryCommand = WindowsInputHelperProtocol.CreateRecoveryCommand(
+                        request.Id, Volatile.Read(ref state));
+                    if (commands.Writer.TryWrite(recoveryCommand) &&
+                        await request.Completion.Task.WaitAsync(TimeSpan.FromSeconds(4), lifetime.Token))
+                    { Log("Resume: existing helper hook recovered; process retained."); return; }
+                }
+                catch (TimeoutException) { Log("Resume: helper recovery acknowledgement timed out."); }
+                finally { Volatile.Write(ref recoveryPending, null); }
+            }
+            // Old/unresponsive/disconnected helper: EOF releases its hook. Never
+            // install a competing hook or launch another helper until it exits.
+            attempt?.Cancel();
+            await runTask.WaitAsync(TimeSpan.FromSeconds(8), lifetime.Token);
+            if (lifetime.IsCancellationRequested) return;
+            attempt?.Dispose();
+            attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            runTask = RunAsync(attempt.Token);
+            Log("Resume: starting a bounded helper reconnect.");
+        }
+        catch (Exception error) when (error is OperationCanceledException or TimeoutException)
+        { if (!lifetime.IsCancellationRequested) Log($"Recovery deferred: {error.GetType().Name}; old helper ownership retained until exit."); }
+        finally { Interlocked.Exchange(ref recovering, 0); }
+    }
 
     public async Task<bool> RestoreWindowAsync(ApplicationWindow window)
     {
@@ -54,7 +94,8 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         this.helperPath = Path.GetFullPath(helperPath);
         this.ownership = ownership;
         this.signal = signal;
-        _ = RunAsync(lifetime.Token);
+        attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        runTask = RunAsync(attempt.Token);
     }
     public void UpdateState(bool suppress, bool capture, uint revision)
     {
@@ -130,6 +171,9 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             long sequence = 0;
             while (await reader.ReadLineAsync(token) is { } line)
             {
+                if (line == "CAPS|RECOVER1") { Volatile.Write(ref supportsRecovery, 1); continue; }
+                if (Volatile.Read(ref recoveryPending) is { } recovery && line == "RECOVERED|" + recovery.Id)
+                { recovery.Completion.TrySetResult(true); continue; }
                 if (line == "CAPS|RESTORE1") { Volatile.Write(ref restoreHelperPid, helper.Id); continue; }
                 var acknowledgement = line.Split('|');
                 if (acknowledgement.Length == 3 && acknowledgement[0] == "RESTORED" &&
@@ -153,6 +197,8 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         }
         finally
         {
+            Volatile.Write(ref supportsRecovery, 0);
+            Volatile.Read(ref recoveryPending)?.Completion.TrySetResult(false);
             Volatile.Write(ref restoreHelperPid, 0);
             Volatile.Read(ref restorePending)?.Completion.TrySetResult(false);
             connection.Cancel();
@@ -164,9 +210,9 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             }
             if (handedOff && helper is not null)
             {
-                try { await helper.WaitForExitAsync(token); }
+                try { await helper.WaitForExitAsync(lifetime.Token); }
                 catch (OperationCanceledException) { }
-                if (!token.IsCancellationRequested) ownership(false);
+                if (!lifetime.IsCancellationRequested) ownership(false);
             }
             helper?.Dispose();
             Volatile.Write(ref grant, null);
@@ -331,6 +377,28 @@ public static class WindowsInputHelperRegistration
 internal static class WindowsInputHelperProtocol
 {
     internal sealed record RestoreRequest(string Id, ApplicationWindow Window);
+    internal sealed record RecoveryRequest(string Id, string? State);
+
+    internal static string CreateRecoveryCommand(string id, string state)
+    {
+        if (!Guid.TryParseExact(id, "N", out _)) throw new ArgumentException("Invalid recovery id.", nameof(id));
+        var parts = state.Split('|');
+        return parts.Length == 4 && parts[0] == "STATE" && parts[1] is "0" or "1" &&
+               parts[2] is "0" or "1" && uint.TryParse(parts[3], out _)
+            ? $"RECOVER|{id}|{parts[1]}|{parts[2]}|{parts[3]}"
+            : $"RECOVER|{id}";
+    }
+
+    internal static RecoveryRequest? ReadRecovery(string line)
+    {
+        var parts = line.Split('|');
+        if (parts.Length is not (2 or 5) || parts[0] != "RECOVER" ||
+            !Guid.TryParseExact(parts[1], "N", out _)) return null;
+        if (parts.Length == 2) return new(parts[1], null);
+        return parts[2] is ("0" or "1") && parts[3] is ("0" or "1") &&
+               uint.TryParse(parts[4], out _) ? new(parts[1], $"STATE|{parts[2]}|{parts[3]}|{parts[4]}") : null;
+    }
+
     internal static RestoreRequest? ReadRestore(string line, long now)
     {
         var parts = line.Split('|');
@@ -363,4 +431,3 @@ internal static class WindowsInputHelperProtocol
         return $"{PipePrefix}.{Process.GetCurrentProcess().SessionId}";
     }
 }
-

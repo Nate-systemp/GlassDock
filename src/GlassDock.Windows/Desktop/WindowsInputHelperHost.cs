@@ -45,14 +45,22 @@ public static class WindowsInputHelperHost
 
             using var disconnected = new ManualResetEvent(false);
             using var lifetime = new CancellationTokenSource();
-            var events = Channel.CreateBounded<InputSignal>(new BoundedChannelOptions(1)
-            { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true });
+            // Preserve distinct key releases in transport. The UI retargets on each
+            // event; it does not queue completed animations. Stale events still expire.
+            var events = Channel.CreateUnbounded<InputSignal>(new UnboundedChannelOptions
+            { SingleReader = true, SingleWriter = true });
             using var hook = new WindowsKeyHook((launcher, revision) =>
                 events.Writer.TryWrite(new InputSignal(launcher, revision, Environment.TickCount64)));
             ApplyState(initial, hook);
             writer.WriteLine("READY");
             // Older clients ignore this optional capability; keyboard protocol is unchanged.
             writer.WriteLine("CAPS|RESTORE1");
+            writer.WriteLine("CAPS|RECOVER1");
+            var hookThread = GetCurrentThreadId();
+            // Force creation of this thread's message queue before the bridge
+            // can post a lifecycle recovery command to it.
+            NativeMethods.PeekMessage(out _, 0, 0, 0, 0);
+            TaskCompletionSource? recovery = null;
             using var writeLock = new SemaphoreSlim(1, 1);
             var readTask = ReadStateAsync();
             var writeTask = WriteEventsAsync();
@@ -64,6 +72,12 @@ public static class WindowsInputHelperHost
                 while (NativeMethods.MsgWaitForMultipleObjectsEx(1, handles, uint.MaxValue, 0x04FF, 0x0004) == 1)
                     while (NativeMethods.PeekMessage(out var message, 0, 0, 0, 1))
                     {
+                        if (message.MessageId == 0x8051)
+                        {
+                            try { hook.RecoverAfterResume(); Volatile.Read(ref recovery)?.TrySetResult(); }
+                            catch (Exception error) { Volatile.Read(ref recovery)?.TrySetException(error); }
+                            continue;
+                        }
                         NativeMethods.TranslateMessage(ref message);
                         NativeMethods.DispatchMessage(ref message);
                     }
@@ -85,7 +99,18 @@ public static class WindowsInputHelperHost
                 {
                     while (await reader.ReadLineAsync(lifetime.Token) is { } line)
                     {
-                        if (WindowsInputHelperProtocol.ReadRestore(line, Environment.TickCount64) is { } request)
+                        if (WindowsInputHelperProtocol.ReadRecovery(line) is { } recoveryRequest)
+                        {
+                            if (recoveryRequest.State is { } recoveryState)
+                                ApplyState(recoveryState, hook);
+                            var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                            Volatile.Write(ref recovery, pending);
+                            if (!PostThreadMessageW(hookThread, 0x8051, 0, 0)) throw new IOException("Cannot dispatch hook recovery.");
+                            await pending.Task.WaitAsync(TimeSpan.FromSeconds(3), lifetime.Token);
+                            await WriteLineAsync("RECOVERED|" + recoveryRequest.Id);
+                        }
+                        else if (line.StartsWith("RECOVER|", StringComparison.Ordinal)) continue;
+                        else if (WindowsInputHelperProtocol.ReadRestore(line, Environment.TickCount64) is { } request)
                         {
                             var restored = RestoreWindow(request);
                             await WriteLineAsync($"RESTORED|{request.Id}|{(restored ? 1 : 0)}");
@@ -93,7 +118,8 @@ public static class WindowsInputHelperHost
                         else ApplyState(line, hook);
                     }
                 }
-                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
+                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or TimeoutException or InvalidOperationException)
+                { Debug.WriteLine($"Doky helper connection/recovery ended: {e}"); }
                 finally { disconnected.Set(); }
             }
             async Task WriteEventsAsync()
@@ -134,6 +160,11 @@ public static class WindowsInputHelperHost
         if (parts.Length != 4 || parts[0] != "STATE" || !uint.TryParse(parts[3], out var revision)) return;
         hook.UpdateState(parts[1] == "1", parts[2] == "1", revision);
     }
+
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostThreadMessageW(uint thread, uint message, nuint wParam, nint lParam);
 
     private static bool RestoreWindow(WindowsInputHelperProtocol.RestoreRequest request)
     {

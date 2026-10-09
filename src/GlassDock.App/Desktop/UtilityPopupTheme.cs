@@ -15,6 +15,7 @@ internal sealed class UtilityPopupTheme
     public SolidColorBrush Tile { get; } = new();
     public SolidColorBrush TileBorder { get; } = new();
     public SolidColorBrush Overlay { get; } = new();
+    public SolidColorBrush ReadingSurface { get; } = new();
     public SolidColorBrush Divider { get; } = new();
     public SolidColorBrush Accent { get; } = new();
     public SolidColorBrush AccentFill { get; } = new();
@@ -25,6 +26,17 @@ internal sealed class UtilityPopupTheme
     public DockAppearanceMode Mode { get; private set; }
 
     public UtilityPopupTheme() => Apply(DockAppearanceMode.Dark);
+
+    public void ApplyReadingContrast(double opacity, DockAppearanceMode? materialMode = null)
+    {
+        var surfaceMode = materialMode ?? Mode;
+        var alpha = GlassDock.Core.Materials.UtilityMaterial.DashboardContrast(surfaceMode, opacity);
+        // Dark glass already gets tint from the native dock graph. Stacking a
+        // charcoal XAML wash and a black shadow over that graph muddies it.
+        ReadingSurface.Color = DockControlPalette.SolidSurface(Mode) with
+        { A = surfaceMode.GlassStyle() is null ? (byte)255 :
+            Mode == DockAppearanceMode.Light ? (byte)Math.Round(alpha * 255) : (byte)0 };
+    }
 
     public void StyleButton(Button button)
     {
@@ -58,8 +70,7 @@ internal sealed class UtilityPopupTheme
         // same neutral finishes as the main dock.
         Overlay.Color = mode switch
         {
-            DockAppearanceMode.Light => Color.FromArgb(255, 243, 243, 243),
-            DockAppearanceMode.Dark => Color.FromArgb(255, 36, 36, 36),
+            DockAppearanceMode.Light or DockAppearanceMode.Dark => DockControlPalette.SolidSurface(mode),
             _ => Color.FromArgb(0, 0, 0, 0)
         };
     }

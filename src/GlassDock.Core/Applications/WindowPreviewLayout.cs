@@ -21,11 +21,12 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
     public static PreviewRect CloseButtonBounds(PreviewRect card, double size) =>
         new(card.X + card.Width - size - 9, card.Y + 8, size, size);
 
-    public static WindowPreviewLayout Create(int count, double availableWidth, double availableHeight, bool expanded)
+    public static WindowPreviewLayout Create(int count, double availableWidth, double availableHeight, bool expanded,
+        bool reservePager = false)
     {
-        var cardWidth = Math.Max(40, Math.Min(count == 1 ? 280 : 208, availableWidth - 50));
-        var cardHeight = Math.Max(40, Math.Min(count == 1 ? 174 : 150, availableHeight - 64));
-        var columns = Math.Max(1, (int)((availableWidth - 24 + 12) / (cardWidth + 12)));
+        var cardWidth = Math.Max(40, Math.Min(count == 1 ? 232 : 176, availableWidth - 50));
+        var cardHeight = Math.Max(40, Math.Min(count == 1 ? 155 : 137, availableHeight - 64));
+        var columns = Math.Max(1, (int)((availableWidth - 16 + 12) / (cardWidth + 12)));
         // Use a second row before paginating, while keeping every card inside
         // the current monitor's work area (values here are already DIPs).
         var rows = count > columns && availableHeight >= 64 + cardHeight * 2 + 12 ? 2 : 1;
@@ -33,14 +34,20 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
         var visible = Math.Min(count, capacity);
         var usedColumns = Math.Min(visible, columns);
         var usedRows = Math.Max(1, (int)Math.Ceiling(visible / (double)columns));
-        var width = expanded ? 24 + usedColumns * cardWidth + Math.Max(0, usedColumns - 1) * 12
-            : 24 + cardWidth + Math.Min(2, Math.Max(0, visible - 1)) * 16;
+        var stackDepth = Math.Min(2, Math.Max(0, visible - 1));
+        var top = expanded ? 8 : 8 + stackDepth * 8;
+        var width = expanded ? 16 + usedColumns * cardWidth + Math.Max(0, usedColumns - 1) * 12
+            : 16 + cardWidth + stackDepth * 16;
         var cards = Enumerable.Range(0, visible).Select(index => expanded
-            ? new PreviewRect(12 + index % columns * (cardWidth + 12),
-                26 + index / columns * (cardHeight + 12), cardWidth, cardHeight)
-            : new PreviewRect(12 + Math.Min(index, 2) * 16, 26 - Math.Min(index, 2) * 8,
+            ? new PreviewRect(8 + index % columns * (cardWidth + 12),
+                top + index / columns * (cardHeight + 12), cardWidth, cardHeight)
+            : new PreviewRect(8 + Math.Min(index, 2) * 16, top - Math.Min(index, 2) * 8,
                 cardWidth * (1 - Math.Min(index, 2) * .06), cardHeight * (1 - Math.Min(index, 2) * .06))).ToArray();
-        return new(width, (expanded ? usedRows * cardHeight + (usedRows - 1) * 12 : cardHeight) + 64, capacity, cards);
+        // Eight DIP body padding plus the existing 12 DIP transparent travel gap.
+        // Only paginated groups need the additional button row.
+        var footer = count > capacity || reservePager ? 30 : 0;
+        return new(width, (expanded ? usedRows * cardHeight + (usedRows - 1) * 12 : cardHeight)
+            + top + 20 + footer, capacity, cards);
     }
 
     public static int NextPage(int page, int count, int capacity) =>

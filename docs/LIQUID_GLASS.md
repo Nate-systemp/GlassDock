@@ -1,5 +1,63 @@
 # Dock-only Liquid Glass prototype
 
+## Physically inspired chromatic dispersion (2026-10-07)
+
+The existing WGC → Win2D shader → dock geometry path is retained. The drag lens
+uses this same shader through its existing transparent CompositionDrawingSurface;
+there is no second optical implementation or capture source.
+
+`LiquidGlassMaterial.ChromaticDispersion` is a per-channel maximum offset in DIPs:
+default 0.65, bounded to [0, 1], nonfinite values reset to 0.65. Zero disables the
+spectral sampling branch. The drag lens uses 0.85. Both convert to physical pixels
+in ConfigureShader through the existing DPI scale, using the existing Lens.y slot.
+The maximum red-to-blue separation is therefore 1.3 DIPs for Clear and 1.7 DIPs
+for the lens, before edge/refraction weighting.
+
+The original refracted coordinate is unchanged. Red and blue sample on opposite
+sides of that coordinate along the existing SDF normal; green stays centered.
+Offset = dispersionPixels × edge² × saturate(2 × refractionPixels / edgeWidthPixels).
+This DPI-invariant weighting vanishes at zero refraction and in the calm center.
+The same wave-aware distance field supplies both edge strength and normals, so
+fringing follows sides, corners and the deformed upper rim rather than a fixed
+screen direction. No artificial rainbow colors or content-analysis pass are used.
+
+Only the dominant 60% diffusion tap is dispersed; the four neutral 10% neighbor
+taps are retained. Tint and neutral specular lighting run afterward. This keeps
+the five-tap diffusion footprint and white highlights while avoiding fifteen
+texture reads. Exact dock geometry clipping and the lens's premultiplied capsule
+alpha remain unchanged. The former lens-only post-lighting channel split was
+removed in favor of this shared step.
+
+Cost is at most seven texture reads instead of five for Clear, and seven instead
+of seven for the lens. The branch can skip the two added reads when disabled or
+outside the optical edge; actual GPU savings depend on execution/driver behavior.
+No passes, timers, captures, readbacks, windows or per-frame resources were added.
+WDA exclusion, native fallback, monitor coordinates and cleanup are unchanged.
+This is an RGB screen-space approximation, not physically exact spectral rendering.
+HDR, color management, high-refresh throughput and long-term resource behavior
+are not certified by the automated tests.
+
+Changed in this pass: LiquidGlassMaterial.cs, DokyLiquidGlassSurface.cs,
+Shaders/LiquidGlass.hlsl, its compiled LiquidGlass.bin,
+tests/GlassDock.Core.Tests/LiquidGlassMaterialTests.cs, and this document.
+
+Validation and runtime results for this pass are recorded below separately from
+the historical prototype results. Manual acceptance is pending: black/white text,
+horizontal/vertical lines, grayscale/color wallpaper, center/edges/corners/rim,
+slow/fast hover and 20+ cycles, collapse/reopen, Dark → Clear → Acrylic → Clear,
+Pin Dock/auto-hide, stacks/drag lens, multi-monitor, 100/125/150/200% DPI, GPU/CPU
+profiling and resource soak. Capture exclusion prevents screenshot-based visual
+certification of Clear; user observation is required.
+
+- Shader compilation succeeded. Debug build: zero warnings/errors; 402/402 tests
+  passed (250 Core, 152 Windows). An initial prematurely started test run hit a
+  watchdog copy mismatch during the build; the completed-build rerun passed.
+- `scripts/Validate.ps1`: locked restore, Release build with zero warnings/errors,
+  and 402/402 tests passed.
+- New Debug process launched and path verified (PID 13112):
+  `C:\Dev\GlassDock\src\GlassDock.App\bin\Debug\net10.0-windows10.0.26100.0\win-x64\GlassDock.App.exe`.
+  User visual verification requested; no optical acceptance claimed yet.
+
 ## Rendering path
 
 Clear on each main dock opts into `DokyLiquidGlassSurface`. Other appearances and all Home/utility/stack/action surfaces keep their existing renderer. Pre-existing Home work is preserved.

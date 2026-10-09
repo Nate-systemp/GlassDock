@@ -6,6 +6,35 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class DockStackStoreTests
 {
+    [Theory]
+    [InlineData(60, DockPointerMode.Stack)]
+    [InlineData(89, DockPointerMode.Reorder)]
+    [InlineData(200, DockPointerMode.Outside)]
+    public void Pointer_release_routes_to_one_persisted_operation(double x, DockPointerMode expected)
+    {
+        WithStore(path =>
+        {
+            var apps = new[] { App("a"), App("b"), App("c") };
+            var store = new DockPinStore(path);
+            DockDragBounds[] bounds = [new(0, 0, 40, 40), new(46, 0, 86, 40), new(92, 0, 132, 40)];
+            var target = DockPointerTarget.Resolve(x, 20, bounds, 0, _ => true);
+            Assert.Equal(expected, target.Mode);
+            Assert.False(File.Exists(path)); // Preview cannot persist anything.
+            if (target.Mode == DockPointerMode.Stack)
+            {
+                Assert.True(store.MergeStack(apps[0].Id, apps[target.Index].Id, apps));
+                Assert.Single(new DockPinStore(path).ApplyStacks(apps), a => a.Stack is not null);
+            }
+            else if (target.Mode == DockPointerMode.Reorder)
+            {
+                var ids = apps.Select(a => a.Id).ToList(); var moved = ids[0]; ids.RemoveAt(0); ids.Insert(target.Index, moved);
+                Assert.True(store.Reorder(apps.Select(a => a.Id).ToArray(), ids));
+                var loaded = new DockPinStore(path).ApplyStacks(apps);
+                Assert.Equal(ids, loaded.Select(a => a.Id)); Assert.All(loaded, a => Assert.Null(a.Stack));
+            }
+            else Assert.False(File.Exists(path));
+        });
+    }
     private static DockApplication App(string id, bool pinned = true) => new("app:" + id.ToUpperInvariant(),
         new(id,@"C:\Apps\" + id + ".exe", "--profile test"), id,@"C:\Links\" + id + ".lnk",pinned,[],null);
     private static void WithStore(Action<string> run)

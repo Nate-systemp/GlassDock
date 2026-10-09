@@ -21,8 +21,9 @@ internal sealed class WindowPreviewWindow : Window
 {
     private readonly Canvas root = new();
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
-    private readonly Border solid = new() { IsHitTestVisible = false, CornerRadius = new(28) };
+    private readonly Border solid = new() { IsHitTestVisible = false, CornerRadius = new(20) };
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly WindowPreviewPlacement placement;
     private readonly WindowPreviewSession session;
@@ -92,6 +93,7 @@ internal sealed class WindowPreviewWindow : Window
         ApplyAppearance(appearance, mode);
         // As with the dock/utilities, attach after Content and native setup.
         SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
 
         root.PointerEntered += (_, _) =>
         {
@@ -157,7 +159,7 @@ internal sealed class WindowPreviewWindow : Window
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         // Alpha 1 is an input surface, not a separate material overlay.
         root.Background = new SolidColorBrush(DockControlPalette.Surface(mode, 1));
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 20);
         if (isShown) Draw();
     }
 
@@ -295,7 +297,7 @@ internal sealed class WindowPreviewWindow : Window
         if (page >= session.Windows.Count) page = 0;
         var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
         var layout = WindowPreviewLayout.Create(session.Windows.Count - page,
-            area.Width / dpi - 24, area.Height / dpi - 24, true);
+            area.Width / dpi - 24, area.Height / dpi - 24, true, reservePager: page > 0);
         var windows = session.Windows.Skip(page).Take(layout.Capacity).ToArray();
         if (layout.Width != expanded.Width || layout.Height != expanded.Height ||
             layout.Capacity != expanded.Capacity ||
@@ -324,13 +326,14 @@ internal sealed class WindowPreviewWindow : Window
             var previous = cards.ToDictionary(card => Key(card.Window));
             cards.Clear();
             root.Children.Clear();
+            liquid.Attach();
             root.Children.Add(glass);
             root.Children.Add(solid);
             var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
             var count = session.Windows.Count - page;
             windowCount = session.Windows.Count;
-            compact = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, false);
-            expanded = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, true);
+            compact = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, false, reservePager: page > 0);
+            expanded = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, true, reservePager: page > 0);
             var windows = session.Windows.Skip(page).Take(expanded.Capacity).ToArray();
             // DWM registrations follow compact stack z-order, front last.
             foreach (var window in windows.Reverse())
@@ -355,23 +358,25 @@ internal sealed class WindowPreviewWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         var fallback = new TextBlock { FontSize = 12, Foreground = theme.Secondary,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var cached = new Image { Stretch = Stretch.Uniform, Margin = new(8, 36, 8, 34), IsHitTestVisible = false };
-        var icon = new AdaptiveAppIcon(22, 1, showTile: false) { VerticalAlignment = VerticalAlignment.Center };
+        // Account for the card's one-DIP border: identical bounds to the live DWM image.
+        var cached = new Image { Stretch = Stretch.Uniform, Margin = new(5, 33, 5, 5), IsHitTestVisible = false };
+        var icon = new AdaptiveAppIcon(18, 1, showTile: false) { VerticalAlignment = VerticalAlignment.Center };
         icon.SetIcon(window.Icon);
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new(10, 0, 10, 5),
-            Height = 28, VerticalAlignment = VerticalAlignment.Bottom };
-        footer.Children.Add(icon);
-        footer.Children.Add(title);
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new(7, 3, 35, 0),
+            Height = 28, VerticalAlignment = VerticalAlignment.Top };
+        header.Children.Add(icon);
+        header.Children.Add(title);
         var content = new Grid();
         content.Children.Add(fallback);
         content.Children.Add(cached);
-        content.Children.Add(footer);
-        var border = new Border { CornerRadius = new(DockControlPalette.ButtonRadius),
+        content.Children.Add(header);
+        var border = new Border { CornerRadius = new(12),
             BorderThickness = new(1), BorderBrush = theme.TileBorder, Background = theme.Tile, Child = content };
         var button = new Button { Content = border, Padding = new(0), BorderThickness = new(0),
             Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0, 0, 0, 0)),
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         theme.StyleButton(button);
+        button.CornerRadius = new(12);
         // A sibling rather than a child of the activation button. Its click
         // cannot bubble through the card activation handler.
         var close = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 10, Foreground = theme.Primary },
@@ -446,7 +451,7 @@ internal sealed class WindowPreviewWindow : Window
             Canvas.SetZIndex(card.Button, cards.Count - index);
             card.Button.Width = rect.Width;
             card.Button.Height = rect.Height;
-            card.Title.MaxWidth = Math.Max(0, rect.Width - 60);
+            card.Title.MaxWidth = Math.Max(0, rect.Width - 68);
             card.Border.Background = card.Emphasis > .5 ? theme.Hover : theme.Tile;
             var closeVisible = visible && CanFocus &&
                 (ContainsPointer(card.Button) || ContainsPointer(card.CloseButton) || card.CloseButton.FocusState != FocusState.Unfocused);
@@ -474,18 +479,18 @@ internal sealed class WindowPreviewWindow : Window
                 card.Cached.Source = null;
                 card.CachedPixels = default;
             }
-            var shown = card.Thumbnail.Update(new(rect.X + 8, rect.Y + 36, Math.Max(1, rect.Width - 16), Math.Max(1, rect.Height - 70)),
+            var shown = card.Thumbnail.Update(new(rect.X + 6, rect.Y + 34, Math.Max(1, rect.Width - 12), Math.Max(1, rect.Height - 40)),
                 dpi, opacity, visible && !useCache);
             card.Fallback.Visibility = useCache || shown ? Visibility.Collapsed : Visibility.Visible;
         }
         var remaining = windowCount - page - cards.Count;
         more.Content = remaining > 0 ? $"+{remaining} more · {page + 1}–{page + cards.Count} of {windowCount}"
             : $"Back to first · {page + 1}–{page + cards.Count} of {windowCount}";
-        more.Visibility = windowCount > expanded.Capacity ? Visibility.Visible : Visibility.Collapsed;
+        more.Visibility = page > 0 || windowCount > expanded.Capacity ? Visibility.Visible : Visibility.Collapsed;
         more.IsEnabled = CanFocus;
-        more.MaxWidth = Math.Max(0, width - 24);
-        Canvas.SetLeft(more, 12);
-        Canvas.SetTop(more, height - 34 + travel);
+        more.MaxWidth = Math.Max(0, width - 16);
+        Canvas.SetLeft(more, 8);
+        Canvas.SetTop(more, height - 46 + travel);
         Canvas.SetZIndex(more, 30);
     }
 
@@ -497,6 +502,7 @@ internal sealed class WindowPreviewWindow : Window
         foreach (var card in cards) card.Thumbnail.Dispose();
         cards.Clear();
         root.Children.Clear();
+        liquid.Attach();
         root.Children.Add(glass);
         root.Children.Add(solid);
     }

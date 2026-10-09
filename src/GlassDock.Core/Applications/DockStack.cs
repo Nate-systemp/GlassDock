@@ -12,10 +12,16 @@ public enum DockDragMode { None, Reorder, StackCandidate, StackMerge, ExternalFi
 /// <summary>One monotonic dwell decision; moving off the target cancels the candidate.</summary>
 public sealed class DockStackDrag
 {
-    public const int DwellMilliseconds = 600;
+    public const int DwellMilliseconds = 450;
     public DockDragMode Mode { get; private set; }
     public string? TargetId { get; private set; }
     private long candidateSince;
+    public void PreviewTarget(string? target)
+    {
+        if (Mode is DockDragMode.None or DockDragMode.ExternalFiles) return;
+        TargetId = target;
+        Mode = target is null ? DockDragMode.Reorder : DockDragMode.StackMerge;
+    }
     public void Begin(bool external = false) { Reset(); Mode = external ? DockDragMode.ExternalFiles : DockDragMode.Reorder; }
     public void Hover(string? eligibleCenteredTarget, long milliseconds)
     {

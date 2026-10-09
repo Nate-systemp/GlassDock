@@ -12,11 +12,11 @@ public sealed class DockStackDragTests
         Assert.Equal(DockDragMode.Reorder, drag.Mode);
         drag.Hover("a", 0); drag.Hover("b", 200);
         Assert.Equal(DockDragMode.StackCandidate, drag.Mode);
-        drag.Hover("b", 799);
+        drag.Hover("b", 200 + DockStackDrag.DwellMilliseconds - 1);
         Assert.Equal(DockDragMode.StackCandidate, drag.Mode);
-        drag.Hover("b", 800);
+        drag.Hover("b", 200 + DockStackDrag.DwellMilliseconds);
         Assert.Equal(DockDragMode.StackMerge, drag.Mode);
-        drag.Hover(null, 801);
+        drag.Hover(null, 201 + DockStackDrag.DwellMilliseconds);
         Assert.Equal(DockDragMode.Reorder, drag.Mode);
         Assert.Null(drag.TargetId);
     }
@@ -30,7 +30,7 @@ public sealed class DockStackDragTests
     [Fact]
     public void Cancelled_candidate_and_ready_merge_clear_all_state()
     {
-        var drag = new DockStackDrag(); drag.Begin(); drag.Hover("a", 0); drag.Hover("a", 600);
+        var drag = new DockStackDrag(); drag.Begin(); drag.Hover("a", 0); drag.Hover("a", DockStackDrag.DwellMilliseconds);
         drag.Reset(); Assert.Equal(DockDragMode.None, drag.Mode); Assert.Null(drag.TargetId);
         drag.Begin(); drag.Hover("a", 700);
         Assert.Equal(DockDragMode.StackCandidate, drag.Mode);

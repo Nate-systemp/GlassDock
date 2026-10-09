@@ -8,6 +8,21 @@ namespace GlassDock.Windows.Tests;
 public sealed class GlassDockSettingsStoreTests
 {
     [Fact]
+    public async Task Optical_settings_load_old_profiles_and_roundtrip_without_resetting_user_values()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath, """{"IconSize":32,"PinDock":true,"DockAppearanceMode":4}""");
+        var old = await store.LoadAsync();
+        Assert.Equal(12,old.ClearRefractionStrength); Assert.Equal(45,old.SpecularHighlightAngle);
+        var edited = old with { ClearRefractionStrength=17.5,SpecularHighlightAngle=135 };
+        await store.SaveAsync(edited);
+        Assert.Equal(edited,await location.CreateStore().LoadAsync());
+        Assert.Equal(32,edited.IconSize); Assert.True(edited.PinDock);
+        Assert.Equal(DockAppearanceMode.Clear,edited.DockAppearanceMode);
+    }
+
+    [Fact]
     public async Task Explicit_appearance_wins_over_legacy_material_without_resetting_other_settings()
     {
         using var location = new TemporarySettingsDirectory();

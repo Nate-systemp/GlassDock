@@ -17,7 +17,10 @@ public sealed class DockStackWiringTests
         Assert.Contains("applicationService.LaunchOrActivate(app)", wiring);
         Assert.Contains("badges.ForApplication", wiring);
         Assert.Contains("\"Rename\"", wiring);
-        Assert.Contains("\"Ungroup\"", wiring);
+        Assert.Contains("\"Unstack all apps\"", wiring);
+        Assert.Contains("previews.BeginContextMenu(menu)", wiring);
+        Assert.Contains("previews.EndContextMenu(menu)", wiring);
+        Assert.Contains("else button.ContextRequested +=", Read("src/GlassDock.App/Desktop/DesktopOverlayWindow.cs"));
         Assert.DoesNotContain("new WindowsApplicationService", wiring);
         Assert.DoesNotContain("new BadgeCoordinator", wiring);
         Assert.DoesNotContain("new DockPinStore", wiring);
@@ -52,7 +55,19 @@ public sealed class DockStackWiringTests
         Assert.Contains("Canvas.SetZIndex(button, 110)", wiring);
         Assert.Contains("content.Children.Remove(mergeCue)", wiring);
         Assert.Contains("ready ? Visibility.Visible : Visibility.Collapsed", wiring);
-        Assert.Contains("holdStackTarget = candidate.Application.Stack is not null", wiring);
+        Assert.Contains("dragIntent.Resolve(pointerX, pointerY, reorderHitBounds", wiring);
+        Assert.Contains("!dragIntent.StackMode || stackDrag.Mode", wiring);
+        Assert.Contains("holdStackTarget = dragPointerTarget.Mode == DockPointerMode.Stack", wiring);
+        Assert.Contains("stackDrag.PreviewTarget(target)", wiring);
+        Assert.DoesNotContain("StackExitHalfWidthFactor", wiring);
+        var desktop = Read("src/GlassDock.App/Desktop/DesktopOverlayWindow.cs");
+        Assert.Contains("dragPointerTarget.Mode != DockPointerMode.Reorder", desktop);
+        Assert.Contains("AnimateReorderShift(candidate, shift)", desktop);
+        Assert.Contains("TransformBounds(", desktop);
+        Assert.Contains("PointerUpdateKind.RightButtonReleased", desktop);
+        Assert.Contains("PointerUpdateKind.LeftButtonReleased", desktop);
+        Assert.Contains("dragIntent.Observe(true, point.Properties.IsRightButtonPressed)", desktop);
+        Assert.Contains("suppressContext?.Invoke() == true", Read("src/GlassDock.App/Desktop/WindowPreviewCoordinator.cs"));
     }
 
 
@@ -91,3 +106,5 @@ public sealed class DockStackWiringTests
         return File.ReadAllText(Path.Combine(directory.FullName, path));
     }
 }
+
+

@@ -213,6 +213,9 @@ public sealed class WindowsApplicationService : IApplicationService
             if (!IsEligible(existing)) continue;
             return ActivateWindow(existing); // Never relaunch because Windows denied foreground focus.
         }
+        // A known running window may be inaccessible (for example privilege or
+        // identity validation failure). Do not reinterpret that as a closed app.
+        if (application.Windows.Count > 0) { RequestRefresh(); return false; }
         return application.IsPinned && Launch(application);
     }
 
@@ -370,6 +373,22 @@ public sealed class WindowsApplicationService : IApplicationService
         var focused = ApplicationNative.SetForegroundWindow(window);
         RequestRefresh();
         return focused;
+    }
+
+    public bool IsForeground(ApplicationWindow window) =>
+        IsEligible(window) && ApplicationNative.GetForegroundWindow() == (nint)window.Handle;
+
+    public bool CanInteractWithWindow(ApplicationWindow window) => IsEligible(window);
+
+    public bool IsMinimized(ApplicationWindow window) =>
+        IsEligible(window) && ApplicationNative.IsIconic((nint)window.Handle);
+
+    public bool MinimizeWindow(ApplicationWindow window)
+    {
+        if (!IsEligible(window)) { RequestRefresh(); return false; }
+        var accepted = ApplicationNative.ShowWindowAsync((nint)window.Handle, 6);
+        RequestRefresh();
+        return accepted;
     }
 
     public bool CloseWindow(ApplicationWindow existing)

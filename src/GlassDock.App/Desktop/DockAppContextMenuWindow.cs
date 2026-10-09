@@ -23,12 +23,13 @@ internal sealed class DockAppContextMenuWindow : Window
     private readonly nint dock;
     private readonly Grid root = new();
     private readonly StackPanel rows = new();
-    private readonly AdaptiveAppIcon icon = new(26, 1, showTile: false);
-    private readonly TextBlock title = new() { FontSize = 15, TextTrimming = TextTrimming.CharacterEllipsis,
+    private readonly AdaptiveAppIcon icon = new(22, 1, showTile: false);
+    private readonly TextBlock title = new() { FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
         VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock status = new() { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new(Gutter), IsHitTestVisible = false };
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly ScrollViewer scroll;
@@ -54,12 +55,12 @@ internal sealed class DockAppContextMenuWindow : Window
         presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
         root.Children.Add(glass);
-        root.Children.Add(new Border { Margin = new(Gutter), CornerRadius = new(28),
+        root.Children.Add(new Border { Margin = new(Gutter), CornerRadius = new(20),
             Background = theme.Overlay, IsHitTestVisible = false });
-        var body = new Grid { Margin = new(Gutter + 8), RowSpacing = 4 };
+        var body = new Grid { Margin = new(Gutter + 6), RowSpacing = 2 };
         body.RowDefinitions.Add(new() { Height = GridLength.Auto });
         body.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
-        var header = new Grid { Margin = new(10, 5, 10, 5), ColumnSpacing = 10 };
+        var header = new Grid { Margin = new(8, 4, 8, 4), ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new());
         header.Children.Add(icon);
@@ -82,6 +83,7 @@ internal sealed class DockAppContextMenuWindow : Window
         catch { host.Dispose(); Close(); throw; }
         // The native client and Content must exist before the backdrop connects.
         SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
         root.SizeChanged += (_, _) => UpdateBounds();
         root.Loaded += (_, _) => UpdateBounds();
         root.KeyDown += (_, e) =>
@@ -115,7 +117,9 @@ internal sealed class DockAppContextMenuWindow : Window
     {
         theme.Apply(mode);
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 20);
+        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        { CornerRadius = 20, ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0 });
     }
 
     public void Show(DockApplicationItem item, IReadOnlyList<DockAppMenuEntry> commands, double anchorX, double dockTop, string stateText = "")
@@ -162,15 +166,15 @@ internal sealed class DockAppContextMenuWindow : Window
     }
 
     private void Separator() => rows.Children.Add(new Border
-    { Height = 1, Margin = new(10, 4, 10, 4), Background = theme.Divider });
+    { Height = 1, Margin = new(8, 3, 8, 3), Background = theme.Divider });
 
     private void AddRow(DockAppMenuEntry entry)
     {
-        var content = new Grid { ColumnSpacing = 10 };
-        content.ColumnDefinitions.Add(new() { Width = new(20) });
+        var content = new Grid { ColumnSpacing = 8 };
+        content.ColumnDefinitions.Add(new() { Width = new(18) });
         content.ColumnDefinitions.Add(new());
         content.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        content.Children.Add(new FontIcon { Glyph = entry.Glyph, FontSize = 16, Foreground = theme.Primary });
+        content.Children.Add(new FontIcon { Glyph = entry.Glyph, FontSize = 15, Foreground = theme.Primary });
         var label = new TextBlock { Text = entry.Text, FontSize = 13, Foreground = theme.Primary,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         Grid.SetColumn(label, 1); content.Children.Add(label);
@@ -179,10 +183,11 @@ internal sealed class DockAppContextMenuWindow : Window
             var chevron = new FontIcon { Glyph = "\uE76C", FontSize = 12, Foreground = theme.Secondary };
             Grid.SetColumn(chevron, 2); content.Children.Add(chevron);
         }
-        var button = new Button { Content = content, Height = 34, Padding = new(10, 0, 10, 0),
+        var button = new Button { Content = content, Height = 32, Padding = new(8, 0, 8, 0),
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         theme.StyleButton(button);
+        button.CornerRadius = new(8);
         AutomationProperties.SetName(button, entry.Text);
         button.Click += (_, _) =>
         {
@@ -204,7 +209,7 @@ internal sealed class DockAppContextMenuWindow : Window
         scale = dpi;
         var bounds = WindowPreviewLayout.Position(new(area.X, area.Y, area.Width, area.Height),
             new(dockBounds.X, dockBounds.Y, dockBounds.Width, dockBounds.Height), scale, anchor, top + 6,
-            240 + Gutter * 2, Math.Min(490, 68 + Gutter * 2 + rows.Children.Sum(child => child is Button ? 34 : child is TextBlock ? 24 : 9)));
+            224 + Gutter * 2, Math.Min(460, 48 + Gutter * 2 + rows.Children.Sum(child => child is Button ? 32 : child is TextBlock ? 24 : 7)));
         AppWindow.MoveAndResize(new((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height));
         UpdateBounds();
     }

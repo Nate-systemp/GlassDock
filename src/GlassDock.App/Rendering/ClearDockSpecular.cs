@@ -6,7 +6,7 @@ using W = global::Windows.UI.Composition;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Clear-only lighting. Borrows the final wave path; owns all light/mask resources.</summary>
+/// <summary>Rim lighting. Borrows the final wave path; owns all light/mask resources.</summary>
 internal sealed class ClearDockSpecular : IDisposable
 {
     private readonly W.CompositionSpriteShape stroke;
@@ -24,6 +24,7 @@ internal sealed class ClearDockSpecular : IDisposable
     private readonly W.CompositionEffectFactory factory;
     public W.CompositionEffectBrush Brush { get; }
     private double thickness, scale = 1;
+    private bool diagonal;
 
     public ClearDockSpecular(W.Compositor compositor, W.CompositionPathGeometry geometry, W.CompositionBrush body)
     {
@@ -59,16 +60,25 @@ internal sealed class ClearDockSpecular : IDisposable
         Brush = factory.CreateBrush(); Brush.SetSourceParameter("Body", body); Brush.SetSourceParameter("Light", lightSource);
     }
 
-    public void Apply(GlassMaterial material)
+    public void Apply(GlassMaterial material, bool diagonalCatches = false)
     {
+        diagonal = diagonalCatches;
         thickness = material.BorderThickness;
         stroke.StrokeThickness = (float)(thickness * 4 * scale);
         for (var i = 0; i < stops.Length; i++)
-            stops[i].Color = global::Windows.UI.Color.FromArgb((byte)Math.Round(255 * DockMaterialRendering.SpecularAlpha(i / 16d,
-                thickness > 0 ? material.BorderOpacity : 0)), 255, 255, 255);
+        {
+            var t = i / 16d;
+            // Short, smoothly faded opposing catches; the middle stays unlit.
+            var alpha = diagonal
+                ? material.BorderOpacity * (Math.Exp(-Math.Pow((t - .10) / .13, 2))
+                    + .65 * Math.Exp(-Math.Pow((t - .90) / .13, 2)))
+                : DockMaterialRendering.SpecularAlpha(t, material.BorderOpacity);
+            stops[i].Color = global::Windows.UI.Color.FromArgb(
+                (byte)Math.Round(255 * Math.Clamp(thickness > 0 ? alpha : 0, 0, 1)), 255, 255, 255);
+        }
     }
 
-    public void SetBounds(double width, double height, double top, double dockHeight, double dpi)
+    public void SetBounds(double width, double height, double top, double dockHeight, double dpi, double dockWidth, double angle = 45)
     {
         scale = dpi;
         stroke.StrokeThickness = (float)(thickness * 4 * dpi);
@@ -79,6 +89,17 @@ internal sealed class ClearDockSpecular : IDisposable
         // downsampling, in final window pixels, not in the stroke's scaled space.
         light.StartPoint = new(0, (float)(top * dpi));
         light.EndPoint = new(0, (float)((top + dockHeight) * dpi));
+        if (diagonal)
+        {
+            // Equal influence from normalized X/Y despite the dock's wide aspect
+            // ratio: the gradient must not turn into a left-to-right stripe.
+            var w = Math.Max(1, dockWidth * dpi);
+            var h = Math.Max(1, dockHeight * dpi);
+            var gradient = DockSpecularLighting.Gradient(w, h, angle);
+            var origin = new Vector2((float)((width - dockWidth) * dpi / 2), (float)(top * dpi));
+            light.StartPoint = origin + gradient.Start;
+            light.EndPoint = origin + gradient.End;
+        }
     }
 
     public void SetTransform(Matrix4x4 matrix) => visual.TransformMatrix = matrix;

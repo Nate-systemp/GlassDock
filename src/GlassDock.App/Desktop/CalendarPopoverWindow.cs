@@ -24,6 +24,7 @@ internal sealed class CalendarPopoverWindow : Window
     private const double Gutter = UtilityPopupStyle.Gutter;
 
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly Grid root = new();
@@ -199,6 +200,7 @@ internal sealed class CalendarPopoverWindow : Window
         // Attach only after Content and the native desktop client exist.
         // OnTargetConnected needs this root to schedule compositor creation.
         SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
 
         ApplyAppearance(appearance, dockMode);
         BuildCalendarGrid();

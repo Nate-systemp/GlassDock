@@ -21,12 +21,14 @@ internal sealed record StackAppDrag(string StackId, string AppId);
 internal sealed class DockStackWindow : Window
 {
     internal const string DragFormat = "Doky.StackApplication";
-    private const double Gutter = UtilityPopupStyle.Gutter;
+    private const double Gutter = 4;
+    private const double DockGap = 10;
     private readonly Grid root = new();
-    private readonly Grid grid = new() { RowSpacing = 8, ColumnSpacing = 8 };
-    private readonly TextBox name = new() { MaxLength = 40, IsReadOnly = true, BorderThickness = new(0), FontSize = 14 };
+    private readonly Grid grid = new() { ColumnSpacing = 4 };
+    private readonly TextBox name = new() { MaxLength = 40, IsReadOnly = true, Visibility = Visibility.Collapsed, BorderThickness = new(0), FontSize = 14 };
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new(Gutter), IsHitTestVisible = false };
     private readonly DesktopGlassBackdrop backdrop = new();
+    private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly nint dock;
@@ -61,39 +63,43 @@ internal sealed class DockStackWindow : Window
         presenter.IsAlwaysOnTop = true;
         root.Children.Add(glass);
         root.Children.Add(new Border { Margin = new(Gutter), CornerRadius = new(28), Background = theme.Overlay, IsHitTestVisible = false });
-        var body = new StackPanel { Margin = new(Gutter + 12), Spacing = 10 };
+        var body = new StackPanel { Margin = new(Gutter + 8), Spacing = 4 };
         name.Foreground = theme.Primary; name.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         AutomationProperties.SetName(name, "Stack name");
         body.Children.Add(name); body.Children.Add(grid); root.Children.Add(body); Content = root;
         host = new(WinRT.Interop.WindowNative.GetWindowHandle(this)) { EnableHostBackdropBrush = true, UseDockLayeredTransparency = true };
         host.Configure(); SystemBackdrop = backdrop;
+        liquid = new(this, root, backdrop);
         root.SizeChanged += (_, _) => UpdateBounds(); root.Loaded += (_, _) => UpdateBounds();
         name.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Enter) { SaveName(); e.Handled = true; } };
         name.LostFocus += (_, _) => SaveName();
-        root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { Hide(); e.Handled = true; } };
+        root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { Hide(); e.Handled = true; } }), true);
         Activated += (_, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated && !dragging && !pointerOnSource()) Hide(); };
         Closed += (_, _) => { disposed = true; generation++; batch?.Dispose(); track?.Dispose(); host.Dispose(); SystemBackdrop = null; };
     }
     private void SaveName()
     {
         if (name.IsReadOnly || stack is null) return;
-        name.IsReadOnly = true; rename(stack.Id, name.Text);
+        name.IsReadOnly = true; name.Visibility = Visibility.Collapsed; rename(stack.Id, name.Text); Position(lastAnchorX, lastDockTop);
     }
-    public void Rename() { name.IsReadOnly = false; name.Focus(FocusState.Programmatic); name.SelectAll(); }
+    public void Rename() { name.Visibility = Visibility.Visible; Position(lastAnchorX, lastDockTop); name.IsReadOnly = false; name.Focus(FocusState.Programmatic); name.SelectAll(); }
     public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
     {
         theme.Apply(mode); root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        { ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0 });
+        foreach (var icon in appIcons.Values) icon.SetDockAppearance(mode);
     }
     public void Show(DockApplication value, double anchorX, double dockTop)
     {
         generation++;
         batch?.Dispose(); batch = null; track?.Stop(); backdrop.StopPresentationAnimation();
-        Update(value); Position(anchorX, dockTop);
+        name.Visibility = Visibility.Collapsed; name.IsReadOnly = true; Update(value); Position(anchorX, dockTop);
         IsOpen = true; closing = false; root.IsHitTestVisible = true;
         var visual = ElementCompositionPreview.GetElementVisual(root);
         visual.Opacity = 0; backdrop.SetPresentationTransform(Matrix4x4.Identity, 0);
-        Activate();
+        Activate(); host.ActivateForUserInput(); (grid.Children.FirstOrDefault() as Control)?.Focus(FocusState.Programmatic);
         var revision = ++generation;
         DispatcherQueue.TryEnqueue(() => { if (IsOpen && revision == generation) { UpdateBounds(); Animate(false); } });
     }
@@ -106,16 +112,16 @@ internal sealed class DockStackWindow : Window
         if (name.IsReadOnly) name.Text = value.Name;
         if (!rebuild) { RefreshBadges(); return; }
         grid.Children.Clear(); grid.RowDefinitions.Clear(); grid.ColumnDefinitions.Clear(); appIcons.Clear();
-        var columns = DockStack.Columns(value.StackApps.Count);
-        for (var i = 0; i < columns; i++) grid.ColumnDefinitions.Add(new() { Width = new(76) });
-        for (var i = 0; i < (value.StackApps.Count + columns - 1) / columns; i++) grid.RowDefinitions.Add(new() { Height = new(86) });
+        var columns = Math.Max(1, value.StackApps.Count);
+        for (var i = 0; i < columns; i++) grid.ColumnDefinitions.Add(new() { Width = new(60) });
+        grid.RowDefinitions.Add(new() { Height = new(68) });
         for (var i = 0; i < value.StackApps.Count; i++)
         {
             var app = value.StackApps[i];
-            var icon = new AdaptiveAppIcon(32, 1, false); icon.SetIcon(app.Icon); appIcons[app.Id] = icon;
+            var icon = new AdaptiveAppIcon(32, 1, false); icon.SetIcon(app.Icon); icon.SetDockAppearance(theme.Mode); appIcons[app.Id] = icon;
             var body = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center };
             body.Children.Add(icon);
-            body.Children.Add(new TextBlock { Text = app.Name, Foreground = theme.Primary, FontSize = 11, MaxWidth = 68,
+            body.Children.Add(new TextBlock { Text = app.Name, Foreground = theme.Primary, FontSize = 11, MaxWidth = 52,
                 TextTrimming = TextTrimming.CharacterEllipsis, TextAlignment = TextAlignment.Center });
             body.Children.Add(new Border { Width = 4, Height = 3, CornerRadius = new(2), Background = theme.Primary,
                 Opacity = app.IsRunning ? 0.7 : 0, HorizontalAlignment = HorizontalAlignment.Center });
@@ -184,7 +190,7 @@ internal sealed class DockStackWindow : Window
                 }
                 finally { deferral.Complete(); }
             };
-            Grid.SetRow(button, i / columns); Grid.SetColumn(button, i % columns); grid.Children.Add(button);
+            Grid.SetRow(button, 0); Grid.SetColumn(button, i); grid.Children.Add(button);
         }
         RefreshBadges();
     }
@@ -213,15 +219,19 @@ internal sealed class DockStackWindow : Window
         if (stack is null) return;
         foreach (var app in stack.StackApps) if (appIcons.TryGetValue(app.Id, out var icon)) icon.SetNotificationBadge(badge(app.Identity));
     }
+    private double lastAnchorX, lastDockTop;
     public void Position(double anchorX, double dockTop)
     {
         if (stack is null) return;
         var (area, dpi, owner) = WindowPreviewPlacement.GetArea(dock); scale = dpi;
-        var columns = DockStack.Columns(stack.StackApps.Count);
-        var width = columns * 76 + (columns - 1) * 8 + 24 + Gutter * 2;
-        var height = ((stack.StackApps.Count + columns - 1) / columns) * 94 + 60 + Gutter * 2;
+        lastAnchorX = anchorX; lastDockTop = dockTop; var columns = Math.Max(1, stack.StackApps.Count);
+        var slot = Math.Min(60, Math.Max(1, (area.Width / scale - 24 - (columns - 1) * 4) / columns));
+        foreach (var column in grid.ColumnDefinitions) column.Width = new(slot);
+        var width = columns * slot + (columns - 1) * 4 + 24;
+        var height = 92 + (name.Visibility == Visibility.Visible ? 36 : 0);
         var bounds = WindowPreviewLayout.Position(new(area.X, area.Y, area.Width, area.Height),
-            new(owner.X, owner.Y, owner.Width, owner.Height), scale, anchorX, dockTop + 6, width, height);
+            // Position uses the HWND bottom; the visible surface ends Gutter DIP above it.
+            new(owner.X, owner.Y, owner.Width, owner.Height), scale, anchorX, dockTop + Gutter - DockGap, width, height);
         if (AppWindow.Position.X != (int)bounds.X || AppWindow.Position.Y != (int)bounds.Y ||
             AppWindow.Size.Width != (int)bounds.Width || AppWindow.Size.Height != (int)bounds.Height)
             AppWindow.MoveAndResize(new((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height)); UpdateBounds();
@@ -261,3 +271,4 @@ internal sealed class DockStackWindow : Window
         closing = true; Animate(true);
     }
 }
+

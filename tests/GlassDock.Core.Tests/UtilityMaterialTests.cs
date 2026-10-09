@@ -7,6 +7,38 @@ namespace GlassDock.Core.Tests;
 public sealed class UtilityMaterialTests
 {
     [Theory]
+    [InlineData(0, 0)]
+    [InlineData(12, 45)]
+    [InlineData(20, 270)]
+    public void Popup_optics_follow_saved_dock_controls(double refraction, double angle)
+    {
+        var session = new GlassDockSettingsSession(new()
+        { ClearRefractionStrength = refraction, SpecularHighlightAngle = angle });
+        var optics = session.Appearance.LiquidOptics;
+        Assert.Equal((float)refraction, optics.RefractionStrength);
+        Assert.Equal((float)angle, optics.SpecularAngleDegrees);
+        Assert.Equal(new LiquidGlassMaterial().ChromaticDispersion, optics.ChromaticDispersion);
+        Assert.Equal(new LiquidGlassMaterial().DiffusionAmount, optics.DiffusionAmount);
+    }
+
+    [Fact]
+    public void Popup_optics_normalize_untrusted_appearance_values()
+    {
+        var appearance = new GlassDockSettingsSession(new()).Appearance with
+        { ClearRefractionStrength = double.PositiveInfinity, SpecularHighlightAngle = double.NaN };
+        Assert.Equal(new LiquidGlassMaterial(), appearance.LiquidOptics);
+    }
+
+    [Fact]
+    public void Popup_rim_is_more_visible_without_changing_refraction_or_highlight_direction()
+    {
+        var dock = new LiquidGlassMaterial { RefractionStrength = 17, SpecularAngleDegrees = 135 };
+        var popup = UtilityMaterial.PopupOptics(dock);
+        Assert.Equal(.26f, popup.SpecularIntensity);
+        Assert.Equal(dock, popup with { SpecularIntensity = dock.SpecularIntensity });
+    }
+
+    [Theory]
     [InlineData(GlassMaterialMode.Frosted)]
     [InlineData(GlassMaterialMode.Acrylic)]
     [InlineData(GlassMaterialMode.Clear)]
