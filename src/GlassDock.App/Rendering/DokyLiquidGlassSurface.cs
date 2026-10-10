@@ -65,7 +65,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private DesktopCaptureSource.Placement placement;
     private Direct3D11CaptureFrame? currentFrame;
     private CanvasBitmap? bitmap;
-    private bool disposed, failed, enabled;
+    private bool disposed, failed, enabled, screenshotFrozen;
     private int queued;
     private Vector4 dock, wave;
     private float scale = 1;
@@ -121,6 +121,13 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     public void Update(bool active, double opacity, float dpiScale, Vector4 dockBounds, Vector4 waveShape)
     {
         if (disposed) return;
+        if (screenshotFrozen)
+        {
+            // Screenshot uses the last clean presented frame; no new captures
+            // or shader draws while the HWND is temporarily screenshot-visible.
+            if (!active) EndScreenshotMode();
+            else return;
+        }
         dock = dockBounds; wave = waveShape; scale = dpiScale;
         clearActive = active;
         Output.Opacity = opacity;
@@ -177,7 +184,51 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
     }
-    private void FrameAvailable(object? sender, EventArgs args) => QueueDraw();
+    // Called on the UI thread. Preserve the already-presented swap-chain image,
+    // rather than re-rendering a frame that might include this window recursively.
+    public bool BeginScreenshotMode()
+    {
+        if (disposed || !clearActive || !enabled || capture is null || bitmap is null ||
+            Output.Visibility != Visibility.Visible) return false;
+        if (screenshotFrozen) return true;
+        // Detach retained references to pooled WGC surfaces before stopping the pool.
+        shader!.Source1 = null;
+        if (popupCrop is not null) popupCrop.Source = null;
+        if (lensBackdrop is not null) lensBackdrop.Source1 = null;
+        if (lensBlur is not null) lensBlur.Source = null;
+        bitmap.Dispose(); bitmap = null;
+        currentFrame?.Dispose(); currentFrame = null;
+        screenshotFrozen = true; // stop any queued renders before toggling display affinity
+        try
+        {
+            if (!capture.PauseForScreenshot())
+            {
+                screenshotFrozen = false;
+                return false;
+            }
+            SetStatus("Liquid screenshot mode · frozen clean frame");
+            return true;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            Fail(error);
+            return false;
+        }
+    }
+
+    public void EndScreenshotMode()
+    {
+        if (!screenshotFrozen) return;
+        screenshotFrozen = false;
+        try
+        {
+            capture?.ResumeAfterScreenshot();
+            QueueDraw();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
+    }
+
+    private void FrameAvailable(object? sender, EventArgs args) { if (!screenshotFrozen) QueueDraw(); }
     private void CaptureClosed(object? sender, EventArgs args) => dispatcher.TryEnqueue(() =>
     {
         if (!disposed && ReferenceEquals(sender, capture)) Fail(new InvalidOperationException("Monitor capture closed."));
@@ -190,7 +241,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private void Draw()
     {
         Interlocked.Exchange(ref queued, 0);
-        if (disposed || !enabled || capture is null || shader is null || (swapChain is null && popupTarget is null)) return;
+        if (disposed || !enabled || screenshotFrozen || capture is null || shader is null || (swapChain is null && popupTarget is null)) return;
         try
         {
             var pending = capture.TakeFrame();
@@ -370,6 +421,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
+        screenshotFrozen = false;
         ReleaseLens();
         Output.Visibility = Visibility.Collapsed;
         popupTarget?.Dispose();

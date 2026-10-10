@@ -14,6 +14,9 @@ public sealed class WindowsKeyGesture
     private const int Escape = 0x1B;
 
     public bool IsWindowsHeld => held.Contains(LeftWindows) || held.Contains(RightWindows);
+    public bool IsShiftHeld => held.Contains(0x10) || held.Contains(0xA0) || held.Contains(0xA1);
+    public bool IsControlHeld => held.Contains(0x11) || held.Contains(0xA2) || held.Contains(0xA3);
+    public bool IsAltHeld => held.Contains(0x12) || held.Contains(0xA4) || held.Contains(0xA5);
 
     public void Reset() { held.Clear(); chord = false; }
 

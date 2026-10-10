@@ -13,7 +13,10 @@ public sealed record ApplicationIcon(int Width, int Height, byte[] Pixels);
 public sealed record PinnedApplication(ApplicationIdentity Identity, string Name, string LaunchTarget, ApplicationIcon? Icon);
 public sealed record ApplicationWindow(ApplicationIdentity Identity, string Name, long Handle, int ProcessId,
     long ProcessStartTicks, bool IsActive, ApplicationIcon? Icon, string Title = "", bool IsMinimized = false,
-    long LastActivatedTicks = 0);
+    long LastActivatedTicks = 0)
+{
+    public bool IsOnCurrentDesktop { get; init; } = true;
+}
 public sealed record DockApplication(string Id, ApplicationIdentity Identity, string Name, string? LaunchTarget,
     bool IsPinned, IReadOnlyList<ApplicationWindow> Windows, ApplicationIcon? Icon)
 {

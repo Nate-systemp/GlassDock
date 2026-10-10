@@ -20,6 +20,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private readonly Func<ApplicationWindow, Task<bool>> restoreElevated;
     private readonly Func<DockApplication, IReadOnlyList<string>, Task<bool>> openFiles;
     private bool filePickerActive;
+    private bool snippingCaptureActive;
     private double? memberAnchor;
     private readonly WindowPreviewSession session = new();
     private readonly WindowFrameCache frameCache = new();
@@ -226,26 +227,55 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private double Anchor(Button button) => button.TransformToVisual(dockRoot).TransformPoint(new(button.ActualWidth / 2, 0)).X;
 
-    private void OnSnapshot(object? sender, EventArgs args)
+    public void BeginSnippingCapture()
     {
-        TrackFrames();
+        snippingCaptureActive = true;
+        appMenu?.BeginSnippingCapture();
+    }
+
+    public void EndSnippingCapture()
+    {
+        // The dock's own screenshot capture is restored before this call, so
+        // the popup never resumes sampling while the dock is screenshot-visible.
+        appMenu?.EndSnippingCapture();
+        snippingCaptureActive = false;
+        CheckMenuSnapshot();
+    }
+
+    private void CheckMenuSnapshot()
+    {
         foreach (var (appId, snapshot) in menuSnapshots.ToArray())
         {
-            var current = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == appId)
-                ?? applications.VisibleDockApplications.SelectMany(item => item.Application.StackApps)
-                    .Where(app => app.Id == appId).Select(app => new DockApplicationItem(app)).FirstOrDefault();
+            var current = FindVisibleApplication(appId);
             if (current is null || !snapshot.State.Matches(current.Application))
                 snapshot.Menu.Hide(immediate: true);
         }
+    }
+
+    private void OnSnapshot(object? sender, EventArgs args)
+    {
+        TrackFrames();
+        // Snipping Tool can change the foreground-window snapshot; it must not
+        // accidentally dismiss an open menu before the screenshot is taken.
+        if (!snippingCaptureActive) CheckMenuSnapshot();
         if (session.ApplicationId is not { } id) return;
-        var item = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id);
+        var item = FindVisibleApplication(id);
         if (item is null || !item.IsRunning) { Hide(); return; }
         session.Refresh(item.Application.Windows);
         Reposition();
     }
 
+    // Stack members may be shown in an app action menu or a window preview even
+    // though their windows are not direct children of VisibleDockApplications.
+    private DockApplicationItem? FindVisibleApplication(string id) =>
+        applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id)
+        ?? applications.VisibleDockApplications.SelectMany(item => item.Application.StackApps)
+            .Where(app => app.Id == id)
+            .Select(app => new DockApplicationItem(app)).FirstOrDefault();
+
     private void TrackFrames() => frameCache.Track(
-        applications.VisibleDockApplications.SelectMany(item => item.Application.Windows));
+        applications.VisibleDockApplications.SelectMany(item =>
+            item.Application.Windows.Concat(item.Application.StackApps.SelectMany(app => app.Windows))));
 
     private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs args)
     {
@@ -357,7 +387,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         pending?.Cancel();
         if (session.ApplicationId is { } id && buttons.TryGetValue(id, out var button))
         {
-            var item = applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id);
+            var item = FindVisibleApplication(id);
             if (item is not null) ToolTipService.SetToolTip(button, CreateTooltip(item.Name));
         }
         session.Hide(); preview?.Hide(immediate);

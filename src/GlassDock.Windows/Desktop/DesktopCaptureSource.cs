@@ -16,11 +16,13 @@ public sealed class DesktopCaptureSource : IDisposable
             MonitorWidth == other.MonitorWidth && MonitorHeight == other.MonitorHeight;
     }
     private readonly nint window;
+    private readonly IDirect3DDevice device;
     private readonly uint previousAffinity;
     private GraphicsCaptureItem? item;
     private Direct3D11CaptureFramePool? pool;
     private GraphicsCaptureSession? session;
     private bool excluded;
+    private bool screenshotPaused;
     public event EventHandler? FrameAvailable;
     public event EventHandler? Closed;
 
@@ -37,6 +39,7 @@ public sealed class DesktopCaptureSource : IDisposable
     public DesktopCaptureSource(nint hwnd, IDirect3DDevice device, Placement placement)
     {
         window = hwnd;
+        this.device = device;
         if (!GraphicsCaptureSession.IsSupported()) throw new NotSupportedException("Windows GPU capture is unavailable.");
         if (!GetWindowDisplayAffinity(hwnd, out previousAffinity)) throw new Win32Exception();
         try
@@ -44,9 +47,19 @@ public sealed class DesktopCaptureSource : IDisposable
             if (!SetWindowDisplayAffinity(hwnd, 0x11)) throw new Win32Exception("Doky could not exclude itself from capture.");
             excluded = true;
             item = CreateMonitor(placement.Monitor);
-            pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
-            pool.FrameArrived += FrameArrived;
             item.Closed += ItemClosed;
+            StartFramePool();
+        }
+        catch { Dispose(); throw; }
+    }
+    private void StartFramePool()
+    {
+        if (item is null) throw new ObjectDisposedException(nameof(DesktopCaptureSource));
+        try
+        {
+            pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+            pool.FrameArrived += FrameArrived;
             session = pool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
             CaptureBorderPermission.Configure(session);
@@ -55,8 +68,50 @@ public sealed class DesktopCaptureSource : IDisposable
                 session.MinUpdateInterval = TimeSpan.FromSeconds(1d / 60);
             session.StartCapture();
         }
-        catch { Dispose(); throw; }
+        catch
+        {
+            StopFramePool();
+            throw;
+        }
     }
+
+    private void StopFramePool()
+    {
+        session?.Dispose(); session = null;
+        if (pool is not null) pool.FrameArrived -= FrameArrived;
+        pool?.Dispose(); pool = null;
+    }
+
+    // The renderer has already presented a clean frame into its own swap chain.
+    // Stop sampling the monitor BEFORE making this HWND screenshot-visible.
+    // No CPU screenshot buffer is created and no new WGC frame can contain Doky.
+    public bool PauseForScreenshot()
+    {
+        if (screenshotPaused) return true;
+        if (!excluded || pool is null) return false;
+        StopFramePool();
+        if (!SetWindowDisplayAffinity(window, 0))
+        {
+            // Fail closed: leave capture excluded and rebuild its original pool.
+            StartFramePool();
+            return false;
+        }
+        excluded = false;
+        screenshotPaused = true;
+        return true;
+    }
+
+    public void ResumeAfterScreenshot()
+    {
+        if (!screenshotPaused) return;
+        // Never restart sampling until the HWND is excluded again.
+        if (!SetWindowDisplayAffinity(window, 0x11))
+            throw new Win32Exception("Cannot restore screenshot exclusion after Snipping Tool.");
+        excluded = true;
+        screenshotPaused = false;
+        StartFramePool();
+    }
+
     private void FrameArrived(Direct3D11CaptureFramePool sender, object args) => FrameAvailable?.Invoke(this, EventArgs.Empty);
     private void ItemClosed(GraphicsCaptureItem sender, object args) => Closed?.Invoke(this, EventArgs.Empty);
     public Direct3D11CaptureFrame? TakeFrame() => pool?.TryGetNextFrame();
@@ -64,9 +119,15 @@ public sealed class DesktopCaptureSource : IDisposable
     {
         if (pool is not null) pool.FrameArrived -= FrameArrived;
         if (item is not null) item.Closed -= ItemClosed;
-        session?.Dispose(); session = null;
-        pool?.Dispose(); pool = null; item = null;
-        if (excluded) { SetWindowDisplayAffinity(window, previousAffinity); excluded = false; }
+        StopFramePool();
+        item = null;
+        // Always restore the original affinity, including if a screenshot was canceled.
+        if (excluded || screenshotPaused)
+        {
+            SetWindowDisplayAffinity(window, previousAffinity);
+            excluded = false;
+            screenshotPaused = false;
+        }
     }
 
     private static GraphicsCaptureItem CreateMonitor(nint monitor)

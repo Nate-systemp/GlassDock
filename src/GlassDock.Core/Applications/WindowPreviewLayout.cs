@@ -18,6 +18,11 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
         return new(Math.Floor(x), Math.Floor(y), pixelWidth, pixelHeight);
     }
 
+    /// <summary>Coalesce identical pixel-aligned preview positions to avoid
+    /// redundant SetWindowPos calls and the recursive size/layout work they cause.</summary>
+    public static bool NeedsNativeMove(PreviewRect? previous, PreviewRect next) =>
+        previous is null || previous.Value != next;
+
     public static PreviewRect CloseButtonBounds(PreviewRect card, double size) =>
         new(card.X + card.Width - size - 9, card.Y + 8, size, size);
 

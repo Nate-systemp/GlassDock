@@ -60,6 +60,15 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
         liquid.Update(active, 1, scale > 0 ? scale : 1, bounds,
             new(bounds.X + bounds.Z / 2, Math.Max(1, bounds.Z / 2), 0, radius));
     }
+    // The capture source normally excludes the popup HWND to avoid recursive
+    // refraction. The screenshot path freezes a clean frame and temporarily
+    // lifts that exclusion, exactly as for the main dock.
+    public bool BeginScreenshotMode() => !disposed && liquid.BeginScreenshotMode();
+    public void EndScreenshotMode()
+    {
+        if (!disposed) liquid.EndScreenshotMode();
+    }
+
     public void Dispose()
     {
         if (disposed) return;

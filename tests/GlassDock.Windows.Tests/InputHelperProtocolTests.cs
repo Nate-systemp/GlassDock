@@ -19,6 +19,26 @@ public sealed class InputHelperProtocolTests
     }
 
     [Fact]
+    public void Snipping_events_share_sequence_with_regular_win_signals()
+    {
+        long sequence = 0;
+        var snip = WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|1|1000|7", ref sequence, 1001);
+        Assert.NotNull(snip);
+        Assert.Equal((uint)7, snip.Revision);
+        Assert.Equal(1, sequence);
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|1|1000|7", ref sequence, 1001));
+        Assert.NotNull(WindowsInputHelperProtocol.ReadEvent("EVENT|2|1002|7|HOME", ref sequence, 1002));
+        Assert.Equal(2, sequence);
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|3|1000|7", ref sequence, 1501));
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|3|1000|7|extra", ref sequence, 1002));
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|3|1000|not-a-revision", ref sequence, 1002));
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|-1|1000|7", ref sequence, 1002));
+        Assert.NotNull(WindowsInputHelperProtocol.ReadSnippingEvent("SNIP|4|1004|7", ref sequence, 1004));
+        Assert.NotNull(WindowsInputHelperProtocol.ReadSnippingEnd("SNIPEND|5|1005|7", ref sequence, 1005));
+        Assert.Null(WindowsInputHelperProtocol.ReadSnippingEnd("SNIPEND|5|1005|7", ref sequence, 1005));
+    }
+
+    [Fact]
     public void RestoreRequestsRequireIdentityAndRejectExpiredOrMalformedCommands()
     {
         var id = Guid.NewGuid().ToString("N");

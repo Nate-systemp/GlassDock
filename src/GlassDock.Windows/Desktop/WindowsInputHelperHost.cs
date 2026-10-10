@@ -47,15 +47,19 @@ public static class WindowsInputHelperHost
             using var lifetime = new CancellationTokenSource();
             // Preserve distinct key releases in transport. The UI retargets on each
             // event; it does not queue completed animations. Stale events still expire.
-            var events = Channel.CreateUnbounded<InputSignal>(new UnboundedChannelOptions
+            var events = Channel.CreateUnbounded<(InputSignal Signal, int Kind)>(new UnboundedChannelOptions
             { SingleReader = true, SingleWriter = true });
             using var hook = new WindowsKeyHook((launcher, revision) =>
-                events.Writer.TryWrite(new InputSignal(launcher, revision, Environment.TickCount64)));
+                events.Writer.TryWrite((new InputSignal(launcher, revision, Environment.TickCount64), 0)),
+                revision => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 1)),
+                revision => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 2)),
+                (index, revision) => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 10 + index)));
             ApplyState(initial, hook);
             writer.WriteLine("READY");
             // Older clients ignore this optional capability; keyboard protocol is unchanged.
             writer.WriteLine("CAPS|RESTORE1");
             writer.WriteLine("CAPS|RECOVER1");
+            writer.WriteLine("CAPS|SNIP1");
             var hookThread = GetCurrentThreadId();
             // Force creation of this thread's message queue before the bridge
             // can post a lifecycle recovery command to it.
@@ -129,8 +133,15 @@ public static class WindowsInputHelperHost
                 {
                     await foreach (var value in events.Reader.ReadAllAsync(lifetime.Token))
                     {
-                        if (Environment.TickCount64 - value.Timestamp > 500) continue;
-                        await WriteLineAsync($"EVENT|{++sequence}|{value.Timestamp}|{value.Revision}|{(value.Launcher ? "LAUNCHER" : "HOME")}");
+                        if (Environment.TickCount64 - value.Signal.Timestamp > 500) continue;
+                        var signal = value.Signal;
+                        await WriteLineAsync(value.Kind switch
+                        {
+                            1 => $"SNIP|{++sequence}|{signal.Timestamp}|{signal.Revision}",
+                            2 => $"SNIPEND|{++sequence}|{signal.Timestamp}|{signal.Revision}",
+                            >= 10 and <= 19 => $"SHORTCUT|{++sequence}|{signal.Timestamp}|{signal.Revision}|{value.Kind - 10}",
+                            _ => $"EVENT|{++sequence}|{signal.Timestamp}|{signal.Revision}|{(signal.Launcher ? "LAUNCHER" : "HOME")}"
+                        });
                     }
                 }
                 catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }

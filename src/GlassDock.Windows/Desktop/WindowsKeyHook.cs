@@ -9,12 +9,16 @@ namespace GlassDock.Windows.Desktop;
 internal sealed class WindowsKeyHook : IDisposable
 {
     private readonly Action<bool, uint> signal;
+    private readonly Action<uint>? snippingShortcut;
+    private readonly Action<uint>? snippingCanceled;
+    private readonly Action<int, uint>? shortcutRequested;
+    private readonly HashSet<int> consumedShortcutKeys = [];
     private readonly NativeMethods.KeyboardProc keyboardCallback;
     private readonly WindowsKeyGesture gesture = new();
     private nint keyboardHook;
     private const nuint InjectionTag = 0x47444F43;
     private const int LeftWindows = 0x5B, RightWindows = 0x5C, Space = 0x20;
-    private bool launcherChordActive, spaceHeld, suppressCurrentWindowsPress;
+    private bool launcherChordActive, spaceHeld, suppressCurrentWindowsPress, snipKeyHeld, snipSessionActive;
     private bool capturedWindowsDown;
     private int capturedWindowsKey;
     private sealed record State(bool Suppress, bool Capture, uint Revision);
@@ -48,6 +52,9 @@ internal sealed class WindowsKeyHook : IDisposable
         gesture.Reset();
         launcherChordActive = false;
         spaceHeld = false;
+        snipKeyHeld = false;
+        snipSessionActive = false;
+        consumedShortcutKeys.Clear();
         suppressCurrentWindowsPress = false;
         capturedWindowsDown = false;
         capturedWindowsKey = 0;
@@ -55,9 +62,12 @@ internal sealed class WindowsKeyHook : IDisposable
     }
     public void UpdateState(bool suppress, bool capture, uint revision) =>
         Volatile.Write(ref state, new(suppress, capture, revision));
-    public WindowsKeyHook(Action<bool, uint> signal)
+    public WindowsKeyHook(Action<bool, uint> signal, Action<uint>? snippingShortcut = null, Action<uint>? snippingCanceled = null, Action<int, uint>? shortcutRequested = null)
     {
         this.signal = signal;
+        this.snippingShortcut = snippingShortcut;
+        this.snippingCanceled = snippingCanceled;
+        this.shortcutRequested = shortcutRequested;
         keyboardCallback = KeyboardMessage;
         for (var key = 8; key < 256; key++)
             if (NativeMethods.GetAsyncKeyState(key) < 0) gesture.Process(key, true);
@@ -390,9 +400,54 @@ internal sealed class WindowsKeyHook : IDisposable
 
         //
         // ==================================================
+        // DOCK TASKBAR SHORTCUTS (Win+1–9 / Win+T)
+        // ==================================================
+        // Do not replay the withheld Win-down for Doky-owned shortcuts.
+        // The key-up is consumed as well, so Explorer receives no partial chord.
+        // Ctrl/Alt/Shift combinations remain ordinary Windows shortcuts.
+        if (!isWindowsKey)
+        {
+            if (!down && consumedShortcutKeys.Remove(keyCode))
+            {
+                gesture.Process(keyCode, false);
+                return 1;
+            }
+            if (down && consumedShortcutKeys.Contains(keyCode)) return 1; // key repeat
+            var shortcutIndex = DockKeyboardShortcut.FromVirtualKey(keyCode);
+            if (down && winHeld && capturedWindowsDown &&
+                shortcutIndex >= 0 && !gesture.IsShiftHeld &&
+                !gesture.IsControlHeld && !gesture.IsAltHeld &&
+                !suppressDockToggle && shortcutRequested is not null)
+            {
+                gesture.Process(keyCode, true);
+                consumedShortcutKeys.Add(keyCode);
+                shortcutRequested(shortcutIndex, pressRevision);
+                return 1;
+            }
+        }
+
+        //
+        // ==================================================
         // OTHER KEYS
         // ==================================================
         //
+        // Observe Win+Shift+S without intercepting or delaying the OS shortcut.
+        // The callback merely prepares the already-rendered glass for Snipping.
+        if (keyCode == 0x53) // S
+        {
+            if (!down) snipKeyHeld = false;
+            else if (!snipKeyHeld && winHeld && gesture.IsShiftHeld)
+            {
+                snipKeyHeld = true;
+                snipSessionActive = true;
+                snippingShortcut?.Invoke(pressRevision);
+            }
+        }
+        else if (keyCode == 0x1B && down && snipSessionActive) // Escape cancels a snip
+        {
+            snipSessionActive = false;
+            snippingCanceled?.Invoke(pressRevision);
+        }
         // Keep WindowsKeyGesture synchronized so regular
         // shortcuts such as Win+E, Win+R, Win+D remain chords.
         //

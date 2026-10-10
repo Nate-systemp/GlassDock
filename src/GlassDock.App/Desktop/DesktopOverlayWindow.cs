@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using GlassDock.App.ViewModels;
 using GlassDock.Core.Applications;
 using GlassDock.Windows.Applications;
@@ -101,6 +102,21 @@ public sealed partial class DesktopOverlayWindow : Window
     private readonly DockApplicationsViewModel applications;
     private readonly WindowPreviewCoordinator previews;
     private readonly Dictionary<string, Button> applicationButtons = new(StringComparer.Ordinal);
+    private int keyboardDockIndex = -1;
+    private bool keyboardDockNavigation;
+    private nint keyboardPreviousForegroundWindow;
+
+    // The normal dock is intentionally WS_EX_NOACTIVATE so pointer interaction
+    // never steals focus from a running app. Win+T is a deliberate exception:
+    // without a foreground HWND, WinUI focus visuals move but arrow KeyDown
+    // messages continue going to the user's previous foreground window.
+    [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern nint GetForegroundWindowForDockKeyboard();
+
+    [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindowForDockKeyboard(nint hwnd);
+
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
     private readonly DesktopGlassBackdrop desktopBackdrop = new()
     {
@@ -218,6 +234,23 @@ public sealed partial class DesktopOverlayWindow : Window
 
     internal nint MonitorTarget => windowManager.FixedMonitor;
     internal WindowsKeyboardService KeyboardService => keyboard;
+    // Snipping Tool's full-screen selection overlay must not be mistaken for a game.
+    private bool snippingPending;
+    internal bool BeginSnippingCapture()
+    {
+        snippingPending = true;
+        // Freeze the separate app menu first. The main dock is exposed only
+        // after popup capture can no longer sample the newly-visible dock.
+        previews.BeginSnippingCapture();
+        return liquidGlass.BeginScreenshotMode();
+    }
+    internal void EndSnippingCapture()
+    {
+        // Re-exclude the main dock before the app menu resumes GPU sampling.
+        liquidGlass.EndScreenshotMode();
+        previews.EndSnippingCapture();
+        snippingPending = false;
+    }
     internal bool OwnsGlobalServices => ownsGlobalServices;
 
     internal void RetargetMonitor(nint monitor)
@@ -310,11 +343,19 @@ public sealed partial class DesktopOverlayWindow : Window
         root.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
         {
             if (!reorderDragging) suppressDragContext = false;
+            EndDockKeyboardNavigation(restorePreviousFocus: false);
             // Dock clicks need not deactivate a topmost popup. Preserve the source toggle.
             if (!StackSourceOwnsPointer()) stackWindow?.Hide();
         }), true);
         root.ContextRequested += (_, e) => { if (reorderDragging || suppressDragContext) e.Handled = true; };
-        Activated += (_, args) => { if (args.WindowActivationState == WindowActivationState.Deactivated && reorderDragging) CancelReorder(); };
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated) return;
+            if (reorderDragging) CancelReorder();
+            // If the user Alt+Tabs or selects another window, stop consuming
+            // arrow keys when they return to Doky later.
+            EndDockKeyboardNavigation(restorePreviousFocus: false);
+        };
         root.AllowDrop = true;
         root.DragEnter += ExternalDragEnter;
         root.DragOver += ExternalDragOver;
@@ -323,7 +364,30 @@ public sealed partial class DesktopOverlayWindow : Window
         root.AddHandler(UIElement.KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) =>
         {
             if (e.Key == global::Windows.System.VirtualKey.Escape && reorderDragging)
-            { CancelReorder(); e.Handled = true; }
+            { CancelReorder(); e.Handled = true; return; }
+            if (!keyboardDockNavigation) return;
+            if (e.Key == global::Windows.System.VirtualKey.Escape)
+            {
+                EndDockKeyboardNavigation(restorePreviousFocus: true);
+                if (!DockPinLock && !windowManager.IsPointerInsideInput()) ScheduleCollapse();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key is global::Windows.System.VirtualKey.Left or global::Windows.System.VirtualKey.Right)
+            {
+                FocusDockIcon(keyboardDockIndex +
+                    (e.Key == global::Windows.System.VirtualKey.Right ? 1 : -1));
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == global::Windows.System.VirtualKey.F10 &&
+                Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(
+                    global::Windows.System.VirtualKey.Shift).HasFlag(
+                    global::Windows.UI.Core.CoreVirtualKeyStates.Down))
+            {
+                ShowKeyboardDockMenu();
+                e.Handled = true;
+            }
         }), true);
 
         surface.RegisterPropertyChangedCallback(UIElement.OpacityProperty, (_, _) => UpdateBackdropBounds());
@@ -405,7 +469,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var fullscreenWasHidden = false;
         displayTimer.Tick += (_, _) =>
         {
-            if (!closing) windowManager.RefreshFullscreenPolicy();
+            if (!closing && !snippingPending) windowManager.RefreshFullscreenPolicy();
             if (windowManager.FullscreenSuppressed)
             {
                 if (!fullscreenWasHidden)
@@ -465,6 +529,7 @@ public sealed partial class DesktopOverlayWindow : Window
                 RequestDockToggle();
             };
             keyboard.LauncherRequested += (_, _) => ShowHome();
+            keyboard.DockShortcutRequested += OnDockShortcut;
             keyboard.RecoveryRequested += (_, _) => RestoreTaskbar();
         }
         else
@@ -636,6 +701,8 @@ public sealed partial class DesktopOverlayWindow : Window
             if (previous >= 0) icons.Children.RemoveAt(previous);
             icons.Children.Insert(index, button);
         }
+        if (keyboardDockNavigation && keyboardDockIndex >= VisibleDockApplications.Count)
+            keyboardDockIndex = VisibleDockApplications.Count - 1;
         if (state.State == DockState.Expanded)
         {
             var targetWidth = CalculateTargetDockWidth();
@@ -814,8 +881,19 @@ public sealed partial class DesktopOverlayWindow : Window
         button.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) =>
         { if (ReferenceEquals(reorderButton, button)) CancelReorder(); }), true);
 
-        button.Click += async (_, _) =>
-        {
+        button.Click += async (_, _) => await ActivateDockItemAsync(button, item);
+
+        if (item.Application.Stack is null) previews.Attach(button, item, () => reorderDragging || suppressDragContext);
+        else button.ContextRequested += (_, e) => { e.Handled = true; if (!reorderDragging && !suppressDragContext) StackContext(button, item); };
+        return button;
+    }
+
+
+    // One activation path for mouse clicks and Win+number; keyboard and mouse
+    // must not diverge in minimize/restore or protected elevated-window logic.
+    private async Task ActivateDockItemAsync(Button button, DockApplicationItem item)
+    {
+
             // ButtonBase can raise Click before our handledEventsToo PointerReleased
             // callback commits the drag. Never activate an app while this button is
             // currently participating in a reorder gesture.
@@ -827,13 +905,12 @@ public sealed partial class DesktopOverlayWindow : Window
             }
 
             if (item.Application.Stack is not null) { ToggleStack(item); return; }
-            var windows = item.Application.Windows.Where(applicationService.CanInteractWithWindow)
-                .OrderByDescending(window => applicationService.IsForeground(window))
-                .ThenByDescending(window => window.LastActivatedTicks).ToArray();
-            if (windows.Length > 0)
+            var windows = item.Application.Windows;
+            var target = DockWindowClick.SelectWindow(windows,
+                applicationService.CanInteractWithWindow, applicationService.IsForeground);
+            if (target is not null)
             {
-                var target = windows[0];
-                var action = DockWindowClick.Resolve(windows.Length,
+                var action = DockWindowClick.Resolve(windows.Count,
                     applicationService.IsForeground(target), applicationService.IsMinimized(target));
                 var succeeded = action == DockWindowClickAction.Minimize
                     ? applicationService.MinimizeWindow(target)
@@ -841,13 +918,98 @@ public sealed partial class DesktopOverlayWindow : Window
                 if (!succeeded && !closing) SetStatus($"Windows could not {action.ToString().ToLowerInvariant()} {item.Name}.");
                 return; // A rejected window command must never become a new launch.
             }
+            // Do not launch a duplicate when the snapshot still contains known
+            // running windows whose handles cannot currently be activated.
+            if (windows.Count > 0)
+            {
+                SetStatus($"Windows could not access a running {item.Name} window.");
+                return;
+            }
             if (!applications.Activate(item))
                 SetStatus($"Windows could not launch or focus {item.Name}.");
-        };
+    }
 
-        if (item.Application.Stack is null) previews.Attach(button, item, () => reorderDragging || suppressDragContext);
-        else button.ContextRequested += (_, e) => { e.Handled = true; if (!reorderDragging && !suppressDragContext) StackContext(button, item); };
-        return button;
+    private async void OnDockShortcut(int index)
+    {
+        if (closing || shutdown.IsRequested || windowManager.FullscreenSuppressed ||
+            reorderDragging || reorderCommitting || externalDragActive || previews.ContextMenuOpen)
+            return;
+        try
+        {
+            if (index == DockKeyboardShortcut.Navigate)
+            {
+                if (!keyboardDockNavigation)
+                {
+                    var foreground = GetForegroundWindowForDockKeyboard();
+                    var dockHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    keyboardPreviousForegroundWindow = foreground != dockHwnd ? foreground : 0;
+                }
+                keyboardDockNavigation = true;
+                await ExpandDockAsync();
+                if (!closing && keyboardDockNavigation)
+                {
+                    // WS_EX_NOACTIVATE is correct for mouse usage, but keyboard
+                    // navigation must explicitly foreground the dock HWND.
+                    var dockHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    if (GetForegroundWindowForDockKeyboard() != dockHwnd)
+                        SetForegroundWindowForDockKeyboard(dockHwnd);
+                    if (GetForegroundWindowForDockKeyboard() != dockHwnd)
+                    {
+                        EndDockKeyboardNavigation(restorePreviousFocus: false);
+                        SetStatus("Win+T could not focus Doky. Try again after closing any fullscreen app.");
+                        return;
+                    }
+                    FocusDockIcon(keyboardDockIndex < 0 ? 0 : keyboardDockIndex);
+                }
+                return;
+            }
+            var target = index - 1;
+            if (target < 0 || target >= VisibleDockApplications.Count) return;
+            var item = VisibleDockApplications[target];
+            if (applicationButtons.TryGetValue(item.Id, out var button))
+                await ActivateDockItemAsync(button, item);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Doky keyboard shortcut failed: {error}");
+            if (!closing) SetStatus("Dock shortcut failed: " + error.Message);
+        }
+    }
+
+    private void EndDockKeyboardNavigation(bool restorePreviousFocus)
+    {
+        if (!keyboardDockNavigation) return;
+        keyboardDockNavigation = false;
+        keyboardDockIndex = -1;
+        var previousHwnd = keyboardPreviousForegroundWindow;
+        keyboardPreviousForegroundWindow = 0;
+        if (!restorePreviousFocus || previousHwnd == 0) return;
+        var dockHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        if (previousHwnd != dockHwnd && GetForegroundWindowForDockKeyboard() == dockHwnd)
+            SetForegroundWindowForDockKeyboard(previousHwnd);
+    }
+
+    private void FocusDockIcon(int index)
+    {
+        var count = VisibleDockApplications.Count;
+        if (count == 0) { keyboardDockIndex = -1; return; }
+        keyboardDockIndex = ((index % count) + count) % count;
+        var selected = VisibleDockApplications[keyboardDockIndex];
+        if (applicationButtons.TryGetValue(selected.Id, out var button))
+            button.Focus(FocusState.Keyboard);
+    }
+
+    private void ShowKeyboardDockMenu()
+    {
+        if (previews.ContextMenuOpen || stackWindow?.IsOpen == true) return;
+        if (keyboardDockIndex < 0 || keyboardDockIndex >= VisibleDockApplications.Count) return;
+        var item = VisibleDockApplications[keyboardDockIndex];
+        if (!applicationButtons.TryGetValue(item.Id, out var button)) return;
+        if (item.Application.Stack is not null)
+            StackContext(button, item);
+        else
+            previews.ShowAppActions(item, button.TransformToVisual(root)
+                .TransformPoint(new global::Windows.Foundation.Point(button.ActualWidth / 2, 0)).X);
     }
 
     private void BuildUtilityCluster()
@@ -2215,7 +2377,16 @@ public sealed partial class DesktopOverlayWindow : Window
             CancelPillHide();
             if (previews.ContextMenuOpen)
             {
+                // A menu is an independent floating window. Do not freeze the
+                // last magnification wave beneath it: that looks like a curved
+                // bridge connecting the menu to the dock. Flatten the existing
+                // mask and GPU refraction while keeping the dock's edge visible.
                 StopDockWaveTimer(clear: false);
+                dockWaveCurrentStrength = 0;
+                dockWaveTargetStrength = 0;
+                desktopBackdrop.ClearDockWave();
+                UpdateDockWaveOutline();
+                UpdateLiquidGlass();
                 if (!heldTransition && state.State is DockState.Expanding or DockState.Collapsing)
                 {
                     heldTransition = state.HoldTransition();
@@ -2742,6 +2913,7 @@ public sealed partial class DesktopOverlayWindow : Window
         if (closing || shutdown.IsRequested || state.State is DockState.Hidden or DockState.Idle ||
             (!resume && state.State == DockState.Collapsing)) return;
         if (DockPinLock || previews.HoldsDock || SystemPopupOpen) return;
+        if (keyboardDockNavigation) return;
         // Return lifted content to its slot before transforming the whole row.
         // External file drags retain ownership until their existing completion path.
         if (externalDragActive) return;
@@ -2810,13 +2982,13 @@ public sealed partial class DesktopOverlayWindow : Window
     }
     private async void ScheduleCollapse()
     {
-        if (DockPinLock || collapseDelay is { IsCancellationRequested: false } || closing || previews.HoldsDock) return;
+        if (DockPinLock || collapseDelay is { IsCancellationRequested: false } || closing || previews.HoldsDock || keyboardDockNavigation) return;
         var delay = new CancellationTokenSource();
         collapseDelay = delay;
         try
         {
             await Task.Delay(settingsSession.DockBehavior.AutoHideDelay, delay.Token);
-            if (delay.IsCancellationRequested || closing || previews.HoldsDock || windowManager.IsPointerInsideInput()) return;
+            if (delay.IsCancellationRequested || closing || keyboardDockNavigation || previews.HoldsDock || windowManager.IsPointerInsideInput()) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             await CollapseDockAsync();
         }
@@ -3301,10 +3473,12 @@ public sealed partial class DesktopOverlayWindow : Window
                 WinRT.Interop.WindowNative.GetWindowHandle(this), ShowSettings,
                 async app =>
                 {
-                    if (app.IsRunning)
+                    if (app.IsRunning || app.Windows.Count > 0)
                     {
-                        var target = app.Windows.OrderByDescending(w => w.LastActivatedTicks).First();
-                        return applicationService.ActivateWindow(target) || await keyboard.RestoreElevatedWindowAsync(target);
+                        var target = DockWindowClick.SelectWindow(app.Windows,
+                            applicationService.CanInteractWithWindow, applicationService.IsForeground);
+                        return target is not null &&
+                            (applicationService.ActivateWindow(target) || await keyboard.RestoreElevatedWindowAsync(target));
                     }
                     return applicationService.LaunchOrActivate(app);
                 });

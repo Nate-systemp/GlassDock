@@ -56,6 +56,24 @@ public sealed class WindowPreviewTests
     }
 
     [Fact]
+    public void PixelAlignedPreviewPlacementCoalescesIdenticalFramesButNotActualMoves()
+    {
+        var work = new PreviewRect(-2560, 0, 2560, 1440);
+        var dock = new PreviewRect(-2300, 1280, 1200, 160);
+        foreach (var dpi in new[] { 1d, 1.25d, 1.5d, 2d })
+        {
+            var first = WindowPreviewLayout.Position(work, dock, dpi, 350, 80, 300, 160);
+            Assert.True(WindowPreviewLayout.NeedsNativeMove(null, first));
+            Assert.False(WindowPreviewLayout.NeedsNativeMove(first, first));
+            // A fractional-DIP change often rounds to the same physical rectangle.
+            var repeated = WindowPreviewLayout.Position(work, dock, dpi, 350, 80, 300, 160);
+            Assert.False(WindowPreviewLayout.NeedsNativeMove(first, repeated));
+            var moved = WindowPreviewLayout.Position(work, dock, dpi, 400, 80, 300, 160);
+            Assert.True(WindowPreviewLayout.NeedsNativeMove(first, moved));
+        }
+    }
+
+    [Fact]
     public void ReusedHandleCannotRetainSelectionFromAnEarlierProcess()
     {
         var session = new WindowPreviewSession();

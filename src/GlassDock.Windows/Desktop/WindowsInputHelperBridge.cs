@@ -19,6 +19,9 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     private readonly string helperPath;
     private readonly Action<bool> ownership;
     private readonly Action<InputSignal> signal;
+    private readonly Action<uint> snippingShortcut;
+    private readonly Action<uint> snippingCanceled;
+    private readonly Action<int, uint> shortcutRequested;
     private readonly CancellationTokenSource lifetime = new();
     private readonly Channel<string> states = Channel.CreateBounded<string>(new BoundedChannelOptions(1)
     { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
@@ -89,11 +92,15 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
     [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(uint processId);
 
-    public WindowsInputHelperBridge(string helperPath, Action<bool> ownership, Action<InputSignal> signal)
+    public WindowsInputHelperBridge(string helperPath, Action<bool> ownership, Action<InputSignal> signal,
+        Action<uint> snippingShortcut, Action<uint> snippingCanceled, Action<int, uint> shortcutRequested)
     {
         this.helperPath = Path.GetFullPath(helperPath);
         this.ownership = ownership;
         this.signal = signal;
+        this.snippingShortcut = snippingShortcut;
+        this.snippingCanceled = snippingCanceled;
+        this.shortcutRequested = shortcutRequested;
         attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         runTask = RunAsync(attempt.Token);
     }
@@ -172,6 +179,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             while (await reader.ReadLineAsync(token) is { } line)
             {
                 if (line == "CAPS|RECOVER1") { Volatile.Write(ref supportsRecovery, 1); continue; }
+                if (line == "CAPS|SNIP1") { Log("Input helper supports Doky screenshot mode."); continue; }
                 if (Volatile.Read(ref recoveryPending) is { } recovery && line == "RECOVERED|" + recovery.Id)
                 { recovery.Completion.TrySetResult(true); continue; }
                 if (line == "CAPS|RESTORE1") { Volatile.Write(ref restoreHelperPid, helper.Id); continue; }
@@ -179,8 +187,14 @@ internal sealed class WindowsInputHelperBridge : IDisposable
                 if (acknowledgement.Length == 3 && acknowledgement[0] == "RESTORED" &&
                     Volatile.Read(ref restorePending) is { } request && request.Id == acknowledgement[1])
                 { request.Completion.TrySetResult(acknowledgement[2] == "1"); continue; }
-                if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
+                if (DockKeyboardShortcut.Read(line, ref sequence, Environment.TickCount64) is { } shortcut)
+                    shortcutRequested(shortcut.Index, shortcut.Revision);
+                else if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
                     signal(value);
+                else if (WindowsInputHelperProtocol.ReadSnippingEvent(line, ref sequence, Environment.TickCount64) is { } snip)
+                    snippingShortcut(snip.Revision);
+                else if (WindowsInputHelperProtocol.ReadSnippingEnd(line, ref sequence, Environment.TickCount64) is { } end)
+                    snippingCanceled(end.Revision);
             }
             if (!token.IsCancellationRequested)
                 Log("Elevated helper disconnected. Restoring the normal-keyboard fallback.");
@@ -413,6 +427,23 @@ internal static class WindowsInputHelperProtocol
 
     internal static Mutex AcquireSingleInstance(int session, out bool created) =>
         new(true, $@"Local\GlassDock.InputHelper.Session{session}", out created);
+
+    internal static InputSignal? ReadSnippingEvent(string line, ref long sequence, long now) =>
+        ReadSnipMessage(line, "SNIP", ref sequence, now);
+
+    internal static InputSignal? ReadSnippingEnd(string line, ref long sequence, long now) =>
+        ReadSnipMessage(line, "SNIPEND", ref sequence, now);
+
+    private static InputSignal? ReadSnipMessage(string line, string kind, ref long sequence, long now)
+    {
+        var parts = line.Split('|');
+        if (parts.Length != 4 || parts[0] != kind ||
+            !long.TryParse(parts[1], out var next) || next <= sequence ||
+            !long.TryParse(parts[2], out var stamp) ||
+            !uint.TryParse(parts[3], out var revision)) return null;
+        sequence = next;
+        return now - stamp is >= 0 and <= 500 ? new(false, revision, stamp) : null;
+    }
 
     internal static InputSignal? ReadEvent(string line, ref long sequence, long now)
     {

@@ -19,9 +19,9 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private readonly InputSignalMailbox signals = new();
     private readonly InputLifecycleRecoveryGate lifecycleGate = new();
     private readonly CancellationTokenSource lifecycleLifetime = new();
-    private bool sessionNotificationsRegistered;
+    private bool sessionNotificationsRegistered, clipboardNotificationsRegistered;
     private nint displayPowerNotification;
-    private const uint SignalMessage = 0x8047, OwnershipMessage = 0x8049;
+    private const uint SignalMessage = 0x8047, OwnershipMessage = 0x8049, SnippingMessage = 0x804A, SnippingEndMessage = 0x804B, ShortcutMessage = 0x804C;
     private const uint PowerBroadcastMessage = 0x0218, PowerSettingChange = 0x8013;
     private const uint PowerSuspend = 0x0004, PowerResumeCritical = 0x0006;
     private const uint PowerResumeSuspend = 0x0007, PowerResumeAutomatic = 0x0012;
@@ -51,11 +51,16 @@ public sealed class WindowsKeyboardService : IKeyboardService
     }
     public bool IsRegistered { get; private set; }
     public Task<bool> RestoreElevatedWindowAsync(ApplicationWindow window) =>
-        disposed || elevatedHelper is null ? Task.FromResult(false) : elevatedHelper.RestoreWindowAsync(window);
+        disposed || elevatedHelper is null || !Applications.WindowsApplicationService.IsEligible(window)
+            ? Task.FromResult(false) : elevatedHelper.RestoreWindowAsync(window);
     public event EventHandler? HomeRequested;
+    public event Action<int>? DockShortcutRequested;
     public event EventHandler? BareWindowsRequested;
     public event EventHandler? LauncherRequested;
     public event EventHandler? RecoveryRequested;
+    public event EventHandler? SnippingRequested;
+    public event EventHandler? SnippingCanceled;
+    public event EventHandler? ClipboardChanged;
 
     public WindowsKeyboardService(nint hwnd, bool enableDockShortcuts = true, string? elevatedHelperPath = null)
     {
@@ -66,6 +71,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
             throw new InvalidOperationException("Cannot attach Doky hotkeys.");
         if (enableDockShortcuts)
         {
+            clipboardNotificationsRegistered = AddClipboardFormatListener(hwnd);
             sessionNotificationsRegistered = NativeMethods.WTSRegisterSessionNotification(hwnd, WtsNotifyForThisSession);
             var displayState = ConsoleDisplayState;
             displayPowerNotification = NativeMethods.RegisterPowerSettingNotification(hwnd, ref displayState, 0);
@@ -77,7 +83,10 @@ public sealed class WindowsKeyboardService : IKeyboardService
         {
             elevatedHelper = new WindowsInputHelperBridge(elevatedHelperPath,
                 take => NativeMethods.PostMessageW(hwnd, OwnershipMessage, take ? 1u : 0u, 0),
-                PostSignal);
+                PostSignal,
+                PostSnipping,
+                PostSnippingCancel,
+                PostShortcut);
             UpdateState();
         }
     }
@@ -97,13 +106,27 @@ public sealed class WindowsKeyboardService : IKeyboardService
     {
         if (!dockShortcutsEnabled || disposed || hook is not null) return;
         hook = new WindowsKeyHook((launcher, version) =>
-            PostSignal(new InputSignal(launcher, version, Environment.TickCount64)));
+            PostSignal(new InputSignal(launcher, version, Environment.TickCount64)),
+            PostSnipping,
+            PostSnippingCancel,
+            PostShortcut);
         UpdateState();
     }
     private void PostSignal(InputSignal signal)
     {
         if (signals.Publish(signal)) NativeMethods.PostMessageW(hwnd, SignalMessage, 0, 0);
     }
+
+    private void PostShortcut(int index, uint version) => NativeMethods.PostMessageW(hwnd, ShortcutMessage, version, index);
+    private void PostSnipping(uint version) => NativeMethods.PostMessageW(hwnd, SnippingMessage, version, 0);
+    private void PostSnippingCancel(uint version) => NativeMethods.PostMessageW(hwnd, SnippingEndMessage, version, 0);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AddClipboardFormatListener(nint hwnd);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RemoveClipboardFormatListener(nint hwnd);
 
     private void MarkLifecycleBoundary(string reason)
     {
@@ -206,6 +229,31 @@ public sealed class WindowsKeyboardService : IKeyboardService
             }
             return 0;
         }
+        if (message == ShortcutMessage)
+        {
+            var index = (int)lParam;
+            if (!disposed && dockShortcutsEnabled && !suppressDockToggle &&
+                (uint)wParam == revision && index is >= 0 and <= 9)
+                DockShortcutRequested?.Invoke(index);
+            return 0;
+        }
+        if (message == SnippingMessage)
+        {
+            if (!disposed && dockShortcutsEnabled && (uint)wParam == revision)
+                SnippingRequested?.Invoke(this, EventArgs.Empty);
+            return 0;
+        }
+        if (message == SnippingEndMessage)
+        {
+            if (!disposed && (uint)wParam == revision)
+                SnippingCanceled?.Invoke(this, EventArgs.Empty);
+            return 0;
+        }
+        if (message == 0x031D) // WM_CLIPBOARDUPDATE
+        {
+            if (!disposed) ClipboardChanged?.Invoke(this, EventArgs.Empty);
+            return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
+        }
         if (message == OwnershipMessage)
         {
             if (!disposed && elevatedHelper is not null)
@@ -248,6 +296,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
         signals.Clear();
         elevatedHelper?.Dispose();
         hook?.Dispose(); hook = null;
+        if (clipboardNotificationsRegistered) RemoveClipboardFormatListener(hwnd);
         if (sessionNotificationsRegistered) NativeMethods.WTSUnRegisterSessionNotification(hwnd);
         if (displayPowerNotification != 0) NativeMethods.UnregisterPowerSettingNotification(displayPowerNotification);
         NativeMethods.UnregisterHotKey(hwnd, 0x4701);

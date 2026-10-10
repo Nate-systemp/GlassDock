@@ -22,6 +22,8 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private readonly DokySharedRuntime runtime = new();
     private readonly Dictionary<nint, DesktopOverlayWindow> secondaryDocks = [];
     private readonly DispatcherQueueTimer topologyTimer;
+    private readonly DispatcherQueueTimer screenshotTimer;
+    private bool screenshotActive;
     private DockDisplayMode lastDisplayMode;
     private bool reconciling;
     private bool reconcilePending;
@@ -65,6 +67,14 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
         runtime.StartApplications();
         settingsSession.Changed += SettingsChanged;
+        PrimaryWindow.KeyboardService.SnippingRequested += SnippingRequested;
+        PrimaryWindow.KeyboardService.SnippingCanceled += SnippingCanceled;
+        PrimaryWindow.KeyboardService.ClipboardChanged += ClipboardChanged;
+        screenshotTimer = PrimaryWindow.DispatcherQueue.CreateTimer();
+        // Fallback when Snipping Tool is canceled and never updates clipboard.
+        screenshotTimer.Interval = TimeSpan.FromSeconds(45);
+        screenshotTimer.IsRepeating = false;
+        screenshotTimer.Tick += (_, _) => EndScreenshotCapture();
 
         topologyTimer = PrimaryWindow.DispatcherQueue.CreateTimer();
         topologyTimer.Interval = TimeSpan.FromSeconds(1);
@@ -107,6 +117,38 @@ internal sealed class MonitorDockCoordinator : IDisposable
         {
             ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome()
         };
+
+    private void SnippingRequested(object? sender, EventArgs e)
+    {
+        if (shuttingDown || disposed) return;
+        if (screenshotActive) EndScreenshotCapture();
+        // Only clear-mode surfaces require temporary exposure. Other materials
+        // remain naturally screenshot-visible and do not change appearance.
+        PrimaryWindow.BeginSnippingCapture();
+        foreach (var secondary in secondaryDocks.Values)
+            secondary.BeginSnippingCapture();
+        screenshotActive = true;
+        screenshotTimer.Stop();
+        screenshotTimer.Start();
+    }
+
+    private void SnippingCanceled(object? sender, EventArgs e) => EndScreenshotCapture();
+
+    private void ClipboardChanged(object? sender, EventArgs e)
+    {
+        // A Snipping Tool capture normally updates the clipboard. Do not
+        // examine the clipboard contents or retain any user image data.
+        if (screenshotActive) EndScreenshotCapture();
+    }
+
+    private void EndScreenshotCapture()
+    {
+        screenshotTimer.Stop();
+        if (!screenshotActive) return;
+        screenshotActive = false;
+        PrimaryWindow.EndSnippingCapture();
+        foreach (var secondary in secondaryDocks.Values) secondary.EndSnippingCapture();
+    }
 
     private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs e)
     {
@@ -242,6 +284,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             return;
 
         shuttingDown = true;
+        EndScreenshotCapture();
         topologyTimer.Stop();
         settingsSession.Changed -= SettingsChanged;
 
@@ -260,6 +303,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             return;
 
         shuttingDown = true;
+        EndScreenshotCapture();
         topologyTimer.Stop();
         settingsSession.Changed -= SettingsChanged;
         _ = ShutdownAsync();
@@ -280,6 +324,11 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        EndScreenshotCapture();
+        screenshotTimer.Stop();
+        PrimaryWindow.KeyboardService.SnippingRequested -= SnippingRequested;
+        PrimaryWindow.KeyboardService.SnippingCanceled -= SnippingCanceled;
+        PrimaryWindow.KeyboardService.ClipboardChanged -= ClipboardChanged;
         topologyTimer.Stop();
         settingsSession.Changed -= SettingsChanged;
         if (!shuttingDown)

@@ -40,6 +40,9 @@ internal sealed class WindowPreviewWindow : Window
     private WindowPreviewLayout expanded = WindowPreviewLayout.Create(1, 600, 400, true);
     private bool isShown;
     private bool rebuilding;
+    private bool drawing;
+    private bool refreshQueued;
+    private int renderRevision;
     private bool closed;
     private double progress, animationFrom, animationTo, animationStarted;
     private double visibility, visibilityFrom, visibilityTo, visibilityStarted;
@@ -134,7 +137,8 @@ internal sealed class WindowPreviewWindow : Window
             Draw();
             if (session.CompleteTransition(progress))
             {
-                root.UpdateLayout();
+                // The Canvas coordinates were updated by Draw already. A synchronous
+                // layout pass here stalls the final animation frame on busy desktops.
                 SyncHoveredCard();
                 moving = true;
             }
@@ -292,6 +296,7 @@ internal sealed class WindowPreviewWindow : Window
     {
         anchorX = anchor;
         dockTop = top;
+        if (drawing || rebuilding) { QueueRefresh(); return; }
         if (!isShown || IsClosing) return;
         if (session.Windows.Count == 0) { Hide(); return; }
         if (page >= session.Windows.Count) page = 0;
@@ -320,21 +325,27 @@ internal sealed class WindowPreviewWindow : Window
 
     private void Rebuild()
     {
+        if (drawing || rebuilding) { QueueRefresh(); return; }
         rebuilding = true;
+        renderRevision++;
         try
         {
+            // GetArea and XAML mutations can pump messages. Membership and both
+            // endpoint layouts must come from the same captured list.
+            var source = session.Windows.ToArray();
+            var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
+            var frame = WindowPreviewFrame.Create(source, page, area.Width / dpi - 24, area.Height / dpi - 24);
             var previous = cards.ToDictionary(card => Key(card.Window));
             cards.Clear();
             root.Children.Clear();
             liquid.Attach();
             root.Children.Add(glass);
             root.Children.Add(solid);
-            var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
-            var count = session.Windows.Count - page;
-            windowCount = session.Windows.Count;
-            compact = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, false, reservePager: page > 0);
-            expanded = WindowPreviewLayout.Create(count, area.Width / dpi - 24, area.Height / dpi - 24, true, reservePager: page > 0);
-            var windows = session.Windows.Skip(page).Take(expanded.Capacity).ToArray();
+            page = frame.Page;
+            windowCount = frame.Total;
+            compact = frame.Compact;
+            expanded = frame.Expanded;
+            var windows = frame.Windows;
             // DWM registrations follow compact stack z-order, front last.
             foreach (var window in windows.Reverse())
             {
@@ -421,77 +432,89 @@ internal sealed class WindowPreviewWindow : Window
 
     private void Draw()
     {
-        if (!isShown || rebuilding || cards.Count == 0) return;
-        var width = Lerp(compact.Width, expanded.Width, progress);
-        var height = Lerp(compact.Height, expanded.Height, progress);
-        placement.Position(dock, anchorX, dockTop, width, height);
-        var dpi = WindowPreviewPlacement.GetArea(dock).Dpi;
-        // All layers, including native thumbnails, use the same fade and travel.
-        var travel = 6 * (1 - visibility);
-        root.Opacity = visibility;
-        glass.Width = solid.Width = width;
-        glass.Height = solid.Height = Math.Max(0, height - 12);
-        Canvas.SetTop(glass, travel);
-        Canvas.SetTop(solid, travel);
-        backdrop.SetBounds(width, height, width, Math.Max(0, height - 12 - travel), 12, dpi, visibility);
-        for (var index = cards.Count - 1; index >= 0; index--)
+        // Resizing the native HWND fires root.SizeChanged synchronously on some
+        // Windows builds. Never let that event re-enter a partially drawn frame.
+        if (!isShown || rebuilding || drawing || cards.Count == 0) return;
+        drawing = true;
+        var revision = renderRevision;
+        var frameCards = cards.ToArray();
+        var frameCompact = compact;
+        var frameExpanded = expanded;
+        try
         {
-            var card = cards[index];
-            var from = compact.Cards[index];
-            var to = expanded.Cards[index];
-            var rect = new PreviewRect(Lerp(from.X, to.X, progress), Lerp(from.Y, to.Y, progress) + travel,
-                Lerp(from.Width, to.Width, progress), Lerp(from.Height, to.Height, progress));
-            var visible = progress > 0 || index < 3;
-            var opacity = visibility * (index == 0 ? 1 : Lerp(.66, 1, progress));
-            if (index >= 3) opacity *= progress;
-            card.Button.Visibility = card.CloseButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            card.Button.Opacity = visibility > 0 ? opacity / visibility : 0;
-            Canvas.SetLeft(card.Button, rect.X);
-            Canvas.SetTop(card.Button, rect.Y);
-            Canvas.SetZIndex(card.Button, cards.Count - index);
-            card.Button.Width = rect.Width;
-            card.Button.Height = rect.Height;
-            card.Title.MaxWidth = Math.Max(0, rect.Width - 68);
-            card.Border.Background = card.Emphasis > .5 ? theme.Hover : theme.Tile;
-            var closeVisible = visible && CanFocus &&
-                (ContainsPointer(card.Button) || ContainsPointer(card.CloseButton) || card.CloseButton.FocusState != FocusState.Unfocused);
-            card.CloseButton.Opacity = closeVisible ? 1 : 0;
-            card.CloseButton.IsHitTestVisible = closeVisible;
-            card.CloseButton.IsTabStop = CanFocus;
-            var closeRect = WindowPreviewLayout.CloseButtonBounds(rect, card.CloseButton.Width);
-            Canvas.SetLeft(card.CloseButton, closeRect.X);
-            Canvas.SetTop(card.CloseButton, closeRect.Y);
-            Canvas.SetZIndex(card.CloseButton, 25);
+            var width = Lerp(compact.Width, expanded.Width, progress);
+            var height = Lerp(compact.Height, expanded.Height, progress);
+            placement.Position(dock, anchorX, dockTop, width, height);
+            var dpi = WindowPreviewPlacement.GetArea(dock).Dpi;
+            // All layers, including native thumbnails, use the same fade and travel.
+            var travel = 6 * (1 - visibility);
+            root.Opacity = visibility;
+            glass.Width = solid.Width = width;
+            glass.Height = solid.Height = Math.Max(0, height - 12);
+            Canvas.SetTop(glass, travel);
+            Canvas.SetTop(solid, travel);
+            backdrop.SetBounds(width, height, width, Math.Max(0, height - 12 - travel), 12, dpi, visibility);
+            for (var index = frameCards.Length - 1; index >= 0; index--)
+            {
+                if (!isShown || revision != renderRevision) return;
+                var card = frameCards[index];
+                var from = frameCompact.Cards[index];
+                var to = frameExpanded.Cards[index];
+                var rect = new PreviewRect(Lerp(from.X, to.X, progress), Lerp(from.Y, to.Y, progress) + travel,
+                    Lerp(from.Width, to.Width, progress), Lerp(from.Height, to.Height, progress));
+                var visible = progress > 0 || index < 3;
+                var opacity = visibility * (index == 0 ? 1 : Lerp(.66, 1, progress));
+                if (index >= 3) opacity *= progress;
+                card.Button.Visibility = card.CloseButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                card.Button.Opacity = visibility > 0 ? opacity / visibility : 0;
+                Canvas.SetLeft(card.Button, rect.X);
+                Canvas.SetTop(card.Button, rect.Y);
+                Canvas.SetZIndex(card.Button, cards.Count - index);
+                card.Button.Width = rect.Width;
+                card.Button.Height = rect.Height;
+                card.Title.MaxWidth = Math.Max(0, rect.Width - 68);
+                card.Border.Background = card.Emphasis > .5 ? theme.Hover : theme.Tile;
+                var closeVisible = visible && CanFocus &&
+                    (ContainsPointer(card.Button) || ContainsPointer(card.CloseButton) || card.CloseButton.FocusState != FocusState.Unfocused);
+                card.CloseButton.Opacity = closeVisible ? 1 : 0;
+                card.CloseButton.IsHitTestVisible = closeVisible;
+                card.CloseButton.IsTabStop = CanFocus;
+                var closeRect = WindowPreviewLayout.CloseButtonBounds(rect, card.CloseButton.Width);
+                Canvas.SetLeft(card.CloseButton, closeRect.X);
+                Canvas.SetTop(card.CloseButton, closeRect.Y);
+                Canvas.SetZIndex(card.CloseButton, 25);
 
-            var frame = card.Window.IsMinimized ? frameCache.GetCachedFrame(card.Window) : null;
-            if (frame is { } cachedFrame && !card.CachedPixels.Equals(cachedFrame.Pixels))
-            {
-                var bitmap = new WriteableBitmap(cachedFrame.Width, cachedFrame.Height);
-                using (var stream = bitmap.PixelBuffer.AsStream()) stream.Write(cachedFrame.Pixels.Span);
-                bitmap.Invalidate();
-                card.Cached.Source = bitmap;
-                card.CachedPixels = cachedFrame.Pixels;
+                var frame = card.Window.IsMinimized ? frameCache.GetCachedFrame(card.Window) : null;
+                if (frame is { } cachedFrame && !card.CachedPixels.Equals(cachedFrame.Pixels))
+                {
+                    var bitmap = new WriteableBitmap(cachedFrame.Width, cachedFrame.Height);
+                    using (var stream = bitmap.PixelBuffer.AsStream()) stream.Write(cachedFrame.Pixels.Span);
+                    bitmap.Invalidate();
+                    card.Cached.Source = bitmap;
+                    card.CachedPixels = cachedFrame.Pixels;
+                }
+                var useCache = frame is not null;
+                card.Cached.Visibility = useCache ? Visibility.Visible : Visibility.Collapsed;
+                if (frame is null && card.Cached.Source is not null)
+                {
+                    card.Cached.Source = null;
+                    card.CachedPixels = default;
+                }
+                var shown = card.Thumbnail.Update(new(rect.X + 6, rect.Y + 34, Math.Max(1, rect.Width - 12), Math.Max(1, rect.Height - 40)),
+                    dpi, opacity, visible && !useCache);
+                card.Fallback.Visibility = useCache || shown ? Visibility.Collapsed : Visibility.Visible;
             }
-            var useCache = frame is not null;
-            card.Cached.Visibility = useCache ? Visibility.Visible : Visibility.Collapsed;
-            if (frame is null && card.Cached.Source is not null)
-            {
-                card.Cached.Source = null;
-                card.CachedPixels = default;
-            }
-            var shown = card.Thumbnail.Update(new(rect.X + 6, rect.Y + 34, Math.Max(1, rect.Width - 12), Math.Max(1, rect.Height - 40)),
-                dpi, opacity, visible && !useCache);
-            card.Fallback.Visibility = useCache || shown ? Visibility.Collapsed : Visibility.Visible;
+            var remaining = windowCount - page - cards.Count;
+            more.Content = remaining > 0 ? $"+{remaining} more · {page + 1}–{page + cards.Count} of {windowCount}"
+                : $"Back to first · {page + 1}–{page + cards.Count} of {windowCount}";
+            more.Visibility = page > 0 || windowCount > expanded.Capacity ? Visibility.Visible : Visibility.Collapsed;
+            more.IsEnabled = CanFocus;
+            more.MaxWidth = Math.Max(0, width - 16);
+            Canvas.SetLeft(more, 8);
+            Canvas.SetTop(more, height - 46 + travel);
+            Canvas.SetZIndex(more, 30);
         }
-        var remaining = windowCount - page - cards.Count;
-        more.Content = remaining > 0 ? $"+{remaining} more · {page + 1}–{page + cards.Count} of {windowCount}"
-            : $"Back to first · {page + 1}–{page + cards.Count} of {windowCount}";
-        more.Visibility = page > 0 || windowCount > expanded.Capacity ? Visibility.Visible : Visibility.Collapsed;
-        more.IsEnabled = CanFocus;
-        more.MaxWidth = Math.Max(0, width - 16);
-        Canvas.SetLeft(more, 8);
-        Canvas.SetTop(more, height - 46 + travel);
-        Canvas.SetZIndex(more, 30);
+        finally { drawing = false; }
     }
 
     private bool ContainsPointer(Button button) => placement.ContainsPointer(
@@ -499,12 +522,23 @@ internal sealed class WindowPreviewWindow : Window
 
     private void ClearCards()
     {
+        renderRevision++;
         foreach (var card in cards) card.Thumbnail.Dispose();
         cards.Clear();
         root.Children.Clear();
         liquid.Attach();
         root.Children.Add(glass);
         root.Children.Add(solid);
+    }
+
+    private void QueueRefresh()
+    {
+        if (refreshQueued || closed) return;
+        refreshQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            refreshQueued = false;
+            if (!closed) Refresh(anchorX, dockTop);
+        });
     }
 
     public void Hide(bool immediate = false)

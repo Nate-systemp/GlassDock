@@ -7,11 +7,10 @@ namespace GlassDock.App.ViewModels;
 public sealed class DockApplicationsViewModel : IDisposable
 {
     private readonly IApplicationService service;
-    private readonly DispatcherQueue dispatcher;
+    private readonly ApplicationSnapshotPump snapshots;
     private readonly DockApplications applications = new();
     private readonly bool ownsService;
     private readonly Func<ApplicationSnapshot, ApplicationSnapshot>? snapshotTransform;
-    private ApplicationSnapshot? lastSnapshot;
     private bool disposed;
     public ObservableCollection<DockApplicationItem> VisibleDockApplications => applications.VisibleDockApplications;
     public string? Warning { get; private set; }
@@ -25,7 +24,7 @@ public sealed class DockApplicationsViewModel : IDisposable
         Func<ApplicationSnapshot, ApplicationSnapshot>? snapshotTransform = null)
     {
         this.service = service;
-        this.dispatcher = dispatcher;
+        snapshots = new(action => dispatcher.TryEnqueue(() => action()), ApplySnapshot);
         this.ownsService = ownsService;
         this.snapshotTransform = snapshotTransform;
         service.SnapshotChanged += OnSnapshot;
@@ -33,8 +32,7 @@ public sealed class DockApplicationsViewModel : IDisposable
 
     private void OnSnapshot(object? sender, ApplicationSnapshot snapshot)
     {
-        lastSnapshot = snapshot;
-        dispatcher.TryEnqueue(() => ApplySnapshot(snapshot));
+        snapshots.Publish(snapshot);
     }
 
     private void ApplySnapshot(ApplicationSnapshot snapshot)
@@ -50,9 +48,7 @@ public sealed class DockApplicationsViewModel : IDisposable
 
     public void RefreshFilter()
     {
-        var snapshot = lastSnapshot;
-        if (snapshot is null || disposed) return;
-        dispatcher.TryEnqueue(() => ApplySnapshot(snapshot));
+        snapshots.Reapply();
     }
 
     public bool Activate(DockApplicationItem item) => service.LaunchOrActivate(item.Application);
@@ -65,6 +61,7 @@ public sealed class DockApplicationsViewModel : IDisposable
     public void Dispose()
     {
         disposed = true;
+        snapshots.Dispose();
         service.SnapshotChanged -= OnSnapshot;
         if (ownsService)
             service.Dispose();

@@ -12,6 +12,7 @@ public sealed class WindowsApplicationService : IApplicationService
 {
     private readonly AutoResetEvent refresh = new(false);
     private readonly ConcurrentDictionary<nint, long> activationTimes = new();
+    private readonly ConcurrentDictionary<string, DockApplication> pendingActivations = new(StringComparer.Ordinal);
     private readonly WindowsApplicationLauncher launcher = new();
     private readonly ShellApplicationIdentityResolver identityResolver = new();
     private readonly DockPinStore pinStore = new();
@@ -31,14 +32,14 @@ public sealed class WindowsApplicationService : IApplicationService
     {
         if (eventId == 3) activationTimes[window] = Stopwatch.GetTimestamp();
         if (eventId == 0x8001 && objectId == 0) activationTimes.TryRemove(window, out _);
-        if (eventId == 3 || (objectId == 0 && childId == 0)) RequestRefresh();
+        if (eventId is 3 or 0x0020 || (objectId == 0 && childId == 0)) RequestRefresh();
     };
 
     public void Start()
     {
         if (worker is not null || stopping) return;
         // Register on the caller's UI thread, which already pumps messages.
-        foreach (var (first, last) in new (uint, uint)[] { (3, 3), (0x8000, 0x8003), (0x800C, 0x800C), (0x8017, 0x8018) })
+        foreach (var (first, last) in new (uint, uint)[] { (3, 3), (0x0020, 0x0020), (0x8000, 0x8003), (0x800C, 0x800C), (0x8017, 0x8018) })
         {
             var hook = NativeMethods.SetWinEventHook(first, last, 0, callback, 0, 0, 2); // OUTOFCONTEXT | SKIPOWNPROCESS
             if (hook != 0) hooks.Add(hook);
@@ -86,8 +87,18 @@ public sealed class WindowsApplicationService : IApplicationService
                         }
                         lastPins = DateTime.UtcNow;
                     }
+                    var activationRequests = pendingActivations.ToArray();
                     var windows = ReadWindows(icons);
-                    var applications = pinStore.ApplyOrder(DockApplicationCollection.Combine(pins, windows));
+                    // Click-time discovery stays on this worker's apartment too.
+                    // Keep each identity pending through processing to coalesce rapid clicks.
+                    foreach (var request in activationRequests)
+                    {
+                        if (stopping) break;
+                        try { LaunchOrActivateFromSnapshot(request.Value, windows); }
+                        finally { pendingActivations.TryRemove(request.Key, out _); }
+                    }
+                    var visibleWindows = VirtualDesktopPolicy.Filter(windows, WindowsVirtualDesktopQuery.ShowAllWindows());
+                    var applications = pinStore.ApplyOrder(DockApplicationCollection.Combine(pins, visibleWindows));
                     Volatile.Write(ref currentApplications, applications);
                     icons.Retain(pins.Select(pin => pin.Identity.Key).Concat(windows.Select(window => window.Identity.Key)));
                     if (!stopping) SnapshotChanged?.Invoke(this, new(pinStore.ApplyStacks(applications), pinWarning));
@@ -99,7 +110,7 @@ public sealed class WindowsApplicationService : IApplicationService
                 }
                 refresh.WaitOne(TimeSpan.FromSeconds(3));
                 if (!stopping) Thread.Sleep(150); // Coalesce show/name/foreground bursts.
-                refresh.Reset();
+                // Do not erase a switch/close signal received during coalescing.
             }
         }
         finally { refresh.Dispose(); }
@@ -107,6 +118,7 @@ public sealed class WindowsApplicationService : IApplicationService
 
     private IReadOnlyList<ApplicationWindow> ReadWindows(WindowsApplicationIconService? icons)
     {
+        using var desktops = new WindowsVirtualDesktopQuery();
         var result = new List<ApplicationWindow>();
         using var currentProcess = Process.GetCurrentProcess();
         var sessionId = currentProcess.SessionId;
@@ -120,7 +132,9 @@ public sealed class WindowsApplicationService : IApplicationService
                 var style = ApplicationNative.GetWindowLongPtr(window, -20).ToInt64();
                 var appWindow = (style & 0x40000) != 0;
                 if (!appWindow && ((style & (0x80 | 0x08000000)) != 0 || ApplicationNative.GetWindow(window, 4) != 0)) return true;
-                if (ApplicationNative.DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) >= 0 && cloaked != 0) return true;
+                if (ApplicationNative.DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) < 0) cloaked = 0;
+                var onCurrentDesktop = desktops.IsCurrent(window);
+                if (!VirtualDesktopPolicy.Track(onCurrentDesktop, cloaked)) return true;
                 var title = new StringBuilder(1024);
                 if (ApplicationNative.GetWindowText(window, title, title.Capacity) == 0) return true;
                 var className = new StringBuilder(256);
@@ -182,7 +196,8 @@ public sealed class WindowsApplicationService : IApplicationService
                 if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(path);
                 result.Add(new(identity, name, window, (int)pid, process.StartTime.ToUniversalTime().Ticks, window == foreground,
                     icons?.FromWindow(identity.Key, window, path, appId), title.ToString(), ApplicationNative.IsIconic(window),
-                    activationTimes.GetValueOrDefault(window)));
+                    activationTimes.GetValueOrDefault(window))
+                { IsOnCurrentDesktop = VirtualDesktopPolicy.IsCurrent(onCurrentDesktop, cloaked) });
             }
             catch (Exception error) when (error is Win32Exception or InvalidOperationException or ArgumentException or IOException or COMException)
             { Debug.WriteLine($"Skipping unavailable application window: {error.HResult:X8}"); }
@@ -202,17 +217,24 @@ public sealed class WindowsApplicationService : IApplicationService
 
     public bool LaunchOrActivate(DockApplication application)
     {
+        if (stopping || worker is null) return false;
+        pendingActivations.TryAdd(application.Id, application);
+        RequestRefresh();
+        return true; // Accepted for fresh enumeration; never block the UI on Shell COM.
+    }
+
+    private bool LaunchOrActivateFromSnapshot(DockApplication application, IReadOnlyList<ApplicationWindow> windows)
+    {
         // Recheck before launching: an app can open between reconciliation and the user's click.
-        var current = DockApplicationCollection.Combine(Volatile.Read(ref currentPins), ReadWindows(null))
+        var current = DockApplicationCollection.Combine(Volatile.Read(ref currentPins), windows)
             .FirstOrDefault(item => item.Id == application.Id);
         if (current is not null) application = current;
         // A pin removed since the snapshot must not be launched as a stale pinned item.
         else if (application.IsPinned) { RequestRefresh(); return false; }
-        foreach (var existing in application.Windows)
-        {
-            if (!IsEligible(existing)) continue;
-            return ActivateWindow(existing); // Never relaunch because Windows denied foreground focus.
-        }
+        var target = DockWindowClick.SelectWindow(application.Windows, IsEligible,
+            window => ApplicationNative.GetForegroundWindow() == (nint)window.Handle);
+        if (target is not null)
+            return ActivateWindow(target); // Never relaunch because Windows denied foreground focus.
         // A known running window may be inaccessible (for example privilege or
         // identity validation failure). Do not reinterpret that as a closed app.
         if (application.Windows.Count > 0) { RequestRefresh(); return false; }
@@ -403,6 +425,7 @@ public sealed class WindowsApplicationService : IApplicationService
     {
         if (stopping) return;
         stopping = true;
+        pendingActivations.Clear();
         foreach (var hook in hooks) NativeMethods.UnhookWinEvent(hook);
         hooks.Clear();
         refresh.Set();

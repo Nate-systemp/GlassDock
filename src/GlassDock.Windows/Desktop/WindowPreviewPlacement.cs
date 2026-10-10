@@ -11,6 +11,10 @@ public sealed class WindowPreviewPlacement : IDisposable
 {
     private readonly nint window;
     private readonly NativeMethods.SubclassProc callback;
+    // Native moves trigger layout and DWM thumbnail updates. A timer frame can
+    // land on the same integer-pixel rectangle as its predecessor, especially
+    // with DPI scaling; avoid a redundant Win32 resize in that case.
+    private PreviewRect? lastPhysicalBounds;
 
     public WindowPreviewPlacement(nint window, bool inspection = false)
     {
@@ -225,12 +229,19 @@ public sealed class WindowPreviewPlacement : IDisposable
         var (area, dpi, bounds) = GetArea(dock);
 
         var rectangle = WindowPreviewLayout.Position(area, bounds, dpi, anchorXDip, dockTopDip, width, height);
-        NativeMethods.SetWindowPos(window, -1, (int)rectangle.X, (int)rectangle.Y,
-            (int)rectangle.Width, (int)rectangle.Height, 0x10 | 0x40);
+        if (!WindowPreviewLayout.NeedsNativeMove(lastPhysicalBounds, rectangle)) return;
+        // Cache the physical rectangle only after SetWindowPos succeeds. Otherwise
+        // the next frame must retry it instead of leaving a stale placement.
+        if (NativeMethods.SetWindowPos(window, -1, (int)rectangle.X, (int)rectangle.Y,
+            (int)rectangle.Width, (int)rectangle.Height, 0x10 | 0x40))
+            lastPhysicalBounds = rectangle;
     }
 
     public void Hide()
     {
+        // SW_HIDE must be paired with another SWP_SHOWWINDOW even when the
+        // next preview opens at exactly the same physical bounds.
+        lastPhysicalBounds = null;
         NativeMethods.ShowWindow(
             window,
             0

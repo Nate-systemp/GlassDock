@@ -37,6 +37,24 @@ public sealed class WindowsKeyGestureTests
     }
 
     [Fact]
+    public void Shift_modifier_state_is_visible_for_snipping_detection_and_resets()
+    {
+        var gesture = new WindowsKeyGesture();
+        gesture.Process(0xA0, true);
+        Assert.True(gesture.IsShiftHeld);
+        gesture.Process(0x5B, true);
+        gesture.Process(0x53, true);
+        Assert.False(gesture.Process(0x5B, false));
+        gesture.Process(0x53, false);
+        gesture.Process(0xA0, false);
+        Assert.False(gesture.IsShiftHeld);
+        gesture.Process(0x10, true);
+        Assert.True(gesture.IsShiftHeld);
+        gesture.Reset();
+        Assert.False(gesture.IsShiftHeld);
+    }
+
+    [Fact]
     public void Dual_windows_keys_stay_disqualified_until_both_are_released()
     {
         foreach (var first in new[] { 0x5B, 0x5C })
