@@ -41,6 +41,9 @@ public sealed class WindowsOverlayManager : IDisposable
     private NativeMethods.Rect currentMonitorBounds;
     private double currentMonitorScale;
     private bool hasCurrentMonitorMetrics;
+    private bool disposed;
+    private bool relocating;
+    public void InvalidateMonitorMetrics() => hasCurrentMonitorMetrics = false;
     public bool FullscreenSuppressed { get; private set; }
 
     public void RefreshFullscreenPolicy()
@@ -210,6 +213,8 @@ public sealed class WindowsOverlayManager : IDisposable
     }
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
         ClearBottomWorkAreaReservation();
         NativeMethods.KillTimer(hwnd, InputTimer);
         NativeMethods.KillTimer(hwnd, TopmostTimer);
@@ -226,6 +231,14 @@ public sealed class WindowsOverlayManager : IDisposable
         var monitor = fixedMonitor != 0 ? fixedMonitor : ResolveMonitor(displayMode);
         if (monitor == 0)
             monitor = NativeMethods.MonitorFromPoint(new NativeMethods.Point(), 1);
+
+        return PositionOnMonitor(margin, monitor);
+    }
+
+    private PixelRect PositionOnMonitor(double margin, nint monitor)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!NativeMethods.IsWindow(hwnd)) throw new Win32Exception(1400);
 
         var monitorChanged = currentMonitor != 0 && currentMonitor != monitor;
 
@@ -244,6 +257,8 @@ public sealed class WindowsOverlayManager : IDisposable
             info.Monitor.Bottom - info.Monitor.Top);
 
         var scale = GetMonitorScale(monitor);
+        if (screen.Width <= 0 || screen.Height <= 0 || !double.IsFinite(scale) || scale <= 0)
+            throw new Win32Exception(87, "Destination monitor has invalid geometry or DPI.");
 
         // Size the transparent overlay host to the current monitor rather than
         // keeping the historical 960-DIP cap. The host itself is invisible;
@@ -251,7 +266,6 @@ public sealed class WindowsOverlayManager : IDisposable
         // edge margin so large docks never touch or cross the display edges.
         var availableWidthDips = Math.Max(320d, screen.Width / scale - 32d);
         var hostWidthDips = Math.Min(Width, availableWidthDips);
-        CurrentHostWidthDips = hostWidthDips;
 
         var rect = DesktopPlacement.BottomCenter(
             screen,
@@ -276,6 +290,7 @@ public sealed class WindowsOverlayManager : IDisposable
         }
 
         currentMonitor = monitor;
+        CurrentHostWidthDips = hostWidthDips;
         currentMonitorBounds = info.Monitor;
         currentMonitorScale = scale;
         hasCurrentMonitorMetrics = true;
@@ -433,8 +448,9 @@ public sealed class WindowsOverlayManager : IDisposable
         }
     }
 
-    public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode)
+    public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode, Action? beforeMove = null)
     {
+        if (disposed || relocating || !NativeMethods.IsWindow(hwnd)) return false;
         var target = fixedMonitor != 0 ? fixedMonitor : ResolveMonitor(displayMode);
         if (target == 0)
             return false;
@@ -462,8 +478,16 @@ public sealed class WindowsOverlayManager : IDisposable
         if (!metricsChanged)
             return false;
 
-        Position(margin, displayMode);
-        return true;
+        relocating = true;
+        try
+        {
+            beforeMove?.Invoke();
+            // Use the destination whose metrics we just validated. Resolving the
+            // pointer again here races rapid moves and monitor removal.
+            PositionOnMonitor(margin, target);
+            return true;
+        }
+        finally { relocating = false; }
     }
 
     private nint ResolveMonitor(DockDisplayMode displayMode)

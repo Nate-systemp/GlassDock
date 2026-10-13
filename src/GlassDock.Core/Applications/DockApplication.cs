@@ -10,7 +10,11 @@ public sealed record ApplicationIdentity(string? AppUserModelId, string? Executa
 
 /// <summary>Premultiplied BGRA pixels supplied by the OS icon service, independent of UI frameworks.</summary>
 public sealed record ApplicationIcon(int Width, int Height, byte[] Pixels);
-public sealed record PinnedApplication(ApplicationIdentity Identity, string Name, string LaunchTarget, ApplicationIcon? Icon);
+public enum PinTargetAvailability { Unknown, Available, Unavailable }
+public sealed record PinnedApplication(ApplicationIdentity Identity, string Name, string LaunchTarget, ApplicationIcon? Icon)
+{
+    public PinTargetAvailability Availability { get; init; }
+}
 public sealed record ApplicationWindow(ApplicationIdentity Identity, string Name, long Handle, int ProcessId,
     long ProcessStartTicks, bool IsActive, ApplicationIcon? Icon, string Title = "", bool IsMinimized = false,
     long LastActivatedTicks = 0)
@@ -21,6 +25,7 @@ public sealed record DockApplication(string Id, ApplicationIdentity Identity, st
     bool IsPinned, IReadOnlyList<ApplicationWindow> Windows, ApplicationIcon? Icon)
 {
     public DockStack? Stack { get; init; }
+    public PinTargetAvailability PinAvailability { get; init; }
     public IReadOnlyList<DockApplication> StackApps { get; init; } = [];
     public bool IsRunning => Windows.Count > 0;
     public bool IsActive => Windows.Any(window => window.IsActive);

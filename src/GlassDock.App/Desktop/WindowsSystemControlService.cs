@@ -113,6 +113,7 @@ internal sealed class WindowsSystemControlService
     public void OpenFocusSettings() => OpenSettings("ms-settings:quietmomentshome");
     public void OpenAirplaneSettings() => OpenSettings("ms-settings:network-airplanemode");
     public void OpenDisplaySettings() => OpenSettings("ms-settings:display");
+    public void OpenNightLightSettings() => OpenSettings("ms-settings:nightlight");
     public void OpenNotificationSettings() => OpenSettings("ms-settings:notifications");
     public void OpenTraySettings() => OpenSettings("ms-settings:taskbar");
 

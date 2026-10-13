@@ -8,6 +8,8 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Applications;
 
+public sealed record RecoverableDockPin(string Id, string Name, string Target, bool Hidden);
+
 public sealed class WindowsApplicationService : IApplicationService
 {
     private readonly AutoResetEvent refresh = new(false);
@@ -281,6 +283,24 @@ public sealed class WindowsApplicationService : IApplicationService
         {
             return null;
         }
+    }
+
+    public IReadOnlyList<RecoverableDockPin> GetRecoverablePins() => pinStore.GetRecoverablePins();
+
+    public bool SetMissingPinVisible(string id, bool visible)
+    {
+        var saved = pinStore.SetMissingPinVisible(id, visible);
+        if (saved) Interlocked.Increment(ref pinRevision);
+        if (saved) RequestRefresh();
+        return saved;
+    }
+
+    public bool RemoveRecoverablePin(string id)
+    {
+        var saved = pinStore.RemoveRecoverablePin(id);
+        if (saved) Interlocked.Increment(ref pinRevision);
+        if (saved) RequestRefresh();
+        return saved;
     }
 
     public bool PinExternalTarget(string path)

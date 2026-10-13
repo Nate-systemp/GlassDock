@@ -9,22 +9,29 @@ internal sealed class DockPinStore
     private readonly object gate = new();
     private readonly string path = Settings.DokyUserData.PinsPath;
     private readonly ShellApplicationIdentityResolver identityResolver = new();
+    private readonly InstalledPinReconciler installations;
 
     private sealed record SavedPin(ApplicationIdentity Identity, string Name, string Target);
 
     private sealed record Preferences
     {
+        public Dictionary<string, PinInstallationEvidence> Installations { get; init; } = new(StringComparer.Ordinal);
         public List<SavedPin> Pins { get; init; } = [];
         public HashSet<string> Excluded { get; init; } = [];
+        // User override for unavailable local shortcuts. Other missing shortcuts
+        // stay saved but do not occupy dock space until the target returns.
+        public HashSet<string> ShownMissingPins { get; init; } = [];
         public List<string>? Order { get; init; }
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public IReadOnlyList<DockStack>? Stacks { get; init; }
     }
 
     private Preferences preferences = new();
+    private IReadOnlyList<RecoverableDockPin> recoverablePins = [];
 
-    public DockPinStore(string? preferencesPath = null)
+    public DockPinStore(string? preferencesPath = null, InstalledPinReconciler? installations = null)
     {
+        this.installations = installations ?? new();
         if (preferencesPath is not null) path = preferencesPath;
         try
         {
@@ -36,6 +43,8 @@ internal sealed class DockPinStore
 
             preferences = new Preferences
             {
+                Installations = (saved.Installations ?? []).Where(pair => pair.Value is not null)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
                 Stacks = ValidateStacks(saved.Stacks),
                 Pins = (saved.Pins ?? [])
                     .Where(pin =>
@@ -48,6 +57,9 @@ internal sealed class DockPinStore
                 Excluded = saved.Excluded is null
                     ? new HashSet<string>(StringComparer.Ordinal)
                     : new HashSet<string>(saved.Excluded, StringComparer.Ordinal),
+                ShownMissingPins = saved.ShownMissingPins is null
+                    ? new HashSet<string>(StringComparer.Ordinal)
+                    : new HashSet<string>(saved.ShownMissingPins, StringComparer.Ordinal),
 
                 Order = saved.Order?
                     .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -96,6 +108,47 @@ internal sealed class DockPinStore
                 }
             }
 
+            for (var index = 0; index < result.Count; index++)
+            {
+                var pin = result[index];
+                var availability = PinTargetProbe.Check(pin.LaunchTarget, pin.Identity);
+                if (availability == PinTargetAvailability.Unavailable) icons.Invalidate(pin.Identity.Key);
+                result[index] = pin with { Availability = availability,
+                    Icon = availability == PinTargetAvailability.Unavailable ? ApplicationIconFallback.Visible(null) : pin.Icon };
+            }
+
+            var reconciliation = installations.Inspect(result, preferences.Installations);
+            var removed = reconciliation.Removed;
+            if (removed.Count > 0 || !preferences.Installations.OrderBy(p => p.Key).SequenceEqual(reconciliation.Evidence.OrderBy(p => p.Key)))
+            {
+                var next = WithoutPins(preferences, removed, reconciliation.Evidence);
+                // Publish removal only after the atomic preferences write succeeds.
+                // Imported Windows shortcuts are excluded, never edited or deleted.
+                if (Save(next))
+                {
+                    result.RemoveAll(pin => removed.Contains(pin.Identity.Key));
+                    foreach (var id in removed) icons.Invalidate(id);
+                }
+            }
+
+            // Only Doky's own local .lnk pins are eligible for visual hiding.
+            // Preserve the saved identity, ordering and stacks; do not infer
+            // permanent uninstall from an unavailable shortcut. Imported pins,
+            // package identities, directories, .url files and direct executable
+            // pins continue to use their original behavior.
+            var customIds = preferences.Pins.Select(pin => pin.Identity.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            recoverablePins = result
+                .Where(pin => customIds.Contains(pin.Identity.Key) &&
+                    pin.LaunchTarget.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) &&
+                    pin.Availability == PinTargetAvailability.Unavailable)
+                .Select(pin => new RecoverableDockPin(pin.Identity.Key, pin.Name, pin.LaunchTarget,
+                    !preferences.ShownMissingPins.Contains(pin.Identity.Key)))
+                .ToArray();
+            var hiddenIds = recoverablePins.Where(pin => pin.Hidden)
+                .Select(pin => pin.Id).ToHashSet(StringComparer.Ordinal);
+            result.RemoveAll(pin => hiddenIds.Contains(pin.Identity.Key));
+
             if (preferences.Order is not { Count: > 0 } order)
                 return result;
 
@@ -117,6 +170,72 @@ internal sealed class DockPinStore
                 .Select(item => item.Pin)
                 .ToArray();
         }
+    }
+
+    /// <summary>Entries hidden from the dock are always available here for recovery.</summary>
+    internal IReadOnlyList<RecoverableDockPin> GetRecoverablePins()
+    {
+        lock (gate) return recoverablePins.ToArray();
+    }
+
+    internal bool SetMissingPinVisible(string id, bool visible)
+    {
+        lock (gate)
+        {
+            if (!recoverablePins.Any(pin => pin.Id == id) ||
+                !preferences.Pins.Any(pin => pin.Identity.Key == id)) return false;
+            var shown = new HashSet<string>(preferences.ShownMissingPins, StringComparer.Ordinal);
+            if (visible) shown.Add(id); else shown.Remove(id);
+            if (!Save(preferences with { ShownMissingPins = shown })) return false;
+            recoverablePins = recoverablePins.Select(pin => pin.Id == id ? pin with { Hidden = !visible } : pin).ToArray();
+            return true;
+        }
+    }
+
+    internal bool RemoveRecoverablePin(string id)
+    {
+        lock (gate)
+        {
+            if (!recoverablePins.Any(pin => pin.Id == id) ||
+                !preferences.Pins.Any(pin => pin.Identity.Key == id)) return false;
+            var removed = new HashSet<string>(StringComparer.Ordinal) { id };
+            if (!Save(WithoutPins(preferences, removed, preferences.Installations
+                    .Where(pair => !removed.Contains(pair.Key))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)))) return false;
+            recoverablePins = recoverablePins.Where(pin => pin.Id != id).ToArray();
+            return true;
+        }
+    }
+
+    private static Preferences WithoutPins(Preferences source, IReadOnlySet<string> removed,
+        Dictionary<string, PinInstallationEvidence> evidence)
+    {
+        if (removed.Count == 0) return source with { Installations = evidence };
+        var order = source.Order?.Where(id => !removed.Contains(id)).ToList();
+        var stacks = new List<DockStack>();
+        foreach (var stack in source.Stacks ?? [])
+        {
+            var members = stack.ApplicationIds.Where(id => !removed.Contains(id)).ToArray();
+            if (members.Length >= 2) { stacks.Add(stack with { ApplicationIds = members }); continue; }
+            if (order is not null && order.IndexOf(stack.Id) is var slot && slot >= 0)
+            {
+                order.RemoveAt(slot);
+                if (members.Length == 1)
+                {
+                    order.Remove(members[0]);
+                    order.Insert(Math.Min(slot, order.Count), members[0]);
+                }
+            }
+        }
+        return source with
+        {
+            Installations = evidence,
+            Pins = source.Pins.Where(pin => !removed.Contains(pin.Identity.Key)).ToList(),
+            Excluded = source.Excluded.Concat(removed).ToHashSet(StringComparer.Ordinal),
+            ShownMissingPins = source.ShownMissingPins.Where(id => !removed.Contains(id)).ToHashSet(StringComparer.Ordinal),
+            Order = order,
+            Stacks = stacks.Count == 0 ? null : stacks
+        };
     }
 
     private Preferences NormalizeShortcutPins(Preferences source)
@@ -151,9 +270,14 @@ internal sealed class DockPinStore
 
         return new Preferences
         {
+            Installations = source.Installations.GroupBy(pair => Map(pair.Key), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.Ordinal),
             Stacks = source.Stacks?.Select(stack => stack with { ApplicationIds = stack.ApplicationIds.Select(Map).Distinct(StringComparer.Ordinal).ToArray() }).ToArray(),
             Pins = pins,
             Excluded = source.Excluded
+                .Select(Map)
+                .ToHashSet(StringComparer.Ordinal),
+            ShownMissingPins = source.ShownMissingPins
                 .Select(Map)
                 .ToHashSet(StringComparer.Ordinal),
             Order = source.Order?
@@ -204,9 +328,13 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Installations = preferences.Installations.Where(pair => pair.Key != application.Id)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
                 Stacks = preferences.Stacks,
                 Pins = pins,
                 Excluded = excluded,
+                ShownMissingPins = preferences.ShownMissingPins.Where(id => id != application.Id)
+                    .ToHashSet(StringComparer.Ordinal),
                 Order = order
             });
         }
@@ -276,9 +404,13 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Installations = preferences.Installations.Where(pair => pair.Key != id)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
                 Stacks = preferences.Stacks,
                 Pins = pins,
                 Excluded = excluded,
+                ShownMissingPins = preferences.ShownMissingPins.Where(existing => existing != id)
+                    .ToHashSet(StringComparer.Ordinal),
                 Order = order
             });
         }
@@ -315,11 +447,13 @@ internal sealed class DockPinStore
 
             return Save(new Preferences
             {
+                Installations = preferences.Installations,
                 Stacks = preferences.Stacks,
                 Pins = preferences.Pins.ToList(),
                 Excluded = new HashSet<string>(
                     preferences.Excluded,
                     StringComparer.Ordinal),
+                ShownMissingPins = new HashSet<string>(preferences.ShownMissingPins, StringComparer.Ordinal),
                 // Keep identities of temporarily absent apps without pinning them.
                 Order = requested.Concat(preferences.Order ?? [])
                     .Distinct(StringComparer.Ordinal).ToList()

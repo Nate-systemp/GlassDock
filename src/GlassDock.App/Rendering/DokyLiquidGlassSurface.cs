@@ -27,6 +27,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private CropEffect? popupCrop;
     private GaussianBlurEffect? popupBlur;
     private ExposureEffect? popupExposure;
+    public bool PreserveDockBackdrop { get; set; }
     public FrameworkElement Output => popupTarget?.Element ?? (FrameworkElement)Panel;
     public CanvasSwapChainPanel Panel { get; } = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     // SwapChainPanel punches through underlying XAML even at transparent pixels.
@@ -282,7 +283,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     Math.Min(placement.MonitorWidth, placement.X + placement.Width + margin) - x,
                     Math.Min(placement.MonitorHeight, placement.Y + placement.Height + margin) - y);
                 popupCrop.Source = bitmap;
-                popupBlur!.BlurAmount = UtilityMaterial.LiquidBackdropBlur * scale;
+                popupBlur!.BlurAmount = PreserveDockBackdrop ? 0 : UtilityMaterial.LiquidBackdropBlur * scale;
+                popupExposure!.Exposure = PreserveDockBackdrop ? 0 : UtilityMaterial.LiquidBackdropExposure;
                 shader.Source1 = popupExposure;
             }
             var origin = new Vector2(placement.X, placement.Y);

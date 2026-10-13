@@ -58,6 +58,14 @@ public sealed record GlassDockSettings
     public const double MaximumBorderOpacity = 1;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
+    public UtilitiesPlacement UtilitiesPlacement { get; init; }
+    public bool UtilitiesHideFullscreen { get; init; } = true;
+    public bool UtilitiesSnapEdges { get; init; } = true;
+    public bool UtilitiesRememberPosition { get; init; } = true;
+    public bool UtilitiesShortcutEnabled { get; init; } = true;
+    public int UtilitiesShortcutKey { get; init; } = 0x55;
+    public double? UtilitiesX { get; init; }
+    public double? UtilitiesY { get; init; }
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
     public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
     public bool SuppressWindowsTaskbar { get; init; } = true;
@@ -145,6 +153,10 @@ public sealed record GlassDockSettings
             DockAppearanceMode = Enum.IsDefined(settings.DockAppearanceMode)
                 ? settings.DockAppearanceMode
                 : DefaultDockAppearanceMode,
+            UtilitiesPlacement = Enum.IsDefined(settings.UtilitiesPlacement) ? settings.UtilitiesPlacement : UtilitiesPlacement.InsideDock,
+            UtilitiesShortcutKey = settings.UtilitiesShortcutKey is 0x20 or 0x55 ? settings.UtilitiesShortcutKey : 0x55,
+            UtilitiesX = settings.UtilitiesX is double x && double.IsFinite(x) ? x : null,
+            UtilitiesY = settings.UtilitiesY is double y && double.IsFinite(y) ? y : null,
             DockDisplayMode = Enum.IsDefined(settings.DockDisplayMode)
                 ? settings.DockDisplayMode
                 : DefaultDockDisplayMode

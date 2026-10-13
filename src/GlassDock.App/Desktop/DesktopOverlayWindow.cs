@@ -27,6 +27,8 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class DesktopOverlayWindow : Window
 {
+    private readonly DockRelocationGuard relocationGuard = new();
+    private DateTime lastRelocationFailure;
     private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
     private readonly GlassSurface surface = new()
     {
@@ -198,6 +200,8 @@ public sealed partial class DesktopOverlayWindow : Window
     private readonly TextBlock utilityClock = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer utilityTimer;
     private SystemQuickSettingsWindow? quickSettings;
+    private FloatingUtilitiesWindow? floatingUtilities;
+    private UtilitiesPlacement utilitiesPlacement;
     private SystemTrayWindow? trayWindow;
     private CalendarPopoverWindow? calendarWindow;
     private FrameworkElement? quickSettingsSource;
@@ -209,7 +213,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private bool trayWindowOpen;
     private bool calendarWindowOpen;
     private bool SystemPopupOpen => utilityTransitionPending || quickSettingsOpen || trayWindowOpen || calendarWindowOpen || stackWindow?.IsOpen == true;
-    private const double UtilityClusterWidth = 248;
+    private double UtilityClusterWidth => settingsSession.Current.UtilitiesPlacement == UtilitiesPlacement.InsideDock ? 248 : 0;
 
     private const double DockWaveHalfWidth = 92;
     private const double DockWaveRise = 12;
@@ -242,6 +246,8 @@ public sealed partial class DesktopOverlayWindow : Window
         // Freeze the separate app menu first. The main dock is exposed only
         // after popup capture can no longer sample the newly-visible dock.
         previews.BeginSnippingCapture();
+        floatingUtilities?.BeginScreenshot();
+        cachedSystemQuickSettingsWindow?.BeginScreenshot();
         return liquidGlass.BeginScreenshotMode();
     }
     internal void EndSnippingCapture()
@@ -249,6 +255,8 @@ public sealed partial class DesktopOverlayWindow : Window
         // Re-exclude the main dock before the app menu resumes GPU sampling.
         liquidGlass.EndScreenshotMode();
         previews.EndSnippingCapture();
+        floatingUtilities?.EndScreenshot();
+        cachedSystemQuickSettingsWindow?.EndScreenshot();
         snippingPending = false;
     }
     internal bool OwnsGlobalServices => ownsGlobalServices;
@@ -434,6 +442,7 @@ public sealed partial class DesktopOverlayWindow : Window
         animation = new DockAnimationController(surface, icons, indicator);
 
         BuildUtilityCluster();
+        DispatcherQueue.TryEnqueue(ApplyUtilitiesPlacement);
         utilityTimer = DispatcherQueue.CreateTimer();
         utilityTimer.Interval = TimeSpan.FromSeconds(1);
         utilityTimer.Tick += (_, _) => RefreshUtilityStatus();
@@ -469,13 +478,21 @@ public sealed partial class DesktopOverlayWindow : Window
         var fullscreenWasHidden = false;
         displayTimer.Tick += (_, _) =>
         {
+            if (closing) { relocationGuard.Stop(); return; }
+            if (snippingPending) return;
+            var relocationStage = "floating utilities";
+            relocationGuard.Run(() =>
+            {
+            floatingUtilities?.Reconcile();
+            relocationStage = "fullscreen policy";
             if (!closing && !snippingPending) windowManager.RefreshFullscreenPolicy();
             if (windowManager.FullscreenSuppressed)
             {
                 if (!fullscreenWasHidden)
                 {
                     previews.DismissForFullscreen();
-                    CloseQuickSettings(); CloseSystemTray(); CloseCalendar();
+                    if (utilitiesPlacement == UtilitiesPlacement.InsideDock || floatingUtilities?.FullscreenSuppressed == true)
+                    { CloseQuickSettings(); CloseSystemTray(); CloseCalendar(); }
                     stackWindow?.Hide();
                     liquidGlass.DeactivateCapture();
                 }
@@ -489,18 +506,43 @@ public sealed partial class DesktopOverlayWindow : Window
             if (closing || previews.HoldsDock)
                 return;
 
-            if (!windowManager.RepositionIfMonitorChanged(0, settingsSession.DisplayMode))
+            relocationStage = "native monitor placement";
+            if (!windowManager.RepositionIfMonitorChanged(0, settingsSession.DisplayMode, () =>
+                {
+                    relocationStage = "dismiss dock-anchored popups";
+                    // A dock-anchored popup cannot retain an anchor on the old
+                    // monitor. Detached Utilities keep their independent anchor.
+                    if (utilitiesPlacement == UtilitiesPlacement.InsideDock)
+                    { CloseQuickSettings(); CloseSystemTray(); CloseCalendar(); utilityRequests.Reset(); }
+                    stackWindow?.Hide();
+                    relocationStage = "native monitor placement";
+                }))
                 return;
 
+            relocationStage = "backdrop and capture bounds";
             UpdateBackdropBounds();
 
+            relocationStage = "input geometry";
             if (state.State is DockState.Idle or DockState.Hovering)
                 UpdatePeekInput();
             else
                 UpdateDockWaveOutline();
 
             pointerInsideDock = windowManager.IsPointerInsideInput();
+            relocationStage = "preview placement";
             previews.Reposition();
+            }, error => error is COMException or System.ComponentModel.Win32Exception or InvalidOperationException,
+            error =>
+            {
+                windowManager.InvalidateMonitorMetrics();
+                // Keep retries on the existing timer; limit repeated logging,
+                // without hiding the exception type, HRESULT or stack trace.
+                if (DateTime.UtcNow - lastRelocationFailure >= TimeSpan.FromSeconds(5))
+                {
+                    lastRelocationFailure = DateTime.UtcNow;
+                    StartupDiagnostics.Write($"Dock monitor reconciliation failed; stage={relocationStage}; mode={settingsSession.DisplayMode}; monitor={windowManager.CurrentMonitor}; utilities={utilitiesPlacement}; retry pending", error);
+                }
+            });
         };
 
 
@@ -822,7 +864,10 @@ public sealed partial class DesktopOverlayWindow : Window
             AutomationProperties.SetName(button, item.Name);
             AutomationProperties.SetHelpText(button, badge.AccessibilityText);
             AutomationProperties.SetItemStatus(button, item.IsActive ? "Active" : item.IsRunning ? "Running" : "Pinned");
-            ToolTipService.SetToolTip(button, WindowPreviewCoordinator.CreateTooltip(item.Name));
+            var pinUnavailable = item.Application.PinAvailability == PinTargetAvailability.Unavailable && !item.IsRunning;
+            ToolTipService.SetToolTip(button, WindowPreviewCoordinator.CreateTooltip(pinUnavailable
+                ? $"{item.Name} — target unavailable. Restore the target or right-click to unpin."
+                : item.Name));
             running.Visibility = item.IsRunning ? Visibility.Visible : Visibility.Collapsed;
             running.Opacity = item.IsActive ? 1 : 0.55;
             running.Width = item.IsActive ? 10 : 4;
@@ -1139,6 +1184,7 @@ public sealed partial class DesktopOverlayWindow : Window
             return;
 
         var snapshot = systemControls.GetSnapshot();
+        floatingUtilities?.RefreshStatus(snapshot);
         utilityClock.Text = DateTime.Now.ToString("t");
         ToolTipService.SetToolTip(utilityCluster.Children[2], snapshot.NetworkAvailable ? snapshot.NetworkName : "Offline");
         ToolTipService.SetToolTip(utilityCluster.Children[3], snapshot.Muted ? "Muted" : $"Volume {snapshot.VolumePercent}%");
@@ -1185,20 +1231,35 @@ public sealed partial class DesktopOverlayWindow : Window
 
         if (quickSettings is not null)
         {
+            if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+                PositionDetachedUtilities();
+            else
+            {
             var anchor = UtilityAnchor(quickSettingsSource);
             quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+            }
         }
 
         if (trayWindow is not null)
         {
+            if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+                trayWindow.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
+            else
+            {
             var anchor = UtilityAnchor(trayWindowSource);
             trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+            }
         }
 
         if (calendarWindow is not null)
         {
+            if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+                calendarWindow.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
+            else
+            {
             var anchor = UtilityAnchor(calendarWindowSource);
             calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y, top);
+            }
         }
     }
 
@@ -1233,7 +1294,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var created = cachedSystemQuickSettingsWindow is null;
         try
         {
-            quickSettings = cachedSystemQuickSettingsWindow ??= new SystemQuickSettingsWindow(systemControls, Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
+            quickSettings = cachedSystemQuickSettingsWindow ??= new SystemQuickSettingsWindow(systemControls, Appearance, UtilityPopupMode(settingsSession.Current.DockAppearanceMode), UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -1253,10 +1314,22 @@ public sealed partial class DesktopOverlayWindow : Window
         };
 
         if (created) quickSettings.Dismissed += (_, _) => utilityRequests.ClosingExternally();
+        if (created)
+        {
+            quickSettings.UtilitiesSettingsRequested += () => { ShowSettings(); settingsWindow.Current?.NavigateUtilities(); };
+            quickSettings.TrayRequested += () => { utilitySource = (FrameworkElement)utilityCluster.Children[1]; RequestUtility(); };
+            quickSettings.CalendarRequested += () => { utilitySource = (FrameworkElement)utilityCluster.Children[5]; RequestUtility(); };
+        }
         quickSettingsOpen = true;
+        quickSettings.SetDetachedLayout(utilitiesPlacement != UtilitiesPlacement.InsideDock);
+        if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+            PositionDetachedUtilities();
+        else
+        {
         var anchor = UtilityAnchor(quickSettingsSource);
         quickSettings.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             ExpandedContentTop);
+        }
         quickSettings.AppWindow.Show();
         quickSettings.Activate();
         quickSettings.Present();
@@ -1292,7 +1365,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var created = cachedSystemTrayWindow is null;
         try
         {
-            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, applicationService, Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
+            trayWindow = cachedSystemTrayWindow ??= new SystemTrayWindow(systemControls, applicationService, Appearance, UtilityPopupMode(settingsSession.Current.DockAppearanceMode), UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -1313,9 +1386,14 @@ public sealed partial class DesktopOverlayWindow : Window
 
         if (created) trayWindow.Dismissed += (_, _) => utilityRequests.ClosingExternally();
         trayWindowOpen = true;
+        if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+            trayWindow.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
+        else
+        {
         var anchor = UtilityAnchor(trayWindowSource);
         trayWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             ExpandedContentTop);
+        }
         trayWindow.AppWindow.Show();
         trayWindow.Activate();
         trayWindow.Present();
@@ -1351,7 +1429,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var created = cachedCalendarPopoverWindow is null;
         try
         {
-            calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(Appearance, settingsSession.Current.DockAppearanceMode, UtilityOwnsPointer);
+            calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(Appearance, UtilityPopupMode(settingsSession.Current.DockAppearanceMode), UtilityOwnsPointer);
         }
         catch (Exception error)
         {
@@ -1372,9 +1450,14 @@ public sealed partial class DesktopOverlayWindow : Window
 
         if (created) calendarWindow.Dismissed += (_, _) => utilityRequests.ClosingExternally();
         calendarWindowOpen = true;
+        if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
+            calendarWindow.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
+        else
+        {
         var anchor = UtilityAnchor(calendarWindowSource);
         calendarWindow.PositionNear(AppWindow, windowManager.Scale, anchor.X, anchor.Y,
             ExpandedContentTop);
+        }
         calendarWindow.AppWindow.Show();
         calendarWindow.Activate();
         calendarWindow.Present();
@@ -1407,6 +1490,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private readonly GlassDock.Core.Desktop.UtilityPopupRequests utilityRequests = new();
     private bool UtilityOwnsPointer()
     {
+        if (utilitiesPlacement != UtilitiesPlacement.InsideDock) return floatingUtilities?.ContainsPointer() == true;
         if (!windowManager.TryGetPointerPosition(out var x, out var y)) return false;
         foreach (var child in utilityCluster.Children)
         {
@@ -1416,6 +1500,77 @@ public sealed partial class DesktopOverlayWindow : Window
             if (bounds.Contains(new global::Windows.Foundation.Point(x, y))) return true;
         }
         return false;
+    }
+
+    // Panels opened from the floating pill are always Frosted glass. Panels opened from the
+    // utility cluster inside the dock keep following the dock's own appearance.
+    private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode) =>
+        utilitiesPlacement == UtilitiesPlacement.InsideDock ? dockMode : DockAppearanceMode.Frosted;
+
+    private void RefreshUtilityPopupAppearance()
+    {
+        var mode = UtilityPopupMode(settingsSession.Current.DockAppearanceMode);
+        cachedSystemQuickSettingsWindow?.ApplyAppearance(Appearance, mode);
+        cachedSystemTrayWindow?.ApplyAppearance(Appearance, mode);
+        cachedCalendarPopoverWindow?.ApplyAppearance(Appearance, mode);
+    }
+
+    private void ApplyUtilitiesPlacement()
+    {
+        if (closing) return;
+        var current = settingsSession.Current;
+        if (utilitiesPlacement != current.UtilitiesPlacement)
+        {
+            utilityRequests.Reset();
+            CloseQuickSettings(); CloseCalendar(); CloseSystemTray();
+            utilitiesPlacement = current.UtilitiesPlacement;
+            RefreshUtilityPopupAppearance();
+        }
+        if (utilitiesPlacement == UtilitiesPlacement.InsideDock)
+        {
+            if (!icons.Children.Contains(utilityCluster)) icons.Children.Add(utilityCluster);
+        }
+        else icons.Children.Remove(utilityCluster);
+        if (ownsGlobalServices)
+        {
+            if (floatingUtilities is null)
+            {
+                floatingUtilities = new();
+                floatingUtilities.ToggleRequested += () =>
+                {
+                    utilitySource = (FrameworkElement)utilityCluster.Children[2];
+                    RequestUtility();
+                };
+                floatingUtilities.SettingsRequested += () => { ShowSettings(); settingsWindow.Current?.NavigateUtilities(); };
+                floatingUtilities.TrayRequested += () => { utilitySource = (FrameworkElement)utilityCluster.Children[1]; RequestUtility(); };
+                floatingUtilities.CalendarRequested += () => { utilitySource = (FrameworkElement)utilityCluster.Children[5]; RequestUtility(); };
+                floatingUtilities.ReturnRequested += () => _ = SaveUtilitiesAsync(settingsSession.Current with { UtilitiesPlacement = UtilitiesPlacement.InsideDock });
+                floatingUtilities.PositionSaved += (x, y) => _ = SaveUtilitiesAsync(settingsSession.Current with { UtilitiesX = x, UtilitiesY = y });
+                floatingUtilities.Moved += RepositionSystemPopups;
+                floatingUtilities.Suppressed += () => { utilityRequests.Reset(); CloseQuickSettings(); CloseCalendar(); CloseSystemTray(); };
+            }
+            floatingUtilities.Apply(current, Appearance);
+            if (!floatingUtilities.ShortcutAvailable) SetStatus("Utilities shortcut is already in use. Choose another shortcut in Settings → Utilities.");
+        }
+        SynchronizeItems();
+    }
+
+    private async Task SaveUtilitiesAsync(GlassDockSettings value)
+    {
+        try
+        {
+            await settingsStore.SaveAsync(value, shutdown.CancellationToken);
+            if (!closing) settingsSession.Replace(value);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { if (!closing) SetStatus($"Utilities preference could not be saved: {error.Message}"); }
+    }
+
+    private void PositionDetachedUtilities()
+    {
+        if (utilitiesPlacement == UtilitiesPlacement.InsideDock || floatingUtilities is null || quickSettings is null) return;
+        quickSettings.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
     }
 
     private void ToggleQuickSettings() => RequestUtility();
@@ -3141,6 +3296,7 @@ public sealed partial class DesktopOverlayWindow : Window
         double indicatorBottom,
         double surfaceHeight)
     {
+        animation.SetPlacementHeight(Math.Max(ExpandedDockHeight, surfaceHeight));
         surface.Height = Math.Max(ExpandedDockHeight, surfaceHeight);
         surface.Margin = new Thickness(0, 0, 0, surfaceBottom);
         icons.Margin = new Thickness(0, 0, 0, contentBottom);
@@ -3274,6 +3430,7 @@ public sealed partial class DesktopOverlayWindow : Window
         ApplyHoverWaveSetting(eventArgs.Settings.HoverWaveEnabled);
         ApplyAppearance(settingsSession.Appearance,
             eventArgs.Settings.DockAppearanceMode);
+        ApplyUtilitiesPlacement();
 
         if (eventArgs.Settings.HoverToExpandOnly &&
             state.State is DockState.Idle or DockState.Hovering &&
@@ -3300,9 +3457,10 @@ public sealed partial class DesktopOverlayWindow : Window
         DockAppearanceMode dockAppearance)
     {
         stackWindow?.ApplyAppearance(appearance, dockAppearance);
-        cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance);
-        cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance);
-        cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);
+        var utilityMode = UtilityPopupMode(dockAppearance);
+        cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, utilityMode);
+        cachedSystemTrayWindow?.ApplyAppearance(appearance, utilityMode);
+        cachedCalendarPopoverWindow?.ApplyAppearance(appearance, utilityMode);
         icons.Spacing = appearance.IconSpacing;
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         if (pinnedPlacementActive)
@@ -3443,7 +3601,8 @@ public sealed partial class DesktopOverlayWindow : Window
                 () => RestartGlassDock(inSafeMode: true),
                 RequestShutdown,
                 badges,
-                VisibleDockApplications.Take(6).Select(item => item.Application).ToArray());
+                VisibleDockApplications.Take(6).Select(item => item.Application).ToArray(),
+                applicationService);
             created.Closed += (_, _) => settingsWindow.Release(created);
             return created;
         });
@@ -3734,6 +3893,8 @@ public sealed partial class DesktopOverlayWindow : Window
         CloseCalendar();
 
         cachedSystemQuickSettingsWindow?.CloseImmediately();
+        floatingUtilities?.Close();
+        floatingUtilities = null;
         cachedSystemTrayWindow?.CloseImmediately();
         cachedCalendarPopoverWindow?.CloseImmediately();
         cachedSystemQuickSettingsWindow = null; cachedSystemTrayWindow = null; cachedCalendarPopoverWindow = null;
@@ -3780,5 +3941,3 @@ public sealed partial class DesktopOverlayWindow : Window
             shutdownCompleted();
     }
 }
-
-

@@ -15,6 +15,12 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
     private bool disposed;
     private bool wasActive;
     private GlassDock.Core.Materials.LiquidGlassMaterial? appliedOptics;
+    private bool useDockOptics;
+    public bool UseDockOptics
+    {
+        get => useDockOptics;
+        set { useDockOptics = value; liquid.PreserveDockBackdrop = value; appliedOptics = null; Update(); }
+    }
     public FrameworkElement Element => liquid.Output;
 
     public PopupLiquidGlassSurface(Window window, Panel root, DesktopGlassBackdrop backdrop)
@@ -50,7 +56,7 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
         if (!ReferenceEquals(appliedOptics, backdrop.PopupOptics))
         {
             appliedOptics = backdrop.PopupOptics;
-            liquid.Material = GlassDock.Core.Materials.UtilityMaterial.PopupOptics(appliedOptics);
+            liquid.Material = useDockOptics ? appliedOptics : GlassDock.Core.Materials.UtilityMaterial.PopupOptics(appliedOptics);
         }
         var active = root.IsLoaded && window.AppWindow.IsVisible &&
             backdrop.PopupMode == DockAppearanceMode.Clear && bounds.Z > 0 && bounds.W > 0;

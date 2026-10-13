@@ -19,6 +19,7 @@ public sealed partial class SettingsWindow : Window
     private readonly ApplicationShutdownState shutdown;
     private readonly WindowsStartupService startupService = new();
     private readonly BadgeCoordinator badges;
+    private readonly WindowsApplicationService applicationService;
     private readonly IReadOnlyList<DockApplication> previewApplications;
     private readonly bool safeMode;
     private readonly Action restoreTaskbar;
@@ -49,7 +50,8 @@ public sealed partial class SettingsWindow : Window
         Action restartSafeMode,
         Action exitGlassDock,
         BadgeCoordinator badges,
-        IReadOnlyList<DockApplication> previewApplications)
+        IReadOnlyList<DockApplication> previewApplications,
+        WindowsApplicationService applicationService)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -61,6 +63,7 @@ public sealed partial class SettingsWindow : Window
         this.restartSafeMode = restartSafeMode;
         this.exitGlassDock = exitGlassDock;
         this.badges = badges;
+        this.applicationService = applicationService;
         this.previewApplications = previewApplications;
         updateLifetime = CancellationTokenSource.CreateLinkedTokenSource(shutdown.CancellationToken);
 
@@ -143,6 +146,12 @@ public sealed partial class SettingsWindow : Window
         UpdateDockAppearanceDescription(settings.DockAppearanceMode);
 
         DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
+        UtilitiesPlacementBox.SelectedIndex = (int)settings.UtilitiesPlacement;
+        UtilitiesFullscreenToggle.IsOn = settings.UtilitiesHideFullscreen;
+        UtilitiesSnapToggle.IsOn = settings.UtilitiesSnapEdges;
+        UtilitiesRememberToggle.IsOn = settings.UtilitiesRememberPosition;
+        UtilitiesShortcutToggle.IsOn = settings.UtilitiesShortcutEnabled;
+        UtilitiesShortcutBox.SelectedIndex = settings.UtilitiesShortcutKey == 0x55 ? 1 : 0;
         BottomMarginBox.Value = settings.BottomMargin;
         AutoHideDelayBox.Value = settings.AutoHideDelayMilliseconds / 1000d;
         PeekDelayBox.Value = settings.PeekDelayMilliseconds / 1000d;
@@ -489,8 +498,62 @@ public sealed partial class SettingsWindow : Window
             SetNavigationState(navigation[definition.Id], definition.Id == page);
         }
         PageScroll.ChangeView(null, 0, null, true);
+        if (page == "Apps") RefreshMissingPins();
         if (page == "System")
             HelperStatusText.Text = "The helper is managed by the active dock session. Settings does not have a live helper connection status; use recovery actions below if elevated apps do not respond.";
+    }
+
+    private void RefreshMissingPinsClick(object sender, RoutedEventArgs e)
+    {
+        applicationService.RequestRefresh();
+        RefreshMissingPins();
+    }
+
+    private void RefreshMissingPins()
+    {
+        if (closed) return;
+        MissingPinsList.Children.Clear();
+        var missing = applicationService.GetRecoverablePins();
+        MissingPinsStatusText.Text = missing.Count == 0
+            ? "No unavailable custom shortcuts. If a target is restored, Doky shows it again automatically."
+            : $"{missing.Count} unavailable shortcut(s) saved for recovery.";
+        foreach (var pin in missing)
+        {
+            var row = new StackPanel { Spacing = 6 };
+            row.Children.Add(new TextBlock
+            {
+                Text = pin.Name,
+                FontWeight = new global::Windows.UI.Text.FontWeight { Weight = 600 },
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            row.Children.Add(new TextBlock
+            {
+                Text = pin.Target,
+                FontSize = 11,
+                Foreground = (Brush)SettingsRoot.Resources["SecondaryBrush"],
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var toggle = new Button { Content = pin.Hidden ? "Show in dock" : "Hide from dock" };
+            toggle.Click += (_, _) =>
+            {
+                if (applicationService.SetMissingPinVisible(pin.Id, pin.Hidden)) RefreshMissingPins();
+            };
+            var forget = new Button { Content = "Remove saved pin" };
+            forget.Click += (_, _) =>
+            {
+                if (applicationService.RemoveRecoverablePin(pin.Id)) RefreshMissingPins();
+            };
+            actions.Children.Add(toggle);
+            actions.Children.Add(forget);
+            row.Children.Add(actions);
+            row.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Height = 1,
+                Fill = (Brush)SettingsRoot.Resources["DividerBrush"]
+            });
+            MissingPinsList.Children.Add(row);
+        }
     }
 
     private void SetNavigationState(Button button, bool selected)
@@ -557,6 +620,12 @@ public sealed partial class SettingsWindow : Window
                 HoverToExpandOnlyToggle.IsOn) with
             {
                 DockAppearanceMode = SelectedDockAppearance,
+                UtilitiesPlacement = (UtilitiesPlacement)Math.Max(0, UtilitiesPlacementBox.SelectedIndex),
+                UtilitiesHideFullscreen = UtilitiesFullscreenToggle.IsOn,
+                UtilitiesSnapEdges = UtilitiesSnapToggle.IsOn,
+                UtilitiesRememberPosition = UtilitiesRememberToggle.IsOn,
+                UtilitiesShortcutEnabled = UtilitiesShortcutToggle.IsOn,
+                UtilitiesShortcutKey = UtilitiesShortcutBox.SelectedIndex == 1 ? 0x55 : 0x20,
                 LaunchAtStartup = desiredStartup,
                 NotificationBadgesEnabled = NotificationBadgesToggle.IsOn,
                 ClearRefractionStrength = ClearRefractionStrengthBox.Value,

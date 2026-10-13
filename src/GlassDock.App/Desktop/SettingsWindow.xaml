@@ -245,6 +245,15 @@
             <TextBlock Text="Apps &amp; Stacks" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Drag an application onto the dock to pin it. Hold a pinned app over another to create a stack. Right-click a stack to unstack all apps. Open a stack to launch or move its members. Pinning, ordering and stack changes are saved automatically." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
+          <Border Padding="14" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="12">
+            <StackPanel Spacing="10">
+              <TextBlock Text="Unavailable pinned shortcuts" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="Missing local shortcuts are hidden from the dock, not deleted. They reappear if their targets return. Show one manually or remove its saved pin here." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+              <TextBlock x:Name="MissingPinsStatusText" Text="Checking saved pins…" FontSize="12" Foreground="{StaticResource SecondaryBrush}" AutomationProperties.LiveSetting="Polite" />
+              <StackPanel x:Name="MissingPinsList" Spacing="10" />
+              <Button Content="Refresh missing pins" Click="RefreshMissingPinsClick" HorizontalAlignment="Left" Padding="12,6" />
+            </StackPanel>
+          </Border>
           <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="18">
               <Grid ColumnSpacing="24">
@@ -427,6 +436,24 @@
           <Button Content="Reset editable preferences…" Click="ResetClick" HorizontalAlignment="Left" />
           <TextBlock Text="Settings file" FontWeight="SemiBold" TextWrapping="Wrap" />
           <TextBlock x:Name="SettingsPathText" TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+        </StackPanel>
+        <StackPanel x:Name="UtilitiesPage" Spacing="20" Visibility="Collapsed">
+          <TextBlock Text="Utilities" FontSize="32" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" />
+          <ComboBox x:Name="UtilitiesPlacementBox" Header="Utilities placement" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Inside Dock" />
+            <ComboBoxItem Content="Separate Floating Button" />
+            <ComboBoxItem Content="Keyboard Shortcut Only" />
+          </ComboBox>
+          <ToggleSwitch x:Name="UtilitiesFullscreenToggle" Header="Hide during fullscreen" />
+          <ToggleSwitch x:Name="UtilitiesSnapToggle" Header="Snap to screen edges" />
+          <ToggleSwitch x:Name="UtilitiesRememberToggle" Header="Remember position" />
+          <ToggleSwitch x:Name="UtilitiesShortcutToggle" Header="Enable Utilities shortcut" />
+          <ComboBox x:Name="UtilitiesShortcutBox" Header="Keyboard shortcut">
+            <ComboBoxItem Content="Ctrl + Alt + Space" />
+            <ComboBoxItem Content="Ctrl + Alt + U" />
+          </ComboBox>
+          <TextBlock Text="If the shortcut is already in use, Doky reports the conflict and leaves that shortcut with its current owner." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+          <Button Content="Reset floating position" Click="ResetUtilitiesPositionClick" />
         </StackPanel>
         <StackPanel x:Name="AboutPage" Spacing="24" Visibility="Collapsed">
           <StackPanel Spacing="5">

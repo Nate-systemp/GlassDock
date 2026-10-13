@@ -60,11 +60,14 @@ public sealed class DockAppMenuWiringTests
         var window = File.ReadAllText(Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop", "DockAppContextMenuWindow.cs"));
 
         // Geometry and hover are shared across all five appearance modes.
-        Assert.Contains("MenuCornerRadius = 9;", window, StringComparison.Ordinal);
-        Assert.Contains("MenuWidth = 258;", window, StringComparison.Ordinal);
-        Assert.Contains("MenuRowHeight = 36;", window, StringComparison.Ordinal);
-        Assert.Contains("MenuRowRadius = 5;", window, StringComparison.Ordinal);
-        Assert.Contains("Height = MenuRowHeight - 4", window, StringComparison.Ordinal);
+        // The approved compact menu scales its original geometry by 85%,
+        // keeping corner, row and hover proportions consistent across modes.
+        Assert.Contains("MenuSizeScale = 0.85;", window, StringComparison.Ordinal);
+        Assert.Contains("MenuCornerRadius = 9 * MenuSizeScale;", window, StringComparison.Ordinal);
+        Assert.Contains("MenuWidth = 258 * MenuSizeScale;", window, StringComparison.Ordinal);
+        Assert.Contains("MenuRowHeight = 36 * MenuSizeScale;", window, StringComparison.Ordinal);
+        Assert.Contains("MenuRowRadius = 5 * MenuSizeScale;", window, StringComparison.Ordinal);
+        Assert.Contains("Height = MenuRowHeight - MenuSize(4)", window, StringComparison.Ordinal);
         Assert.Contains("VerticalContentAlignment = VerticalAlignment.Center", window, StringComparison.Ordinal);
         Assert.Contains("Segoe UI Variable Text", window, StringComparison.Ordinal);
         Assert.Contains("menuAccent.Color = global::Windows.UI.Color.FromArgb(255, 24, 126, 247);", window, StringComparison.Ordinal);

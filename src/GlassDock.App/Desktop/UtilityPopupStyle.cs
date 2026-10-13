@@ -12,6 +12,18 @@ internal static class UtilityPopupStyle
     public const double Gutter = 16;
     public const double Padding = 20;
 
+    public static void ApplyDockMatched(GlassSurface glass, DesktopGlassBackdrop backdrop,
+        DockAppearanceSettings appearance, DockAppearanceMode mode, double radius = 22)
+    {
+        var solid = mode.GlassStyle() is null;
+        var changed = backdrop.UseSolidSurface != solid;
+        backdrop.UseSolidSurface = solid;
+        Apply(glass, backdrop, appearance, mode, radius);
+        // Match the dock's XAML layer: no second filled shadow/scrim over glass.
+        glass.ApplyPlain(mode, 1, radius);
+        if (changed) backdrop.RebuildConnectedSurface();
+    }
+
     public static void Apply(GlassSurface glass, DesktopGlassBackdrop backdrop,
         DockAppearanceSettings appearance, DockAppearanceMode mode = DockAppearanceMode.Dark,
         double cornerRadius = 28)
@@ -51,7 +63,7 @@ internal static class UtilityPopupStyle
     }
 
     public static void Position(AppWindow popup, AppWindow owner, double scale,
-        double anchorX, double dockTop, double panelWidth, double panelHeight)
+        double anchorX, double dockTop, double panelWidth, double panelHeight, bool belowRight = false)
     {
         scale = double.IsFinite(scale) && scale > 0 ? scale : 1;
         var area = DisplayArea.GetFromWindowId(owner.Id, DisplayAreaFallback.Nearest).WorkArea;
@@ -59,6 +71,15 @@ internal static class UtilityPopupStyle
         var height = Math.Min(area.Height, (int)Math.Round((panelHeight + Gutter * 2) * scale));
         var x = owner.Position.X + (int)Math.Round(anchorX * scale) - width / 2;
         var y = owner.Position.Y + (int)Math.Round(dockTop * scale) - height + (int)Math.Round(6 * scale);
+        // A launcher near the top edge needs the panel below it, rather than
+        // clamped over the launcher. Dock anchors retain their above placement.
+        if (y < area.Y)
+            y = owner.Position.Y + owner.Size.Height - (int)Math.Round(10 * scale);
+        if (belowRight)
+        {
+            x = owner.Position.X + owner.Size.Width - width + (int)Math.Round(8 * scale);
+            y = owner.Position.Y + owner.Size.Height - (int)Math.Round(12 * scale);
+        }
         var bounds = new RectInt32(Math.Clamp(x, area.X, area.X + area.Width - width),
             Math.Clamp(y, area.Y, area.Y + area.Height - height), width, height);
         if (popup.Position.X != bounds.X || popup.Position.Y != bounds.Y ||

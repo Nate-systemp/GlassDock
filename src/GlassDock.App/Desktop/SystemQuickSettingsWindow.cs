@@ -16,7 +16,7 @@ using static GlassDock.App.Desktop.SystemControlStyle;
 
 namespace GlassDock.App.Desktop;
 
-internal sealed class SystemQuickSettingsWindow : Window
+internal sealed partial class SystemQuickSettingsWindow : Window
 {
     private const double PanelWidth = 474, PanelHeight = 336, Gutter = 16;
     private readonly WindowsSystemControlService controls;
@@ -54,6 +54,19 @@ internal sealed class SystemQuickSettingsWindow : Window
     private bool syncing;
     private readonly UtilityPopupPresentation presentation;
     private bool closed;
+    private readonly Grid tiles;
+    private readonly Grid footer;
+    private readonly Border airplaneFrame;
+    private readonly Border nightFrame;
+    private readonly TextBlock heading;
+    private readonly Grid headingRow;
+    public event Action? UtilitiesSettingsRequested;
+    public event Action? TrayRequested;
+    public event Action? CalendarRequested;
+    private readonly Dictionary<Border, (StackPanel Stack, StackPanel Caption, Button Button, TextBlock Label, TextBlock Detail)> tileLayouts = new();
+    private bool detached;
+    private DockAppearanceSettings currentAppearance = new();
+    private DockAppearanceMode currentMode;
 
     public SystemQuickSettingsWindow(WindowsSystemControlService controls, DockAppearanceSettings appearance,
         DockAppearanceMode dockMode, Func<bool>? utilityOwnsPointer = null)
@@ -85,7 +98,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var tiles = new Grid { ColumnSpacing = 10 };
+        tiles = new Grid { ColumnSpacing = 10, RowSpacing = 8 };
         for (var i = 0; i < 4; i++) tiles.ColumnDefinitions.Add(new ColumnDefinition());
         networkTile = AddTile(tiles, 0, "\uE701", "Wi-Fi", networkDetail,
             () => _ = ToggleRadioAsync(RadioKind.WiFi), () => _ = ShowWifiAsync(), out networkFrame);
@@ -94,7 +107,30 @@ internal sealed class SystemQuickSettingsWindow : Window
         AddTile(tiles, 2, "\uE708", "Focus", focusDetail, null,
             () => ShowInformation("Focus", "Focus is " + SystemRadioControls.FocusStatus() + ". Direct control requires restricted Windows API access.", controls.OpenFocusSettings), out _);
         AddTile(tiles, 3, "\uE709", "Airplane", Label("Unsupported", 10, 155), null,
-            () => ShowInformation("Airplane mode", "Windows does not expose a supported airplane-mode toggle here.", controls.OpenAirplaneSettings), out _);
+            () => ShowInformation("Airplane mode", "Windows does not expose a supported airplane-mode toggle here.", controls.OpenAirplaneSettings), out airplaneFrame);
+        AddTile(tiles, 3, "\uE706", "Night Light", Label("Settings", 10), null, controls.OpenNightLightSettings, out nightFrame);
+        nightFrame.Visibility = Visibility.Collapsed;
+        heading = Label("Control Center", 16);
+        heading.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        heading.Foreground = theme.Primary;
+        heading.Visibility = Visibility.Collapsed;
+        headingRow = new Grid { Visibility = Visibility.Collapsed };
+        headingRow.Children.Add(heading);
+        var more = Button(Icon("\uE9E9", 13), "More utilities", () => { }, 26, 26);
+        more.HorizontalAlignment = HorizontalAlignment.Right;
+        var utilityMenu = new MenuFlyout();
+        void AddUtilityAction(string label, Action action)
+        {
+            var item = new MenuFlyoutItem { Text = label };
+            item.Click += (_, _) => action();
+            utilityMenu.Items.Add(item);
+        }
+        AddUtilityAction("Hidden Tray", () => TrayRequested?.Invoke());
+        AddUtilityAction("Calendar", () => CalendarRequested?.Invoke());
+        AddUtilityAction("Utilities Settings", () => UtilitiesSettingsRequested?.Invoke());
+        more.Flyout = utilityMenu;
+        headingRow.Children.Add(more);
+        panel.Children.Add(headingRow);
         panel.Children.Add(tiles);
         StyleSlider(volumeSlider, "System volume");
         volumeSlider.ValueChanged += (_, e) =>
@@ -118,7 +154,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         };
         AddRow(panel, 1, SliderRow("\uE706", brightness, brightnessValue, null));
         AddRow(panel, 3, new Border { Height = 1, Background = theme.Divider });
-        var footer = new Grid { ColumnSpacing = 8 };
+        footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var battery = new StackPanel
@@ -189,7 +225,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         };
         refreshTimer = DispatcherQueue.CreateTimer();
         refreshTimer.Interval = TimeSpan.FromSeconds(1);
-        refreshTimer.Tick += (_, _) => { Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); };
+        refreshTimer.Tick += (_, _) => { Refresh(); if (detached) _ = RefreshMediaAsync(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); };
         presentation.Hidden += (_, _) => { refreshTimer.Stop(); detailRevision++; detailLifetime?.Cancel(); };
         root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Dismiss(); } };
         Closed += (_, _) => { closed = true; lifetime.Cancel(); detailLifetime?.Cancel(); refreshTimer.Stop(); detailLifetime?.Dispose(); lifetime.Dispose(); host.Dispose(); };
@@ -199,9 +235,11 @@ internal sealed class SystemQuickSettingsWindow : Window
 
     public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
     {
+        currentAppearance = appearance; currentMode = mode;
         theme.Apply(mode);
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
+        if (detached) UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, mode);
         UpdateTileContrast(networkTile, lastWifiOn);
         UpdateTileContrast(bluetoothTile, lastBluetoothOn);
         // Resource brushes track the live palette; changing the appearance also
@@ -217,6 +255,8 @@ internal sealed class SystemQuickSettingsWindow : Window
     public event EventHandler? Hidden { add => presentation.Hidden += value; remove => presentation.Hidden -= value; }
     public void HideImmediately() => presentation.HideImmediately();
     public void RetargetClosed() => presentation.RetargetClosed();
+    public void BeginScreenshot() => liquid.BeginScreenshotMode();
+    public void EndScreenshot() => liquid.EndScreenshotMode();
     public void Present() { presentation.Present(); refreshTimer.Start(); Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
@@ -228,12 +268,76 @@ internal sealed class SystemQuickSettingsWindow : Window
         double anchorY,
         double dockTop)
     {
-        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, PanelWidth, PanelHeight);
+        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, detached ? 270 : PanelWidth, detached ? 280 : PanelHeight, detached);
         presentation.SetTargetWindowGeometry(
             owner.Position.X + anchorX * scale,
             owner.Position.Y + anchorY * scale,
             scale);
         host.InputHeightPixels = presentation.InputHeightPixels;
+    }
+
+    public void SetDetachedLayout(bool value)
+    {
+        if (detached == value) return;
+        if (!value) RestoreDockModules();
+        detached = value;
+        panel.RowDefinitions.Clear();
+        foreach (var height in value ? new[] { 28d, 166, 38, 38, 0 } : new[] { 108d, 50, 50, 1, 38 })
+            panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
+        heading.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        headingRow.Visibility = heading.Visibility;
+        Grid.SetRow(tiles, value ? 1 : 0);
+        // Reuse the same sliders and their handlers. The compact layout follows
+        // the reference's volume-then-brightness order.
+        foreach (var child in panel.Children.OfType<Border>())
+        {
+            if (child.Height == 1) { child.Visibility = value ? Visibility.Collapsed : Visibility.Visible; continue; }
+            var row = Grid.GetRow(child);
+            if (value && row == 1) Grid.SetRow(child, 3);
+            else if (!value && row == 3) Grid.SetRow(child, 1);
+        }
+        footer.Visibility = value ? Visibility.Collapsed : Visibility.Visible;
+        tiles.ColumnDefinitions.Clear();
+        tiles.RowDefinitions.Clear();
+        for (var i = 0; i < (value ? 2 : 4); i++) tiles.ColumnDefinitions.Add(new ColumnDefinition());
+        if (value) { tiles.RowDefinitions.Add(new RowDefinition()); tiles.RowDefinitions.Add(new RowDefinition()); }
+        var index = 0;
+        foreach (var child in tiles.Children.OfType<Border>())
+        {
+            var slot = ReferenceEquals(child, nightFrame) ? 3 : index++;
+            Grid.SetColumn(child, value ? slot % 2 : slot);
+            Grid.SetRow(child, value ? slot / 2 : 0);
+            child.CornerRadius = new(value ? 10 : 17);
+            var visuals = tileLayouts[child];
+            if (value)
+            {
+                visuals.Stack.Children.Remove(visuals.Button);
+                visuals.Caption.Children.Insert(0, visuals.Button);
+            }
+            else
+            {
+                visuals.Caption.Children.Remove(visuals.Button);
+                visuals.Stack.Children.Insert(0, visuals.Button);
+            }
+            visuals.Button.Width = value ? 22 : 43;
+            visuals.Button.Height = value ? 24 : 39;
+            if (visuals.Button.Content is FontIcon icon) icon.FontSize = value ? 14 : 22;
+            visuals.Caption.HorizontalAlignment = value ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+            visuals.Label.FontSize = value ? 11.5 : 12.5;
+            visuals.Label.TextWrapping = value ? TextWrapping.Wrap : TextWrapping.NoWrap;
+            visuals.Label.MaxLines = value ? 2 : 1;
+            visuals.Label.MaxWidth = value ? 48 : double.PositiveInfinity;
+            visuals.Detail.TextAlignment = value ? TextAlignment.Left : TextAlignment.Center;
+            visuals.Stack.Spacing = value ? 10 : 4;
+            child.Padding = value ? new Thickness(7, 8, 4, 8) : new Thickness(3, 6, 3, 6);
+        }
+        airplaneFrame.Visibility = value ? Visibility.Collapsed : Visibility.Visible;
+        nightFrame.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        panel.Margin = new(Gutter + (value ? 14 : 18));
+        panel.RowSpacing = value ? 6 : 10;
+        if (value) BuildDetachedModules();
+        liquid.UseDockOptics = value;
+        ApplyAppearance(currentAppearance, currentMode);
     }
 
 
@@ -245,6 +349,8 @@ internal sealed class SystemQuickSettingsWindow : Window
         {
             var snapshot = controls.GetSnapshot();
             batteryDetail.Text = snapshot.HasBattery ? $"{snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power";
+            if (detachedBattery is not null) detachedBattery.Text = snapshot.HasBattery
+                ? $"{snapshot.BatteryPercent}%   ·   {(snapshot.PluggedIn ? "Plugged in" : "On battery")}" : "AC power";
             volumeValue.Text = snapshot.Muted ? "Muted" : $"{snapshot.VolumePercent}%";
             volumeSlider.Value = snapshot.VolumePercent;
         }
@@ -502,6 +608,7 @@ internal sealed class SystemQuickSettingsWindow : Window
             Child = stack
         };
         tileVisuals[button] = (glyphControl, label, detail, moreGlyph);
+        tileLayouts[frame] = (stack, caption, button, label, detail);
         Grid.SetColumn(frame, column);
         parent.Children.Add(frame);
         return button;
@@ -581,6 +688,7 @@ internal sealed class SystemQuickSettingsWindow : Window
         else grid.Children.Add(icon);
         Grid.SetColumn(slider, 1);
         grid.Children.Add(slider);
+        sliderHomes[slider] = (grid, grid.Children.IndexOf(slider));
         value.Foreground = theme.Primary;
         value.TextAlignment = TextAlignment.Right;
         Grid.SetColumn(value, 2);

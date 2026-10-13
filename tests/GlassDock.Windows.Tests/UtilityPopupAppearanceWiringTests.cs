@@ -50,11 +50,11 @@ public sealed class UtilityPopupAppearanceWiringTests
                 StringComparison.Ordinal);
         }
 
-        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance)", owner,
+        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, utilityMode)", owner,
             StringComparison.Ordinal);
-        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance)", owner,
+        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, utilityMode)", owner,
             StringComparison.Ordinal);
-        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance)", owner,
+        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, utilityMode)", owner,
             StringComparison.Ordinal);
         Assert.Contains("mode.GlassStyle()", style, StringComparison.Ordinal);
 
@@ -63,6 +63,30 @@ public sealed class UtilityPopupAppearanceWiringTests
         Assert.Contains("DockControlPalette.Hover(mode, selected)", owner, StringComparison.Ordinal);
         Assert.Contains("_ => Color.FromArgb(0, 0, 0, 0)", theme, StringComparison.Ordinal);
     }
+    [Fact]
+    public void Floating_pill_is_clear_glass_and_its_panels_are_frosted()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null &&
+               !File.Exists(Path.Combine(directory.FullName, "GlassDock.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+
+        var desktop = Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop");
+        var pill = File.ReadAllText(Path.Combine(desktop, "FloatingUtilitiesWindow.cs"));
+        var owner = File.ReadAllText(Path.Combine(desktop, "DesktopOverlayWindow.cs"));
+
+        // The pill ignores the dock's appearance and always uses the Clear branch.
+        Assert.Contains("const DockAppearanceMode PillMode = DockAppearanceMode.Clear;", pill, StringComparison.Ordinal);
+        Assert.Contains("theme.Apply(PillMode);", pill, StringComparison.Ordinal);
+        Assert.Contains("UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, PillMode,", pill, StringComparison.Ordinal);
+        Assert.DoesNotContain("value.DockAppearanceMode", pill, StringComparison.Ordinal);
+
+        // Detached panels are Frosted; panels inside the dock still follow the dock.
+        Assert.Contains("utilitiesPlacement == UtilitiesPlacement.InsideDock ? dockMode : DockAppearanceMode.Frosted", owner, StringComparison.Ordinal);
+        Assert.Contains("UtilityPopupMode(settingsSession.Current.DockAppearanceMode)", owner, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Solid_popup_palette_matches_the_main_dock_finishes()
     {

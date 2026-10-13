@@ -15,6 +15,7 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class SettingsWindow
 {
+    internal void NavigateUtilities() => ShowSettingsPage("Utilities");
     private readonly DesktopGlassBackdrop settingsBackdrop = new();
     private readonly GlassSurface settingsGlass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
     private readonly GlassSurface previewGlass = new() { IsHitTestVisible = false };
@@ -86,6 +87,10 @@ public sealed partial class SettingsWindow
             ClearRefractionStrengthBox, SpecularHighlightAngleBox })
             box.ValueChanged += (_, _) => SaveEditedControl();
         DockDisplayModeBox.SelectionChanged += (_, _) => SaveEditedControl();
+        UtilitiesPlacementBox.SelectionChanged += (_, _) => SaveEditedControl();
+        UtilitiesShortcutBox.SelectionChanged += (_, _) => SaveEditedControl();
+        foreach (var toggle in new[] { UtilitiesFullscreenToggle, UtilitiesSnapToggle, UtilitiesRememberToggle, UtilitiesShortcutToggle })
+            toggle.Toggled += (_, _) => SaveEditedControl();
         HoverWaveToggle.Toggled += (_, _) => SaveEditedControl();
         HoverToExpandOnlyToggle.Toggled += (_, _) => SaveEditedControl();
         LaunchAtStartupToggle.Toggled += (_, _) => SaveEditedControl();
@@ -301,6 +306,9 @@ public sealed partial class SettingsWindow
         if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
             sender.ItemsSource = SettingsCatalog.Search(sender.Text);
     }
+
+    private async void ResetUtilitiesPositionClick(object sender, RoutedEventArgs e) =>
+        await SaveRecoverySettingsAsync(settingsSession.Current with { UtilitiesX = null, UtilitiesY = null }, "Floating position reset.");
     private void SearchSettingChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
     { if (args.SelectedItem is SettingsSearchEntry entry) NavigateToSetting(entry); }
     private void SearchSettingSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)

@@ -28,15 +28,16 @@ public sealed class SettingsCatalogTests
     }
 
     [Fact]
-    public void Navigation_has_exactly_the_supported_nine_pages()
+    public void Navigation_has_exactly_the_supported_ten_pages()
     {
-        Assert.Equal(new[] { "General", "Appearance", "Dock", "Apps", "Behavior", "Displays", "System", "Advanced", "About" },
+        Assert.Equal(new[] { "General", "Appearance", "Dock", "Apps", "Behavior", "Displays", "System", "Utilities", "Advanced", "About" },
             SettingsCatalog.Pages.Select(page => page.Id));
         Assert.All(SettingsCatalog.Options, entry => Assert.Contains(SettingsCatalog.Pages, page => page.Id == entry.Page));
     }
 
     [Theory]
     [InlineData("magnification", "Dock", "MagnificationScaleBox")]
+    [InlineData("floating", "Utilities", "UtilitiesPlacementBox")]
     [InlineData("stack", "Apps", "StackHelp")]
     [InlineData("monitor", "Displays", "DockDisplayModeBox")]
     [InlineData("startup", "General", "LaunchAtStartupToggle")]

@@ -18,6 +18,7 @@ public static class SettingsCatalog
         new SettingsPageEntry("Behavior", "Behavior", "\uE713"),
         new SettingsPageEntry("Displays", "Displays", "\uE7F4"),
         new SettingsPageEntry("System", "System", "\uE80A"),
+        new SettingsPageEntry("Utilities", "Utilities", "\uE713"),
         new SettingsPageEntry("Advanced", "Advanced", "\uE90F"),
         new SettingsPageEntry("About", "About", "\uE946")
     });
@@ -44,6 +45,7 @@ public static class SettingsCatalog
         new SettingsSearchEntry("Displays", "Bottom spacing", "BottomMarginBox", "position margin"),
         new SettingsSearchEntry("System", "Taskbar recovery", "ResumeTaskbarButton", "restore windows suppression safe mode"),
         new SettingsSearchEntry("System", "Input helper", "HelperStatusText", "elevated keyboard uac"),
+        new SettingsSearchEntry("Utilities", "Utilities placement", "UtilitiesPlacementBox", "floating detach shortcut control center"),
         new SettingsSearchEntry("Advanced", "Rendering status", "RenderingStatusText", "diagnostics fallback capture"),
         new SettingsSearchEntry("Advanced", "Reset preferences", "ResetSection", "defaults placement appearance reset"),
         new SettingsSearchEntry("About", "Version and updates", "CheckUpdatesButton", "update version github release"),

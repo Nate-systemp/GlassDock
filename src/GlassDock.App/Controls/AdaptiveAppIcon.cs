@@ -170,6 +170,7 @@ internal sealed class AdaptiveAppIcon : Grid
         // Siblings: the rounded tile never clips or masks the image's alpha edges.
         Children.Add(artwork);
         artwork.Children.Add(image);
+        SetIcon(null);
         Loaded += (_, _) =>
         {
             observedRoot = XamlRoot;
@@ -195,6 +196,7 @@ internal sealed class AdaptiveAppIcon : Grid
 
     public void SetIcon(ApplicationIcon? icon)
     {
+        icon = ApplicationIconFallback.Visible(icon);
         image.Source = null;
         original = null;
         rasterWidth = rasterHeight = 0;

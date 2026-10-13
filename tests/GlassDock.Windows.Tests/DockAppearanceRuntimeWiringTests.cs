@@ -39,9 +39,20 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
         Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
         Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, dockAppearance);", dock, StringComparison.Ordinal);
+        // The detached Utilities pill uses Frosted glass, while docked Utilities
+        // follow the selected dock appearance. Validate the mapping and each
+        // popup's use of its resolved mode (rather than requiring the old call).
+        Assert.Contains("private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode)", dock, StringComparison.Ordinal);
+        Assert.Contains("utilitiesPlacement == UtilitiesPlacement.InsideDock ? dockMode : DockAppearanceMode.Frosted;", dock, StringComparison.Ordinal);
+        Assert.Contains("var utilityMode = UtilityPopupMode(dockAppearance);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
+        // Live placement changes must refresh already-created popup windows.
+        Assert.Contains("var mode = UtilityPopupMode(settingsSession.Current.DockAppearanceMode);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
+        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
         Assert.Contains("double targetHeight = 68", animation, StringComparison.Ordinal);
         Assert.Contains("maximumMagnificationScale - 1", animation, StringComparison.Ordinal);
     }

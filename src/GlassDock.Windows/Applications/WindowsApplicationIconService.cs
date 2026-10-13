@@ -129,6 +129,8 @@ internal sealed class WindowsApplicationIconService
         return image;
     }
 
+    internal void Invalidate(string identity) => cache.Remove(identity);
+
     internal void Retain(IEnumerable<string> identities)
     {
         var live = identities.ToHashSet(StringComparer.Ordinal);

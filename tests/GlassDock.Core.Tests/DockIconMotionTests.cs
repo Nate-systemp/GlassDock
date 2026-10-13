@@ -6,6 +6,16 @@ namespace GlassDock.Core.Tests;
 public sealed class DockIconMotionTests
 {
     [Fact]
+    public void Unpin_depth_must_update_expanded_reference_at_every_frame()
+    {
+        Assert.True(DockIconMotion.FromGeometry(900, 68, 900, 96, 68).Scale < 1);
+        foreach (var progress in new[] { 0d, .25, .5, .75, 1 })
+        {
+            var height = 96 - 28 * progress;
+            Assert.Equal(new DockIconMotion(1, 0, 1), DockIconMotion.FromGeometry(900, height, 900, height, 68));
+        }
+    }
+    [Fact]
     public void Removing_stack_slots_requires_updated_expanded_geometry_for_full_size_icons()
     {
         const double oldWidth = 900, newWidth = 732, height = 68;

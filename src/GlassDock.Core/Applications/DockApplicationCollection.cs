@@ -37,7 +37,10 @@ public static class DockApplicationCollection
         {
             groups.Remove(pin.Identity.Key, out var group);
             result.Add(new(pin.Identity.Key, pin.Identity, pin.Name, pin.LaunchTarget, true,
-                OrderWindows(group ?? []), pin.Icon ?? group?.FirstOrDefault()?.Icon));
+                OrderWindows(group ?? []), ApplicationIconFallback.Visible(
+                    pin.Availability == PinTargetAvailability.Unavailable ? null :
+                    ApplicationIconFallback.HasArtwork(pin.Icon) ? pin.Icon : group?.FirstOrDefault()?.Icon))
+                { PinAvailability = pin.Availability });
         }
         foreach (var (key, group) in groups.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
