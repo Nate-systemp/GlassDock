@@ -621,7 +621,8 @@ public sealed partial class SettingsWindow : Window
             {
                 DockAppearanceMode = SelectedDockAppearance,
                 UtilitiesPlacement = (UtilitiesPlacement)Math.Max(0, UtilitiesPlacementBox.SelectedIndex),
-                UtilitiesHideFullscreen = UtilitiesFullscreenToggle.IsOn,
+                // The floating top bar is always visible; persist the new behavior.
+                UtilitiesHideFullscreen = false,
                 UtilitiesSnapEdges = UtilitiesSnapToggle.IsOn,
                 UtilitiesRememberPosition = UtilitiesRememberToggle.IsOn,
                 UtilitiesShortcutEnabled = UtilitiesShortcutToggle.IsOn,

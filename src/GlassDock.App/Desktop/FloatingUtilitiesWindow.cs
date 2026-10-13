@@ -16,7 +16,7 @@ internal sealed class FloatingUtilitiesWindow : Window
 {
     // The pill is sized from its content. Fixed side padding replaces the old fixed
     // 124 px width, which left roughly 19 px of empty space on each side.
-    private const double Diameter = 34, Gutter = 4, EdgeInset = 12, SidePadding = 12, ClockWidth = 37, FallbackContentWidth = 92;
+    private const double Diameter = 34, Gutter = 4, EdgeInset = 12, VerticalInset = 4, SidePadding = 12, ClockWidth = 37, FallbackContentWidth = 92;
     // The floating pill is always Clear liquid glass, whatever the dock uses.
     private const DockAppearanceMode PillMode = DockAppearanceMode.Clear;
     private double pillWidth = FallbackContentWidth + SidePadding * 2;
@@ -37,7 +37,6 @@ internal sealed class FloatingUtilitiesWindow : Window
         HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
     private GlassDockSettings settings = new();
     private bool down, dragged, disposed, shown;
-    private bool screenshot, wasSuppressed;
     private RectInt32? initialBounds;
     private bool positioned;
     private (int X, int Y) start, origin;
@@ -47,15 +46,17 @@ internal sealed class FloatingUtilitiesWindow : Window
     private PointInt32 snapFrom, snapTo;
     public double Scale => native.Scale;
     public bool ShortcutAvailable { get; private set; } = true;
-    public bool FullscreenSuppressed => !screenshot && settings.UtilitiesHideFullscreen && native.Fullscreen();
+    // The detached top bar stays visible even when an app enters fullscreen.
+    // Exclusive fullscreen surfaces can still bypass the Windows work area.
+    public bool FullscreenSuppressed => false;
     public bool ContainsPointer()
     {
         if (!shown) return false;
         var p = native.Cursor(); var origin = AppWindow.Position; var size = AppWindow.Size;
         return p.X >= origin.X && p.Y >= origin.Y && p.X < origin.X + size.Width && p.Y < origin.Y + size.Height;
     }
-    public void BeginScreenshot() { screenshot = true; liquid.BeginScreenshotMode(); }
-    public void EndScreenshot() { liquid.EndScreenshotMode(); screenshot = false; }
+    public void BeginScreenshot() { liquid.BeginScreenshotMode(); }
+    public void EndScreenshot() { liquid.EndScreenshotMode(); }
     public event Action? ToggleRequested;
     public event Action? SettingsRequested;
     public event Action? ReturnRequested;
@@ -171,9 +172,9 @@ internal sealed class FloatingUtilitiesWindow : Window
         if (!positioned || savedX != value.UtilitiesX || savedY != value.UtilitiesY)
         {
             savedX = value.UtilitiesX; savedY = value.UtilitiesY;
-            var area = DisplayArea.Primary.WorkArea;
+            var area = DisplayArea.Primary.OuterBounds;
             var defaultX = area.X + area.Width - (pillWidth + Gutter * 2 + EdgeInset) * Scale;
-            var defaultY = area.Y + EdgeInset * Scale;
+            var defaultY = area.Y + VerticalInset * Scale;
             var bounds = new RectInt32((int)(value.UtilitiesRememberPosition ? value.UtilitiesX ?? defaultX : defaultX),
                 (int)(value.UtilitiesRememberPosition ? value.UtilitiesY ?? defaultY : defaultY),
                 (int)Math.Ceiling((pillWidth + Gutter * 2) * Scale),
@@ -190,16 +191,22 @@ internal sealed class FloatingUtilitiesWindow : Window
     public void Reconcile()
     {
         if (disposed || !positioned) return;
-        var suppressed = FullscreenSuppressed;
-        if (suppressed && !wasSuppressed) Suppressed?.Invoke();
-        if (disposed) return;
-        wasSuppressed = suppressed;
-        var visible = settings.UtilitiesPlacement == UtilitiesPlacement.FloatingButton &&
-            !suppressed;
-        if (!visible && shown) { AppWindow.Hide(); shown = false; Suppressed?.Invoke(); }
-        if (disposed) return;
+        var visible = settings.UtilitiesPlacement == UtilitiesPlacement.FloatingButton;
+        if (!visible)
+        {
+            // Always release the reserved work area when moving Utilities back
+            // into the dock or switching to keyboard-shortcut-only mode.
+            native.ClearTopBar();
+            if (shown) { AppWindow.Hide(); shown = false; Suppressed?.Invoke(); }
+            return;
+        }
+
+        // Reserve a thin strip across the physical monitor. There is NO
+        // full-width visual host or hit-test surface behind the actual pill.
+        var barHeight = (int)Math.Ceiling((Diameter + Gutter * 2 + VerticalInset * 2) * Scale);
+        native.ReserveTopBar(barHeight);
         if (!down && !snapTimer.IsRunning) Clamp(false);
-        if (visible && !shown) { AppWindow.Show(false); shown = true; }
+        if (!shown) { AppWindow.Show(false); shown = true; }
     }
 
     // Returns true when the content width changed (for example when the focus icon appears).
@@ -238,16 +245,22 @@ internal sealed class FloatingUtilitiesWindow : Window
     private void Clamp(bool snap)
     {
         if (disposed) return;
-        var display = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest) ?? DisplayArea.Primary;
-        if (display is null) return; // Display topology can be briefly unavailable during removal.
-        var area = display.WorkArea;
-        if (area.Width <= 0 || area.Height <= 0) return;
         var size = (int)Math.Ceiling((Diameter + Gutter * 2) * Scale);
         var width = (int)Math.Ceiling((pillWidth + Gutter * 2) * Scale);
-        // Reserve a bottom band for both expanded and minimized dock geometry.
-        var point = FloatingUtilityPlacement.Clamp(AppWindow.Position.X, AppWindow.Position.Y,
-            area.X + 8, area.Y + 8, Math.Max(width, area.Width - 16), Math.Max(size, area.Height - 112), width, size, snap);
-        var rect = new RectInt32((int)point.X, (int)point.Y, width, size);
+        // Use the monitor / reserved AppBar strip, NEVER DisplayArea.WorkArea:
+        // WorkArea now begins below the new strip and would push the pill down
+        // over the foreground application's titlebar.
+        var (left, top, right, bottom) = native.TopBarReserved
+            ? native.TopBarBounds
+            : native.MonitorBounds();
+        if (right <= left || bottom <= top)
+            (left, top, right, bottom) = native.MonitorBounds();
+        if (right <= left || bottom <= top) return;
+        if (!native.TopBarReserved)
+            bottom = Math.Min(bottom, top + (int)Math.Ceiling((Diameter + Gutter * 2 + VerticalInset * 2) * Scale));
+        var point = FloatingUtilityPlacement.ClampToTopStrip(
+            AppWindow.Position.X, left, top, right, bottom, width, size, EdgeInset * Scale, snap);
+        var rect = new RectInt32((int)Math.Round(point.X), (int)Math.Round(point.Y), width, size);
         if (snap && new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         {
             snapFrom = AppWindow.Position;

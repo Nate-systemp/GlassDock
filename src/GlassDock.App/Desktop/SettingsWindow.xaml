@@ -444,7 +444,8 @@
             <ComboBoxItem Content="Separate Floating Button" />
             <ComboBoxItem Content="Keyboard Shortcut Only" />
           </ComboBox>
-          <ToggleSwitch x:Name="UtilitiesFullscreenToggle" Header="Hide during fullscreen" />
+          <TextBlock Text="Floating Utilities remain visible at the top of the screen. Doky reserves a transparent strip so maximized windows start below them. Drag left or right to reposition." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+          <ToggleSwitch x:Name="UtilitiesFullscreenToggle" Header="Hide during fullscreen (not used by floating top bar)" Visibility="Collapsed" />
           <ToggleSwitch x:Name="UtilitiesSnapToggle" Header="Snap to screen edges" />
           <ToggleSwitch x:Name="UtilitiesRememberToggle" Header="Remember position" />
           <ToggleSwitch x:Name="UtilitiesShortcutToggle" Header="Enable Utilities shortcut" />
