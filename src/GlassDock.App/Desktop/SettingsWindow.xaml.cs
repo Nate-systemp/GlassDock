@@ -164,6 +164,7 @@ public sealed partial class SettingsWindow : Window
         BorderOpacityBox.Value = settings.BorderOpacity * 100;
         ClearRefractionStrengthBox.Value = settings.ClearRefractionStrength;
         SpecularHighlightAngleBox.Value = settings.SpecularHighlightAngle;
+        CircularHighlightsToggle.IsOn = settings.CircularHighlightsEnabled;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
         HoverToExpandOnlyToggle.IsOn = settings.HoverToExpandOnly;
         PinDockToggle.IsOn = settings.PinDock;
@@ -630,7 +631,8 @@ public sealed partial class SettingsWindow : Window
                 LaunchAtStartup = desiredStartup,
                 NotificationBadgesEnabled = NotificationBadgesToggle.IsOn,
                 ClearRefractionStrength = ClearRefractionStrengthBox.Value,
-                SpecularHighlightAngle = SpecularHighlightAngleBox.Value
+                SpecularHighlightAngle = SpecularHighlightAngleBox.Value,
+                CircularHighlightsEnabled = CircularHighlightsToggle.IsOn
             };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
@@ -738,7 +740,8 @@ public sealed partial class SettingsWindow : Window
             BorderThickness = GlassDockSettings.DefaultBorderThickness,
             BorderOpacity = GlassDockSettings.DefaultBorderOpacity,
             ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
-            SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle
+            SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle,
+            CircularHighlightsEnabled = GlassDockSettings.DefaultCircularHighlightsEnabled
         });
 
         await SaveRecoverySettingsAsync(edited, "Appearance reset to defaults.");

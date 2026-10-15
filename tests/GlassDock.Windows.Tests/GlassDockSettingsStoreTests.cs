@@ -15,7 +15,8 @@ public sealed class GlassDockSettingsStoreTests
         await File.WriteAllTextAsync(store.SettingsFilePath, """{"IconSize":32,"PinDock":true,"DockAppearanceMode":4}""");
         var old = await store.LoadAsync();
         Assert.Equal(12,old.ClearRefractionStrength); Assert.Equal(45,old.SpecularHighlightAngle);
-        var edited = old with { ClearRefractionStrength=17.5,SpecularHighlightAngle=135 };
+        Assert.True(old.CircularHighlightsEnabled);
+        var edited = old with { ClearRefractionStrength=17.5,SpecularHighlightAngle=135,CircularHighlightsEnabled=false };
         await store.SaveAsync(edited);
         Assert.Equal(edited,await location.CreateStore().LoadAsync());
         Assert.Equal(32,edited.IconSize); Assert.True(edited.PinDock);

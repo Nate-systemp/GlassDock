@@ -1,4 +1,4 @@
-﻿<Window x:Class="GlassDock.App.Desktop.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+<Window x:Class="GlassDock.App.Desktop.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid x:Name="SettingsRoot">
     <Grid.Resources>
       <SolidColorBrush x:Key="PrimaryBrush" Color="#FFF4F5F7" />
@@ -97,6 +97,7 @@
           </StackPanel>
           <StackPanel Spacing="10">
             <TextBlock Text="Rim highlights" FontSize="17" FontWeight="SemiBold" />
+            <ToggleSwitch x:Name="CircularHighlightsToggle" Header="Circular highlights" OnContent="On" OffContent="Off" AutomationProperties.Name="Circular highlights in all dock appearances" />
             <TextBlock Text="Position the two opposing highlights in every dock appearance. 45° is top-left / bottom-right; 135° is top-right / bottom-left." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
             <Grid x:Name="SpecularHighlightAngleBoxRow" ColumnSpacing="12">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions>

@@ -1,5 +1,6 @@
 using System.Numerics;
 using GlassDock.App.Controls;
+using GlassDock.App.Rendering;
 using GlassDock.Core.Settings;
 using GlassDock.Core.Desktop;
 using Microsoft.UI.Xaml;
@@ -12,20 +13,44 @@ namespace GlassDock.App.Desktop;
 
 internal sealed class DockAnimationController : IDisposable
 {
-    private double maximumMagnificationScale = GlassDockSettings.DefaultMagnificationScale;
-    private const double MagnificationSigma = 52;
-    private const double MagnificationEpsilon = 0.0015;
-    private const double MagnificationSmoothing = 0.34;
+    private readonly DockHoverMagnification<FrameworkElement> hover = new();
+    private readonly UISettings hoverSettings = new();
 
     private readonly GlassSurface surface;
     private readonly Panel icons;
     private readonly DockIconTransition iconTransition;
     private readonly FrameworkElement indicator;
+    private readonly Canvas hoverArtworkForeground;
+    // One cached mirror per real artwork image, including stack layers. Source
+    // images still belong to their Buttons (for badges, drag and interactions),
+    // but the mirrored pixels render above the glass in the unclipped root.
+    private readonly Dictionary<Image, Image> hoverArtworkMirrors = new(ReferenceEqualityComparer.Instance);
+    // The bitmap is mirrored at root level to avoid button clipping, so its
+    // notification badge must be mirrored in that same coordinate space.
+    // Otherwise the red number remains attached to the *unscaled* icon slot.
+    private readonly Dictionary<NotificationBadge, ForegroundBadge> hoverBadgeMirrors = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<AdaptiveAppIcon> observedBadgeIcons = new(ReferenceEqualityComparer.Instance);
+    private bool badgeRefreshQueued;
+
+    private sealed class ForegroundBadge
+    {
+        public NotificationBadge Visual { get; } = new()
+        {
+            IsHitTestVisible = false,
+            UseLayoutRounding = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        public Microsoft.UI.Xaml.Media.ScaleTransform Scale { get; } = new();
+        public long LastRevision { get; set; } = -1;
+    }
+
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer magnificationTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer placementTimer;
     private double placementFrom, placementTarget, placementStarted, placementDuration;
     public bool IsPlacementAnimating { get; private set; }
     public event EventHandler? PlacementChanged;
+    public event EventHandler? HoverPresentationChanged;
 
     private Storyboard? active;
     private Storyboard? indicatorFade;
@@ -59,16 +84,16 @@ internal sealed class DockAnimationController : IDisposable
         surface.Opacity = frame.MaterialBlend;
     }
 
-    private bool magnificationRequested;
     private bool interactionHeld;
     private bool magnificationTimerRunning;
-    private double magnificationPointerX;
 
     public DockAnimationController(
         GlassSurface surface,
         Panel icons,
-        FrameworkElement indicator)
+        FrameworkElement indicator,
+        Canvas hoverArtworkForeground)
     {
+        this.hoverArtworkForeground = hoverArtworkForeground;
         progressClock.ValueChanged += ProgressChanged;
         this.surface = surface;
         this.icons = icons;
@@ -83,6 +108,7 @@ internal sealed class DockAnimationController : IDisposable
 
         magnificationTimer.Tick +=
             (_, _) => TickMagnification();
+        icons.SizeChanged += HoverLayoutChanged;
         placementTimer = icons.DispatcherQueue.CreateTimer();
         placementTimer.Interval = TimeSpan.FromMilliseconds(16);
         placementTimer.Tick += (_, _) =>
@@ -179,9 +205,11 @@ internal sealed class DockAnimationController : IDisposable
 
     public void HoldMagnification(bool held)
     {
+        if (interactionHeld == held) return;
         interactionHeld = held;
+        hover.Pause(held, Environment.TickCount64);
         if (held) StopMagnificationTimer();
-        else StartMagnificationTimer();
+        else if (hover.IsAnimating) StartMagnificationTimer();
     }
 
     /// <summary>Resize a settled open dock without interpreting removed slots as collapse progress.</summary>
@@ -200,21 +228,6 @@ internal sealed class DockAnimationController : IDisposable
     {
         expandedHeight = height;
         iconTransition.SetExpandedSize(expandedWidth, height);
-    }
-
-    public void SetMaximumMagnificationScale(double value)
-    {
-        maximumMagnificationScale = double.IsFinite(value)
-            ? Math.Clamp(
-                value,
-                GlassDockSettings.MinimumMagnificationScale,
-                GlassDockSettings.MaximumMagnificationScale)
-            : GlassDockSettings.DefaultMagnificationScale;
-
-        if (maximumMagnificationScale == 1)
-            ResetMagnification(immediate: true);
-        else if (magnificationRequested)
-            StartMagnificationTimer();
     }
 
     public Task<bool> AnimateAsync(
@@ -293,246 +306,225 @@ internal sealed class DockAnimationController : IDisposable
         return pending.Task;
     }
 
-    /// <summary>
-    /// Updates the continuous macOS-style magnification field.
-    /// The hovered icon grows the most and nearby icons grow progressively less.
-    /// </summary>
-    public void UpdateMagnification(
-        double pointerX)
+    /// <summary>Retargets one continuous wave without restarting its spring clock.</summary>
+    private void HoverLayoutChanged(object sender, SizeChangedEventArgs args)
     {
-        if (!double.IsFinite(pointerX))
-            return;
-
-        magnificationPointerX = pointerX;
-        magnificationRequested = true;
-
-        StartMagnificationTimer();
+        if (disposed || interactionHeld || !hover.HasPointer) return;
+        TickMagnification();
+        if (hover.IsAnimating) StartMagnificationTimer();
     }
 
-    /// <summary>
-    /// Smoothly restores all dock icons to their normal size.
-    /// </summary>
-    public void ResetMagnification(
-        bool immediate = false)
+    public void UpdateMagnification(double pointerX, double pointerY)
     {
-        magnificationRequested = false;
+        if (disposed || interactionHeld || !hover.SetPointer(pointerX, pointerY)) return;
+        TickMagnification();
+        if (hover.IsAnimating) StartMagnificationTimer();
+    }
 
-        if (immediate)
-        {
-            StopMagnificationTimer();
-
-            foreach (var element in IconElements())
-            {
-                var visual =
-                    ElementCompositionPreview.GetElementVisual(
-                        element);
-
-                ConfigureMagnificationOrigin(
-                    element,
-                    visual);
-
-                visual.Scale =
-                    Vector3.One;
-
-                Canvas.SetZIndex(
-                    element,
-                    0);
-            }
-
-            return;
-        }
-
-        StartMagnificationTimer();
+    /// <summary>Releases both scale and translation before drag/reorder takes ownership.</summary>
+    public void ResetMagnification(bool immediate = false)
+    {
+        if (immediate) { hover.Reset(); StopMagnificationTimer(); }
+        else if (!hover.Leave()) return;
+        TickMagnification();
+        if (!immediate && hover.IsAnimating) StartMagnificationTimer();
     }
 
     private void TickMagnification()
     {
         if (disposed) return;
-        var settled = true;
-
-        foreach (var element in IconElements())
+        var elements = icons.Children.OfType<FrameworkElement>().Where(element => element.IsLoaded).ToArray();
+        var items = elements.Select(element => new DockHoverMagnification<FrameworkElement>.Item(
+            element, element.ActualOffset.X, element.ActualOffset.Y, element.ActualWidth, element.ActualHeight,
+            !string.Equals(element.Tag as string, "NoMagnify", StringComparison.Ordinal),
+            Artwork(element)?.HoverArtworkWidth ?? element.ActualWidth)).ToArray();
+        var frames = hover.Step(items, Environment.TickCount64, hoverSettings.AnimationsEnabled);
+        var liveImages = new HashSet<Image>(ReferenceEqualityComparer.Instance);
+        var liveBadges = new HashSet<NotificationBadge>(ReferenceEqualityComparer.Instance);
+        var liveBadgeIcons = new HashSet<AdaptiveAppIcon>(ReferenceEqualityComparer.Instance);
+        foreach (var frame in frames)
         {
-            var visual =
-                ElementCompositionPreview.GetElementVisual(
-                    element);
-
-            ConfigureMagnificationOrigin(
-                element,
-                visual);
-
-            var targetScale =
-                magnificationRequested
-                    ? TargetScaleFor(
-                        element)
-                    : 1.0;
-
-            var currentScale =
-                visual.Scale.X;
-
-            if (!float.IsFinite(currentScale) ||
-                currentScale <= 0)
+            var element = frame.Id;
+            ElementCompositionPreview.GetElementVisual(element).Scale = Vector3.One;
+            if (Artwork(element) is { } artwork)
             {
-                currentScale = 1;
+                var artworkVisual = ElementCompositionPreview.GetElementVisual(artwork);
+                // The actual icon never scales inside its Button: the Button's
+                // native ContentPresenter can clip it even with ZIndex raised.
+                // Magnification is drawn in the root-level foreground instead.
+                artworkVisual.Scale = Vector3.One;
+                DrawHoverArtworkInForeground(artwork, frame.Scale, liveImages);
+                liveBadgeIcons.Add(artwork);
+                if (observedBadgeIcons.Add(artwork)) artwork.HoverBadgeChanged += OnHoverBadgeChanged;
+                DrawHoverBadgeInForeground(artwork, frame.Scale, liveBadges);
+            }
+            element.Translation = Vector3.Zero;
+            Canvas.SetZIndex(element, (int)Math.Round((frame.Scale - 1) * 1000));
+        }
+        // Restore the originals on pointer exit, reorder, source replacement or
+        // removal; never leave a real icon hidden behind a stale mirror.
+        foreach (var pair in hoverArtworkMirrors.ToArray())
+        {
+            if (liveImages.Contains(pair.Key)) continue;
+            pair.Key.Opacity = 1;
+            pair.Value.Visibility = Visibility.Collapsed;
+            if (pair.Key.IsLoaded) continue;
+            hoverArtworkForeground.Children.Remove(pair.Value);
+            hoverArtworkMirrors.Remove(pair.Key);
+        }
+        foreach (var pair in hoverBadgeMirrors.ToArray())
+        {
+            if (liveBadges.Contains(pair.Key)) continue;
+            pair.Key.Opacity = 1;
+            pair.Value.Visual.Visibility = Visibility.Collapsed;
+            if (pair.Key.IsLoaded) continue;
+            hoverArtworkForeground.Children.Remove(pair.Value.Visual);
+            hoverBadgeMirrors.Remove(pair.Key);
+        }
+        foreach (var icon in observedBadgeIcons.ToArray())
+        {
+            if (liveBadgeIcons.Contains(icon)) continue;
+            icon.HoverBadgeChanged -= OnHoverBadgeChanged;
+            observedBadgeIcons.Remove(icon);
+        }
+        HoverPresentationChanged?.Invoke(this, EventArgs.Empty);
+        if (!hover.IsAnimating) StopMagnificationTimer();
+    }
+
+    // Notification counts can change after the magnification spring settles.
+    // Refresh the foreground badge once on the UI dispatcher without waking the
+    // 60fps animation timer or disturbing the icon's current target scale.
+    private void OnHoverBadgeChanged(object? sender, EventArgs args)
+    {
+        if (disposed || !hover.HasPointer || badgeRefreshQueued) return;
+        badgeRefreshQueued = true;
+        if (!icons.DispatcherQueue.TryEnqueue(() =>
+        {
+            badgeRefreshQueued = false;
+            if (!disposed && hover.HasPointer) TickMagnification();
+        })) badgeRefreshQueued = false;
+    }
+
+    private void DrawHoverBadgeInForeground(
+        AdaptiveAppIcon icon,
+        double scale,
+        HashSet<NotificationBadge> liveBadges)
+    {
+        var badge = icon.LensBadge;
+        if (badge is null || !badge.IsLoaded ||
+            icon.HoverBadgeState is not { } display || !display.IsVisible)
+            return;
+
+        liveBadges.Add(badge);
+        if (scale <= 1.001)
+        {
+            badge.Opacity = 1;
+            if (hoverBadgeMirrors.TryGetValue(badge, out var inactive))
+                inactive.Visual.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var width = badge.ActualWidth;
+        var height = badge.ActualHeight;
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+            return;
+
+        // The badge follows the exact same optical anchor and spring progress
+        // as the mirrored bitmap, rather than the fixed-size Button/ContentPresenter.
+        var bounds = badge.TransformToVisual(hoverArtworkForeground).TransformBounds(
+            new global::Windows.Foundation.Rect(0, 0, width, height));
+        var anchor = icon.TransformToVisual(hoverArtworkForeground).TransformPoint(
+            new global::Windows.Foundation.Point(icon.ActualWidth / 2, icon.HoverArtworkBaseline));
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+        if (!hoverBadgeMirrors.TryGetValue(badge, out var mirror))
+        {
+            mirror = new ForegroundBadge();
+            mirror.Visual.RenderTransform = mirror.Scale;
+            hoverBadgeMirrors.Add(badge, mirror);
+            hoverArtworkForeground.Children.Add(mirror.Visual);
+        }
+
+        if (mirror.LastRevision != icon.HoverBadgeRevision)
+        {
+            mirror.Visual.SetBadge(display);
+            mirror.LastRevision = icon.HoverBadgeRevision;
+        }
+
+        // Scale the entire badge (including its number/text), not just its
+        // outline. Anchor both components to the same baseline as the icon.
+        mirror.Visual.Width = bounds.Width;
+        mirror.Visual.Height = bounds.Height;
+        Canvas.SetLeft(mirror.Visual, anchor.X + (bounds.Left - anchor.X) * scale);
+        Canvas.SetTop(mirror.Visual, anchor.Y + (bounds.Top - anchor.Y) * scale);
+        mirror.Scale.ScaleX = mirror.Scale.ScaleY = scale;
+        Canvas.SetZIndex(mirror.Visual, 10_000 + (int)Math.Round(scale * 1000));
+        mirror.Visual.Visibility = Visibility.Visible;
+        badge.Opacity = 0;
+    }
+
+    private void DrawHoverArtworkInForeground(
+        AdaptiveAppIcon icon,
+        double scale,
+        HashSet<Image> liveImages)
+    {
+        var magnified = scale > 1.001;
+        icon.VisitLensArtwork((_, source, _) =>
+        {
+            if (source is not Image image || !image.IsLoaded || image.Source is null)
+                return;
+
+            liveImages.Add(image);
+            if (!magnified)
+            {
+                image.Opacity = 1;
+                if (hoverArtworkMirrors.TryGetValue(image, out var existing))
+                    existing.Visibility = Visibility.Collapsed;
+                return;
             }
 
-            double nextScale;
+            var width = image.ActualWidth > 0 ? image.ActualWidth : image.Width;
+            var height = image.ActualHeight > 0 ? image.ActualHeight : image.Height;
+            if (!double.IsFinite(width) || !double.IsFinite(height) ||
+                width <= 0 || height <= 0)
+                return;
 
-            if (Math.Abs(
-                    targetScale -
-                    currentScale) <=
-                MagnificationEpsilon)
+            // Positions are sampled from the unscaled image in root coordinates.
+            // The final rectangle expands about the dock's existing optical
+            // baseline; no button moves or gives up its original hit target.
+            var bounds = image.TransformToVisual(hoverArtworkForeground).TransformBounds(
+                new global::Windows.Foundation.Rect(0, 0, width, height));
+            var anchor = icon.TransformToVisual(hoverArtworkForeground).TransformPoint(
+                new global::Windows.Foundation.Point(icon.ActualWidth / 2, icon.HoverArtworkBaseline));
+            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+            if (!hoverArtworkMirrors.TryGetValue(image, out var mirror))
             {
-                nextScale =
-                    targetScale;
-            }
-            else
-            {
-                nextScale =
-                    currentScale +
-                    (targetScale -
-                     currentScale) *
-                    MagnificationSmoothing;
-
-                settled = false;
+                mirror = new Image
+                {
+                    IsHitTestVisible = false,
+                    UseLayoutRounding = false,
+                    Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform
+                };
+                hoverArtworkMirrors.Add(image, mirror);
+                hoverArtworkForeground.Children.Add(mirror);
             }
 
-            visual.Scale =
-                new Vector3(
-                    (float)nextScale,
-                    (float)nextScale,
-                    1);
-
-            // Larger icons render over their neighbors instead of being
-            // hidden underneath the next StackPanel child.
-            Canvas.SetZIndex(
-                element,
-                Math.Max(
-                    0,
-                    (int)Math.Round(
-                        (nextScale - 1) *
-                        1000)));
-        }
-
-        if (settled)
-            StopMagnificationTimer();
+            if (!ReferenceEquals(mirror.Source, image.Source)) mirror.Source = image.Source;
+            mirror.Width = bounds.Width * scale;
+            mirror.Height = bounds.Height * scale;
+            Canvas.SetLeft(mirror, anchor.X + (bounds.Left - anchor.X) * scale);
+            Canvas.SetTop(mirror, anchor.Y + (bounds.Top - anchor.Y) * scale);
+            Canvas.SetZIndex(mirror, (int)Math.Round(scale * 1000));
+            mirror.Visibility = Visibility.Visible;
+            // The artwork and badge are both drawn above the glass in sync;
+            // running indicators, focus visuals and tiles stay in their slots.
+            image.Opacity = 0;
+        });
     }
 
-    private double TargetScaleFor(
-        FrameworkElement element)
-    {
-        if (!element.IsLoaded ||
-            element.ActualWidth <= 0 ||
-            element.ActualHeight <= 0)
-        {
-            return 1;
-        }
-
-        double centerX;
-
-        try
-        {
-            var transform =
-                element.TransformToVisual(
-                    icons);
-
-            var center =
-                transform.TransformPoint(
-                    new global::Windows.Foundation.Point(
-                        element.ActualWidth / 2,
-                        element.ActualHeight / 2));
-
-            centerX =
-                center.X;
-        }
-        catch (ArgumentException)
-        {
-            return 1;
-        }
-        catch (InvalidOperationException)
-        {
-            return 1;
-        }
-
-        var distance =
-            Math.Abs(
-                centerX -
-                magnificationPointerX);
-
-        // Gaussian falloff:
-        // center     ~= 1.24
-        // 1 neighbor ~= 1.16
-        // 2 away     ~= 1.05
-        // farther    quickly returns to 1.00
-        var influence =
-            Math.Exp(
-                -(distance * distance) /
-                (2 *
-                 MagnificationSigma *
-                 MagnificationSigma));
-
-        var scale =
-            1 +
-            (maximumMagnificationScale - 1) *
-            influence;
-
-        return scale < 1.003
-            ? 1
-            : Math.Min(
-                maximumMagnificationScale,
-                scale);
-    }
-
-    private static void ConfigureMagnificationOrigin(
-        FrameworkElement element,
-        Microsoft.UI.Composition.Visual visual)
-    {
-        var width =
-            element.ActualWidth > 0
-                ? element.ActualWidth
-                : element.Width;
-
-        var height =
-            element.ActualHeight > 0
-                ? element.ActualHeight
-                : element.Height;
-
-        if (!double.IsFinite(width) ||
-            width <= 0)
-        {
-            width = 40;
-        }
-
-        if (!double.IsFinite(height) ||
-            height <= 0)
-        {
-            height = 44;
-        }
-
-        // Anchor near the bottom so growth naturally rises upward,
-        // like a dock sitting on a shelf.
-        visual.CenterPoint =
-            new Vector3(
-                (float)(width / 2),
-                (float)(height * 0.90),
-                0);
-    }
-
-    private IEnumerable<FrameworkElement> IconElements()
-    {
-        foreach (var child in icons.Children)
-        {
-            if (child is not FrameworkElement element)
-                continue;
-
-            // Non-app dock content (system tray / clock cluster) deliberately stays
-            // compact while the application icons use macOS-style magnification.
-            if (string.Equals(element.Tag as string, "NoMagnify", StringComparison.Ordinal))
-                continue;
-
-            yield return element;
-        }
-    }
-
+    private static AdaptiveAppIcon? Artwork(FrameworkElement element) =>
+        element is Button { Content: Grid content } ? content.Children.OfType<AdaptiveAppIcon>().FirstOrDefault() : null;
     private void StartMagnificationTimer()
     {
         if (disposed || magnificationTimerRunning || interactionHeld)
@@ -661,6 +653,21 @@ internal sealed class DockAnimationController : IDisposable
 
         ResetMagnification(
             immediate: true);
+        foreach (var pair in hoverArtworkMirrors)
+        {
+            pair.Key.Opacity = 1;
+            hoverArtworkForeground.Children.Remove(pair.Value);
+        }
+        hoverArtworkMirrors.Clear();
+        foreach (var pair in hoverBadgeMirrors)
+        {
+            pair.Key.Opacity = 1;
+            hoverArtworkForeground.Children.Remove(pair.Value.Visual);
+        }
+        hoverBadgeMirrors.Clear();
+        foreach (var icon in observedBadgeIcons) icon.HoverBadgeChanged -= OnHoverBadgeChanged;
+        observedBadgeIcons.Clear();
+        badgeRefreshQueued = false;
 
         active = null;
     }
@@ -671,7 +678,9 @@ internal sealed class DockAnimationController : IDisposable
         Stop();
         disposed = true;
         progressClock.ValueChanged -= ProgressChanged;
+        icons.SizeChanged -= HoverLayoutChanged;
         iconTransition.Dispose();
         PlacementChanged = null;
+        HoverPresentationChanged = null;
     }
 }

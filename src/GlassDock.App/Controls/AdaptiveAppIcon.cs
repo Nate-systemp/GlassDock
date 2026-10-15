@@ -25,6 +25,12 @@ internal sealed class AdaptiveAppIcon : Grid
         BorderThickness = new Thickness(0.5), IsHitTestVisible = false
     };
     private readonly Canvas artwork = new() { IsHitTestVisible = false };
+    private double FittedArtworkScale => sourceWidth > 0 && double.IsFinite(image.Width) ? image.Width / sourceWidth : 0;
+    // Reserve the whole icon slot for hover spacing. Alpha-trimmed artwork may be
+    // only a few pixels wide (e.g. slim logos) and must not collapse other apps
+    // into an unreadable cluster when they are scaled to 75%.
+    internal double HoverArtworkWidth => Width;
+    internal double HoverArtworkBaseline => stackPreview is null && FittedArtworkScale > 0 ? (ActualHeight + pixelHeight * FittedArtworkScale) / 2 : ActualHeight;
     private double maximumHoverScale;
     private int pixelWidth;
     private int pixelHeight;
@@ -61,6 +67,12 @@ internal sealed class AdaptiveAppIcon : Grid
     }
 
     internal NotificationBadge? LensBadge => badge;
+    // A foreground badge follows the same magnification anchor as its icon.
+    // Keep the original display state so it can be faithfully reproduced above
+    // the glass without reparenting the real badge out of its button.
+    internal BadgeDisplayState? HoverBadgeState { get; private set; }
+    internal long HoverBadgeRevision { get; private set; }
+    internal event EventHandler? HoverBadgeChanged;
 
     public void SetStack(IReadOnlyList<DockApplication> apps)
     {
@@ -139,6 +151,8 @@ internal sealed class AdaptiveAppIcon : Grid
 
     public void SetNotificationBadge(BadgeDisplayState display)
     {
+        HoverBadgeState = display;
+        HoverBadgeRevision++;
         if (badge is null && !display.IsVisible) return;
         if (badge is null)
         {
@@ -149,8 +163,12 @@ internal sealed class AdaptiveAppIcon : Grid
                 Margin = new Thickness(0, -4, -5, 0)
             };
             Children.Add(badge);
+            // Multi-digit counts can change the badge's measured width while
+            // hovering. Re-align its foreground mirror after layout catches up.
+            badge.SizeChanged += (_, _) => HoverBadgeChanged?.Invoke(this, EventArgs.Empty);
         }
         badge.SetBadge(display);
+        HoverBadgeChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public AdaptiveAppIcon(double size, double maximumHoverScale, bool showTile = true)

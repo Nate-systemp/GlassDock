@@ -29,6 +29,7 @@ public sealed partial class DesktopOverlayWindow : Window
 {
     private readonly DockRelocationGuard relocationGuard = new();
     private DateTime lastRelocationFailure;
+    private DockDisplayMode appliedDisplayMode;
     private readonly Grid root = new() { Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(1, 0, 0, 0)) };
     private readonly GlassSurface surface = new()
     {
@@ -48,6 +49,17 @@ public sealed partial class DesktopOverlayWindow : Window
         Orientation = Orientation.Horizontal, Spacing = 6, Height = 68, Opacity = 0,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
         Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
+    };
+
+    // Magnified artwork lives in a full-window, input-transparent foreground layer.
+    // Drawing the enlarged image inside the original Button/ContentPresenter can
+    // clip its top and bottom at the button's fixed layout bounds. Its hit target,
+    // running indicator and badge stay in the original dock row.
+    private readonly Canvas hoverArtworkForeground = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch,
+        IsHitTestVisible = false
     };
 
     private readonly Border externalDropHighlight = new()
@@ -266,7 +278,19 @@ public sealed partial class DesktopOverlayWindow : Window
         if (closing) return;
         CancelReorder();
         AbortDragLens();
+        var oldMonitor = windowManager.CurrentMonitor;
         windowManager.SetFixedMonitor(monitor);
+        // Leaving All Displays for Follow Pointer/Foreground/Primary must use
+        // the guarded timer path instead of relocating synchronously inside the
+        // settings notification (which can re-enter WinUI window events).
+        if (monitor == 0)
+        {
+            windowManager.InvalidateMonitorMetrics();
+            applications.RefreshFilter();
+            return;
+        }
+        if (oldMonitor != 0 && oldMonitor != monitor)
+            liquidGlass.DeactivateCapture();
         windowManager.Position(0, settingsSession.DisplayMode);
         applications.RefreshFilter();
         UpdateBackdropBounds();
@@ -315,6 +339,7 @@ public sealed partial class DesktopOverlayWindow : Window
         ownsBadges = sharedBadges is null;
         badges = sharedBadges ?? new BadgeCoordinator([new WindowsToastBadgeProvider()]);
         BottomMargin = settingsSession.DockBehavior.BottomMargin;
+        appliedDisplayMode = settingsSession.DisplayMode;
         pinDockRequested = settingsSession.Current.PinDock;
         notificationBadgesRequested = settingsSession.Current.NotificationBadgesEnabled;
         settingsSession.Changed += SettingsChanged;
@@ -347,6 +372,16 @@ public sealed partial class DesktopOverlayWindow : Window
         root.Children.Add(indicator);
         root.Children.Add(icons);
         root.Children.Add(externalDropHighlight);
+        root.Children.Add(hoverArtworkForeground);
+        // The compositor wave and Clear glass must remain BEHIND magnified
+        // icon artwork. Explicit root-layer ordering prevents the crest from
+        // painting over an enlarged logo even when the icon crosses the rim.
+        Canvas.SetZIndex(surface, 0);
+        Canvas.SetZIndex(liquidGlass.Panel, 1);
+        Canvas.SetZIndex(indicator, 2);
+        Canvas.SetZIndex(icons, 20);
+        Canvas.SetZIndex(externalDropHighlight, 30);
+        Canvas.SetZIndex(hoverArtworkForeground, 1000);
 
         root.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
         {
@@ -439,7 +474,8 @@ public sealed partial class DesktopOverlayWindow : Window
         };
         applications.VisibleDockApplications.CollectionChanged += (_, _) => SynchronizeItems();
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
-        animation = new DockAnimationController(surface, icons, indicator);
+        animation = new DockAnimationController(surface, icons, indicator, hoverArtworkForeground);
+        animation.HoverPresentationChanged += (_, _) => UpdateDockWaveOutline();
 
         BuildUtilityCluster();
         DispatcherQueue.TryEnqueue(ApplyUtilitiesPlacement);
@@ -474,7 +510,9 @@ public sealed partial class DesktopOverlayWindow : Window
                 RefreshHoverVisuals();
         };
         displayTimer = DispatcherQueue.CreateTimer();
-        displayTimer.Interval = TimeSpan.FromMilliseconds(200);
+        // Pointer-following is latency-sensitive. Other modes retain the cheaper
+        // polling interval (utilities/fullscreen handling share this timer).
+        displayTimer.Interval = MonitorTrackingInterval(settingsSession.DisplayMode);
         var fullscreenWasHidden = false;
         displayTimer.Tick += (_, _) =>
         {
@@ -515,6 +553,11 @@ public sealed partial class DesktopOverlayWindow : Window
                     if (utilitiesPlacement == UtilitiesPlacement.InsideDock)
                     { CloseQuickSettings(); CloseSystemTray(); CloseCalendar(); utilityRequests.Reset(); }
                     stackWindow?.Hide();
+                    relocationStage = "native monitor placement";
+                }, () =>
+                {
+                    relocationStage = "invalidate old monitor capture";
+                    liquidGlass.DeactivateCapture();
                     relocationStage = "native monitor placement";
                 }))
                 return;
@@ -819,7 +862,8 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private Button CreateApplicationButton(DockApplicationItem item)
     {
-    var image = new AdaptiveAppIcon(Appearance.IconSize, Appearance.MagnificationScale, showTile: false);
+    var image = new AdaptiveAppIcon(Appearance.IconSize, DockHoverMagnification<FrameworkElement>.HoverScale, showTile: false);
+    image.Background = new SolidColorBrush(Colors.Transparent);
     image.SetDockAppearance(settingsSession.Current.DockAppearanceMode);
 
     var running = new Border
@@ -2565,10 +2609,12 @@ public sealed partial class DesktopOverlayWindow : Window
             SystemPopupOpen ||
             state.State != DockState.Expanded)
             return;
-        if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out _))
+        if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out var y))
         {
-            var origin = icons.TransformToVisual(root).TransformPoint(new(0, 0));
-            animation.UpdateMagnification(x - origin.X);
+            var pointer = root.TransformToVisual(icons).TransformPoint(new(x, y));
+            animation.UpdateMagnification(pointer.X, pointer.Y);
+            // The glass-edge wave is independent of icon scale/reflow. Re-anchor
+            // it in root coordinates without changing the pill's width or height.
             ShowDockWave(x);
         }
         else
@@ -2634,14 +2680,13 @@ public sealed partial class DesktopOverlayWindow : Window
             state.State != DockState.Expanded)
             return;
 
-        var pointerX =
-            e.GetCurrentPoint(icons).Position.X;
+        var hoverPointer = e.GetCurrentPoint(icons).Position;
 
-        var rootX =
-            e.GetCurrentPoint(root).Position.X;
-
-        animation.UpdateMagnification(pointerX);
-        ShowDockWave(rootX);
+        animation.UpdateMagnification(hoverPointer.X, hoverPointer.Y);
+        // Restore the original pointer-following glass crest. The magnification
+        // controller only transforms icon artwork/positions; SetDockWave only
+        // updates the existing compositor mask and input outline.
+        ShowDockWave(e.GetCurrentPoint(root).Position.X);
     }
 
     private void ShowDockWave(
@@ -2821,7 +2866,16 @@ public sealed partial class DesktopOverlayWindow : Window
                 }
             }
         }
-        windowManager.SetInteractionPolygon(outline);
+        // Input can extend above the pill without changing its rendered geometry.
+        var iconBounds = new List<(double Left, double Top, double Right, double Bottom)>();
+        foreach (var button in applicationButtons.Values)
+        {
+            if (!button.IsLoaded || button.Content is not Grid content ||
+                content.Children.OfType<AdaptiveAppIcon>().FirstOrDefault() is not { } icon) continue;
+            var bounds = icon.TransformToVisual(root).TransformBounds(new(0, 0, icon.ActualWidth, icon.ActualHeight));
+            iconBounds.Add((bounds.Left, bounds.Top, bounds.Right, bounds.Bottom));
+        }
+        windowManager.SetInteractionPolygon(outline, iconBounds);
     }
 
     private Geometry CreateDockWaveGeometry(double centerX, double strength)
@@ -3313,6 +3367,7 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         var mode = dockAppearance ?? settingsSession.Current.DockAppearanceMode;
         desktopBackdrop.SpecularHighlightAngle = settingsSession.Current.SpecularHighlightAngle;
+        desktopBackdrop.CircularHighlightsEnabled = settingsSession.Current.CircularHighlightsEnabled;
         liquidGlass.Material = liquidGlass.Material with
         {
             RefractionStrength = (float)settingsSession.Current.ClearRefractionStrength,
@@ -3425,7 +3480,8 @@ public sealed partial class DesktopOverlayWindow : Window
         var notificationBadgesChanged = notificationBadgesRequested != eventArgs.Settings.NotificationBadgesEnabled;
         notificationBadgesRequested = eventArgs.Settings.NotificationBadgesEnabled;
 
-        ApplyBottomMargin(eventArgs.Settings.BottomMargin);
+        if (Math.Abs(BottomMargin - eventArgs.Settings.BottomMargin) > 0.001)
+            ApplyBottomMargin(eventArgs.Settings.BottomMargin, repositionNativeWindow: false);
         ApplyDisplayMode(eventArgs.Settings.DockDisplayMode);
         ApplyHoverWaveSetting(eventArgs.Settings.HoverWaveEnabled);
         ApplyAppearance(settingsSession.Appearance,
@@ -3465,7 +3521,6 @@ public sealed partial class DesktopOverlayWindow : Window
         icons.Height = Math.Max(68, appearance.ButtonHeight + 24);
         if (pinnedPlacementActive)
             windowManager.SetReservedBottomSpace(Math.Max(68, appearance.ButtonHeight + 24));
-        animation.SetMaximumMagnificationScale(appearance.MagnificationScale);
         dockWaveRim.StrokeThickness = 0;
         dockWaveRim.Opacity = 0;
         var foreground = DockForegroundBrush();
@@ -3521,7 +3576,7 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         button.Width = content.Width = appearance.ButtonWidth;
         button.Height = content.Height = appearance.ButtonHeight;
-        icon.Configure(appearance.IconSize, appearance.MagnificationScale);
+        icon.Configure(appearance.IconSize, DockHoverMagnification<FrameworkElement>.HoverScale);
     }
 
     public void SetBottomMargin(double margin)
@@ -3532,7 +3587,7 @@ public sealed partial class DesktopOverlayWindow : Window
             settingsSession.Current.PeekDelayMilliseconds));
     }
 
-    private void ApplyBottomMargin(double margin)
+    private void ApplyBottomMargin(double margin, bool repositionNativeWindow = true)
     {
         BottomMargin = Math.Clamp(
             double.IsFinite(margin) ? margin : GlassDockSettings.DefaultBottomMargin,
@@ -3546,7 +3601,10 @@ public sealed partial class DesktopOverlayWindow : Window
             else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
         }
 
-        windowManager.Position(0, settingsSession.DisplayMode);
+        // Settings changes are dispatched while the Settings window is still
+        // applying controls; the monitor timer owns any native monitor move.
+        if (repositionNativeWindow)
+            windowManager.Position(0, settingsSession.DisplayMode);
         if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
         else UpdateDockWaveOutline();
         UpdateBackdropBounds();
@@ -3556,18 +3614,19 @@ public sealed partial class DesktopOverlayWindow : Window
         previews.Reposition();
     }
 
+    private static TimeSpan MonitorTrackingInterval(DockDisplayMode mode) =>
+        TimeSpan.FromMilliseconds(mode == DockDisplayMode.Pointer ? 90 : 200);
+
     private void ApplyDisplayMode(DockDisplayMode displayMode)
     {
-        windowManager.Position(0, displayMode);
-
-        if (state.State is DockState.Idle or DockState.Hovering)
-            UpdatePeekInput();
-        else
-            UpdateDockWaveOutline();
-
-        pointerInsideDock = windowManager.IsPointerInsideInput();
-        UpdateBackdropBounds();
-        previews.Reposition();
+        if (appliedDisplayMode == displayMode) return;
+        appliedDisplayMode = displayMode;
+        // Do not call Position here. Saving Settings fires synchronously, so a
+        // SetWindowPos here used to race XAML layout/changed notifications and
+        // the display timer. The timer performs one guarded transition and
+        // refreshes capture/input/preview geometry after the HWND has moved.
+        displayTimer.Interval = MonitorTrackingInterval(displayMode);
+        windowManager.InvalidateMonitorMetrics();
 
         var label = displayMode switch
         {

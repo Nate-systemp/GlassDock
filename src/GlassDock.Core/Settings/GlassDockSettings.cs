@@ -30,6 +30,7 @@ public sealed record GlassDockSettings
     public const bool DefaultPinDock = false;
     public const double DefaultClearRefractionStrength = 12;
     public const double DefaultSpecularHighlightAngle = 45;
+    public const bool DefaultCircularHighlightsEnabled = true;
     public const bool DefaultLaunchAtStartup = false;
     public const bool DefaultNotificationBadgesEnabled = false;
     public const GlassMaterialMode DefaultGlassMaterialMode = GlassMaterialMode.Frosted;
@@ -84,6 +85,7 @@ public sealed record GlassDockSettings
     public bool PinDock { get; init; } = DefaultPinDock;
     public double ClearRefractionStrength { get; init; } = DefaultClearRefractionStrength;
     public double SpecularHighlightAngle { get; init; } = DefaultSpecularHighlightAngle;
+    public bool CircularHighlightsEnabled { get; init; } = DefaultCircularHighlightsEnabled;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
     public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;

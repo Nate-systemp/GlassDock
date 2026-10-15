@@ -14,6 +14,7 @@ public sealed class WindowsOverlayManager : IDisposable
     private nint foregroundHook;
     private NativeMethods.Point[]? lastInteractionPolygon;
     private nint inputRegion;
+    private (double Left, double Top, double Right, double Bottom)[] lastInteractionIcons = [];
     private const nuint InputTimer = 0x4744;
     private const nuint TopmostTimer = 0x4745;
 
@@ -448,7 +449,8 @@ public sealed class WindowsOverlayManager : IDisposable
         }
     }
 
-    public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode, Action? beforeMove = null)
+    public bool RepositionIfMonitorChanged(double margin, DockDisplayMode displayMode,
+        Action? beforeMove = null, Action? beforeCrossMonitorMove = null)
     {
         if (disposed || relocating || !NativeMethods.IsWindow(hwnd)) return false;
         var target = fixedMonitor != 0 ? fixedMonitor : ResolveMonitor(displayMode);
@@ -482,6 +484,11 @@ public sealed class WindowsOverlayManager : IDisposable
         try
         {
             beforeMove?.Invoke();
+            // The old WGC pool belongs to a different physical monitor. Drop it
+            // *before* SetWindowPos so no queued draw can present old pixels on
+            // the destination while the new monitor capture is warming up.
+            if (currentMonitor != 0 && currentMonitor != target)
+                beforeCrossMonitorMove?.Invoke();
             // Use the destination whose metrics we just validated. Resolving the
             // pointer again here races rapid moves and monitor removal.
             PositionOnMonitor(margin, target);
@@ -619,7 +626,8 @@ public sealed class WindowsOverlayManager : IDisposable
         return true;
     }
     /// <summary>Keep an input-only region; never clip expanded glass/shadow rendering.</summary>
-    public void SetInteractionPolygon(IReadOnlyList<(double X, double Y)> outline)
+    public void SetInteractionPolygon(IReadOnlyList<(double X, double Y)> outline,
+        IReadOnlyList<(double Left, double Top, double Right, double Bottom)>? iconBounds = null)
     {
         if (outline.Count < 3) return;
         var scale = Scale;
@@ -636,9 +644,31 @@ public sealed class WindowsOverlayManager : IDisposable
         if (polygonWidthDips > 240)
             dropAcquisitionWidthDips = Math.Clamp(polygonWidthDips, 320, CurrentHostWidthDips);
 
-        if (lastInteractionPolygon is { } previous && points.SequenceEqual(previous)) return;
+        if (lastInteractionPolygon is { } previous && points.SequenceEqual(previous) &&
+            lastInteractionIcons.SequenceEqual(iconBounds ?? [])) return;
         var region = NativeMethods.CreatePolygonRgn(points, points.Length, 2 /* WINDING */);
         if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            foreach (var bounds in iconBounds ?? [])
+            {
+                if (!double.IsFinite(bounds.Left) || !double.IsFinite(bounds.Top) ||
+                    !double.IsFinite(bounds.Right) || !double.IsFinite(bounds.Bottom) ||
+                    bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top) continue;
+                var extra = NativeMethods.CreateRectRgn((int)Math.Floor(bounds.Left * scale),
+                    (int)Math.Floor(bounds.Top * scale), (int)Math.Ceiling(bounds.Right * scale),
+                    (int)Math.Ceiling(bounds.Bottom * scale));
+                if (extra == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+                try
+                {
+                    if (NativeMethods.CombineRgn(region, region, extra, 2 /* RGN_OR */) == 0)
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                finally { NativeMethods.DeleteObject(extra); }
+            }
+        }
+        catch { NativeMethods.DeleteObject(region); throw; }
+        lastInteractionIcons = iconBounds?.ToArray() ?? [];
         if (!expandedInput)
         {
             if (NativeMethods.GetCursorPos(out var current)) previousPointer = current;

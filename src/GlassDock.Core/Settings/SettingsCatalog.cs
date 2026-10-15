@@ -30,6 +30,7 @@ public static class SettingsCatalog
         new SettingsSearchEntry("Appearance", "Blur and opacity", "GlassControls", "diffusion tint transparency material"),
         new SettingsSearchEntry("Appearance", "Clear edge refraction", "ClearRefractionStrengthBox", "liquid glass distortion strength"),
         new SettingsSearchEntry("Appearance", "Highlight position", "SpecularHighlightAngleBox", "specular rim lighting angle"),
+        new SettingsSearchEntry("Appearance", "Circular highlights", "CircularHighlightsToggle", "toggle rim circular light reflections all dock modes"),
         new SettingsSearchEntry("Dock", "Icon size", "IconSizeBox", "size scale layout"),
         new SettingsSearchEntry("Dock", "Magnification", "MagnificationScaleBox", "hover zoom grow"),
         new SettingsSearchEntry("Dock", "Icon spacing", "IconSpacingBox", "gap layout"),

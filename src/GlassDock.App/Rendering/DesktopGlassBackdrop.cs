@@ -43,6 +43,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     }
     public bool UseInnerEdge { get; set; }
     public bool UseDockSpecular { get; set; }
+    public bool CircularHighlightsEnabled { get; set; } = true;
     public double SpecularHighlightAngle { get; set; } = 45;
     // Popup-only: soften Acrylic's lightly diffused base so the 12% base stream
     // cannot bring sharp wallpaper details back over the blurred material.
@@ -622,7 +623,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         W.CompositionBrush? specularBody = UseSolidSurface ? solidSurface : effect;
         if ((UseInnerEdge || UseDockSpecular) && specularBody is not null && fallback is null && output is not null)
         {
-            if ((UseDockSpecular || dockStyle == GlassMaterialMode.Clear) && surfaceRegions is null && !clearSpecularUnavailable)
+            if (CircularHighlightsEnabled && (UseDockSpecular || dockStyle == GlassMaterialMode.Clear) && surfaceRegions is null && !clearSpecularUnavailable)
             {
                 try
                 {

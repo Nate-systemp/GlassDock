@@ -51,6 +51,14 @@ public sealed class DockInteractionRegionTests
                 Assert.Equal(!inside, result == -1);
                 Assert.Equal(transparent, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
             }
+            // Enlarged artwork gets input above a completely unchanged pill.
+            // Clearing the icon rectangles must also invalidate the region cache.
+            manager.SetInteractionPolygon([(100, 70), (540, 70), (540, 120), (100, 120)],
+                [(290, 35, 350, 80)]);
+            Hit(320, 40, true); Hit(150, 40, false);
+            Assert.Equal(0, GetWindowRgn(window, region));
+            manager.SetInteractionPolygon([(100, 70), (540, 70), (540, 120), (100, 120)]);
+            Hit(320, 40, false); Hit(320, 100, true);
             for (var i = 0; i < 100; i++)
             {
                 // A wave rising above the base, with transparent space beside it.
