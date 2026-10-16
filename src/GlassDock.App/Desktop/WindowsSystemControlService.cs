@@ -15,6 +15,19 @@ internal readonly record struct WindowsSystemSnapshot(
 
 internal sealed class WindowsSystemControlService
 {
+    private static readonly Type? MmDeviceEnumeratorType =
+        Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"), throwOnError: false);
+
+    private string cachedNetworkName = "Offline";
+    private long lastNetworkQueryTick = long.MinValue;
+    private volatile bool networkDirty = true;
+
+    public WindowsSystemControlService()
+    {
+        NetworkChange.NetworkAvailabilityChanged += (_, _) => networkDirty = true;
+        NetworkChange.NetworkAddressChanged += (_, _) => networkDirty = true;
+    }
+
     public (int Percent, bool Muted)? ReadMasterVolume() => TryGetVolume(out var value, out var muted)
         ? ((int)Math.Round(Math.Clamp(value, 0, 1) * 100), muted) : null;
 
@@ -25,23 +38,34 @@ internal sealed class WindowsSystemControlService
 
         if (networkAvailable)
         {
-            try
+            var now = Environment.TickCount64;
+            if (networkDirty || now - lastNetworkQueryTick >= 15_000)
             {
-                networkName = NetworkInterface
-                    .GetAllNetworkInterfaces()
-                    .Where(adapter =>
-                        adapter.OperationalStatus == OperationalStatus.Up &&
-                        adapter.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
-                        adapter.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
-                    .OrderByDescending(adapter =>
-                        adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
-                    .Select(adapter => adapter.Name)
-                    .FirstOrDefault() ?? "Connected";
+                networkDirty = false;
+                lastNetworkQueryTick = now;
+                try
+                {
+                    cachedNetworkName = NetworkInterface
+                        .GetAllNetworkInterfaces()
+                        .Where(adapter =>
+                            adapter.OperationalStatus == OperationalStatus.Up &&
+                            adapter.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                            adapter.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                        .OrderByDescending(adapter =>
+                            adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+                        .Select(adapter => adapter.Name)
+                        .FirstOrDefault() ?? "Connected";
+                }
+                catch (NetworkInformationException)
+                {
+                    cachedNetworkName = "Connected";
+                }
             }
-            catch (NetworkInformationException)
-            {
-                networkName = "Connected";
-            }
+            networkName = cachedNetworkName;
+        }
+        else
+        {
+            cachedNetworkName = "Offline";
         }
 
         var volume = TryGetVolume(out var scalar, out var muted)
@@ -116,6 +140,8 @@ internal sealed class WindowsSystemControlService
     public void OpenNightLightSettings() => OpenSettings("ms-settings:nightlight");
     public void OpenNotificationSettings() => OpenSettings("ms-settings:notifications");
     public void OpenTraySettings() => OpenSettings("ms-settings:taskbar");
+    public void OpenAccessibilitySettings() => OpenSettings("ms-settings:easeofaccess");
+    public void OpenBatterySettings() => OpenSettings("ms-settings:batterysaver");
 
     private static void OpenSettings(string uri)
     {
@@ -150,17 +176,16 @@ internal sealed class WindowsSystemControlService
 
     private static ComLease<IAudioEndpointVolume> OpenEndpointVolume()
     {
+        if (MmDeviceEnumeratorType is null)
+            return new ComLease<IAudioEndpointVolume>(null);
+
         IMMDeviceEnumerator? enumerator = null;
         IMMDevice? device = null;
         IAudioEndpointVolume? endpoint = null;
 
         try
         {
-            enumerator = (IMMDeviceEnumerator)
-                Activator.CreateInstance(
-                    Type.GetTypeFromCLSID(
-                        new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"),
-                        throwOnError: true)!)!;
+            enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(MmDeviceEnumeratorType)!;
 
             if (enumerator.GetDefaultAudioEndpoint(
                     EDataFlow.Render,

@@ -39,6 +39,19 @@ internal sealed class AdaptiveAppIcon : Grid
     private ApplicationIcon? original;
     private int rasterWidth, rasterHeight;
     private NotificationBadge? badge;
+    private double dockScale = 1;
+    internal void SetDockScale(double scale)
+    {
+        dockScale = scale;
+        Fit();
+        if (stackPreview is not null)
+            foreach (var layer in stackPreview.Children.OfType<AdaptiveAppIcon>()) layer.SetDockScale(scale);
+        if (badge is not null)
+        {
+            badge.SetLayoutScale(scale);
+            badge.Margin = new Thickness(0, -4 * scale, -5 * scale, 0);
+        }
+    }
     private Canvas? stackPreview;
     private ApplicationIcon?[] stackIcons = [];
     private readonly double artworkPadding;
@@ -95,6 +108,7 @@ internal sealed class AdaptiveAppIcon : Grid
                 var layer = new AdaptiveAppIcon(Width * StackLayerScale(depth),
                     maximumHoverScale, false, artworkPadding * StackLayerScale(depth)) { isStackLayer = true };
                 layer.SetDockAppearance(stackAppearance);
+                layer.SetDockScale(dockScale);
                 stackPreview.Children.Add(layer);
             }
             LayoutStackLayers();
@@ -163,6 +177,7 @@ internal sealed class AdaptiveAppIcon : Grid
                 Margin = new Thickness(0, -4, -5, 0)
             };
             Children.Add(badge);
+            SetDockScale(dockScale);
             // Multi-digit counts can change the badge's measured width while
             // hovering. Re-align its foreground mirror after layout catches up.
             badge.SizeChanged += (_, _) => HoverBadgeChanged?.Invoke(this, EventArgs.Empty);
@@ -253,7 +268,7 @@ internal sealed class AdaptiveAppIcon : Grid
     {
         if (pixelWidth == 0 || pixelHeight == 0) return;
         var dpi = XamlRoot?.RasterizationScale ?? 1;
-        var padding = Math.Min(artworkPadding, Math.Max(0, (Math.Min(Width, Height) - 1) / 2));
+        var padding = Math.Min(artworkPadding * dockScale, Math.Max(0, (Math.Min(Width, Height) - 1) / 2));
         var scale = Math.Min(Math.Min((Width - padding * 2) / pixelWidth, (Height - padding * 2) / pixelHeight),
             1 / (dpi * maximumHoverScale));
         image.Width = sourceWidth * scale;

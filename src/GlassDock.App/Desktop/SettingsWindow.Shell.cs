@@ -87,11 +87,17 @@ public sealed partial class SettingsWindow
             ClearRefractionStrengthBox, SpecularHighlightAngleBox })
             box.ValueChanged += (_, _) => SaveEditedControl();
         DockDisplayModeBox.SelectionChanged += (_, _) => SaveEditedControl();
+        DockSizeBox.SelectionChanged += (_, _) => SaveEditedControl();
+        PinnedPlacementBox.SelectionChanged += (_, _) => SaveEditedControl();
+        FloatingDockGapBox.ValueChanged += (_, _) => SaveEditedControl();
         UtilitiesPlacementBox.SelectionChanged += (_, _) => SaveEditedControl();
+        UtilitiesLayoutBox.SelectionChanged += (_, _) => SaveEditedControl();
         UtilitiesShortcutBox.SelectionChanged += (_, _) => SaveEditedControl();
         foreach (var toggle in new[] { UtilitiesFullscreenToggle, UtilitiesSnapToggle, UtilitiesRememberToggle, UtilitiesShortcutToggle })
             toggle.Toggled += (_, _) => SaveEditedControl();
         HoverWaveToggle.Toggled += (_, _) => SaveEditedControl();
+        CircularHighlightsToggle.Toggled += (_, _) => SaveEditedControl();
+        ClearCircularHighlightsToggle.Toggled += (_, _) => SaveEditedControl();
         HoverToExpandOnlyToggle.Toggled += (_, _) => SaveEditedControl();
         LaunchAtStartupToggle.Toggled += (_, _) => SaveEditedControl();
         Closed += (_, _) =>
@@ -185,6 +191,7 @@ public sealed partial class SettingsWindow
         GlassControls.Visibility = glass && mode != DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         ClearMaterialNote.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         ClearOpticsControls.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
+        CircularHighlightsToggle.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Collapsed : Visibility.Visible;
         // Clear's GPU edge refraction does not consume the shared blur/opacity values.
         GlassBlurAmountBox.IsEnabled = DockOpacityBox.IsEnabled = mode != DockAppearanceMode.Clear;
         foreach (var (value, button) in appearanceButtons)

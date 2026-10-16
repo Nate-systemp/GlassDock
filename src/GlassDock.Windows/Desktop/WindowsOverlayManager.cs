@@ -14,7 +14,7 @@ public sealed class WindowsOverlayManager : IDisposable
     private nint foregroundHook;
     private NativeMethods.Point[]? lastInteractionPolygon;
     private nint inputRegion;
-    private (double Left, double Top, double Right, double Bottom)[] lastInteractionIcons = [];
+    private (int Left, int Top, int Right, int Bottom)[] lastInteractionIcons = [];
     private const nuint InputTimer = 0x4744;
     private const nuint TopmostTimer = 0x4745;
 
@@ -37,6 +37,9 @@ public sealed class WindowsOverlayManager : IDisposable
     private bool expandedInput;
     private bool transparentInput;
     private NativeMethods.Point? previousPointer;
+    private bool? lastPointerInsideInput;
+    private nint lastForegroundWindow;
+    private bool lastForegroundEligible;
     private nint currentMonitor;
     private nint fixedMonitor;
     private NativeMethods.Rect currentMonitorBounds;
@@ -54,18 +57,46 @@ public sealed class WindowsOverlayManager : IDisposable
         var suppressed = false;
         if (foreground != 0 && foreground != hwnd)
         {
-            NativeMethods.GetWindowThreadProcessId(foreground, out var owner);
-            var name = new System.Text.StringBuilder(256);
-            NativeMethods.GetClassName(foreground, name, name.Capacity);
-            var eligible = owner != Environment.ProcessId &&
-                name.ToString() is not ("Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd");
-            var monitor = NativeMethods.MonitorFromWindow(hwnd, 2);
-            var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
-            if (NativeMethods.GetMonitorInfo(monitor, ref info) && NativeMethods.GetWindowRect(foreground, out var bounds))
-                suppressed = FullscreenPolicy.CoversMonitor(eligible,
-                    NativeMethods.MonitorFromWindow(foreground, 2) == monitor, NativeMethods.IsIconic(foreground),
-                    bounds.Left, bounds.Top, bounds.Right, bounds.Bottom,
-                    info.Monitor.Left, info.Monitor.Top, info.Monitor.Right, info.Monitor.Bottom);
+            bool eligible;
+            if (foreground == lastForegroundWindow)
+            {
+                eligible = lastForegroundEligible;
+            }
+            else
+            {
+                NativeMethods.GetWindowThreadProcessId(foreground, out var owner);
+                var name = new System.Text.StringBuilder(256);
+                NativeMethods.GetClassName(foreground, name, name.Capacity);
+                eligible = owner != Environment.ProcessId &&
+                    name.ToString() is not ("Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd");
+                lastForegroundWindow = foreground;
+                lastForegroundEligible = eligible;
+            }
+
+            if (eligible && !NativeMethods.IsIconic(foreground) && NativeMethods.GetWindowRect(foreground, out var bounds))
+            {
+                nint monitor;
+                NativeMethods.Rect monitorBounds;
+                if (hasCurrentMonitorMetrics && currentMonitor != 0)
+                {
+                    monitor = currentMonitor;
+                    monitorBounds = currentMonitorBounds;
+                }
+                else
+                {
+                    monitor = NativeMethods.MonitorFromWindow(hwnd, 2);
+                    var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
+                    monitorBounds = NativeMethods.GetMonitorInfo(monitor, ref info) ? info.Monitor : default;
+                }
+
+                if (monitorBounds.Right > monitorBounds.Left && monitorBounds.Bottom > monitorBounds.Top)
+                {
+                    suppressed = FullscreenPolicy.CoversMonitor(eligible,
+                        NativeMethods.MonitorFromWindow(foreground, 2) == monitor, false,
+                        bounds.Left, bounds.Top, bounds.Right, bounds.Bottom,
+                        monitorBounds.Left, monitorBounds.Top, monitorBounds.Right, monitorBounds.Bottom);
+                }
+            }
         }
         if (FullscreenSuppressed == suppressed) return;
         FullscreenSuppressed = suppressed;
@@ -92,6 +123,7 @@ public sealed class WindowsOverlayManager : IDisposable
         hasCurrentMonitorMetrics = false;
         lastInteractionPolygon = null;
         previousPointer = null;
+        lastPointerInsideInput = null;
     }
     // Maximum invisible host width. The actual host is clamped to the current
     // monitor so the visible dock can grow with pinned applications without
@@ -122,7 +154,7 @@ public sealed class WindowsOverlayManager : IDisposable
         try { ClearBackground(dc); } finally { NativeMethods.ReleaseDC(hwnd, dc); }
         // Out-of-context notification only: no input interception or code in other processes.
         foregroundCallback = (_, _, _, _, _, _, _) => EnsureTopmost();
-        foregroundHook = NativeMethods.SetWinEventHook(3, 3, 0, foregroundCallback, 0, 0, 0);
+        foregroundHook = NativeMethods.SetWinEventHook(3, 3, 0, foregroundCallback, 0, 0, 2);
         if (foregroundHook == 0) throw new InvalidOperationException("Cannot monitor foreground changes for the desktop overlay.");
         EnsureTopmost();
         // WinUI can perform one final z-order update after the HWND is first shown.
@@ -169,7 +201,8 @@ public sealed class WindowsOverlayManager : IDisposable
         {
             var point = new NativeMethods.Point { X = (short)(long)lParam, Y = (short)((long)lParam >> 16) };
             var inside = ContainsScreenPoint(point);
-            var acquiringExternalDrag = IsLeftButtonDown() && ContainsDropAcquisitionPoint(point);
+            if (inside) lastPointerInsideInput = true;
+            var acquiringExternalDrag = !inside && IsLeftButtonDown() && ContainsDropAcquisitionPoint(point);
             // OLE asks Windows which HWND owns the current drag point. A fully
             // click-through layered host can otherwise never receive DragEnter,
             // so admit a small acquisition band around the visible dock while
@@ -187,6 +220,7 @@ public sealed class WindowsOverlayManager : IDisposable
             hasCurrentMonitorMetrics = false;
             lastInteractionPolygon = null;
             previousPointer = null;
+            lastPointerInsideInput = null;
         }
 
         if (message == 0x031E) ConfigureTransparency();
@@ -423,9 +457,8 @@ public sealed class WindowsOverlayManager : IDisposable
         // reserve taskbar height + dock height and push maximized windows too far
         // upward. Reserve only the additional pixels needed for the combined
         // bottom work-area inset to equal Doky's visible pinned height.
-        var desiredTotalPixels = Math.Max(1,
-            (int)Math.Round(reservedBottomSpaceDips * Math.Max(scale, 0.001)));
-        var heightPixels = Math.Max(1, desiredTotalPixels - preexistingBottomWorkAreaPixels);
+        var heightPixels = DockSizing.AdditionalReservationPixels(reservedBottomSpaceDips,
+            Math.Max(scale, 0.001), preexistingBottomWorkAreaPixels);
 
         var data = CreateAppBarData();
         data.Rectangle = info.Monitor;
@@ -465,17 +498,22 @@ public sealed class WindowsOverlayManager : IDisposable
         if (!NativeMethods.GetMonitorInfo(target, ref info))
             return false;
 
-        var targetScale = GetMonitorScale(target);
         var bounds = info.Monitor;
-
-        var metricsChanged =
+        var boundsChanged =
             !hasCurrentMonitorMetrics ||
             target != currentMonitor ||
-            Math.Abs(targetScale - currentMonitorScale) > 0.001 ||
             bounds.Left != currentMonitorBounds.Left ||
             bounds.Top != currentMonitorBounds.Top ||
             bounds.Right != currentMonitorBounds.Right ||
             bounds.Bottom != currentMonitorBounds.Bottom;
+
+        if (!boundsChanged)
+            return false;
+
+        var targetScale = GetMonitorScale(target);
+        var metricsChanged =
+            boundsChanged ||
+            Math.Abs(targetScale - currentMonitorScale) > 0.001;
 
         if (!metricsChanged)
             return false;
@@ -553,6 +591,7 @@ public sealed class WindowsOverlayManager : IDisposable
         if (inputRegion != 0) NativeMethods.DeleteObject(inputRegion);
         inputRegion = 0;
         lastInteractionPolygon = null;
+        lastPointerInsideInput = null;
         var scale = Scale;
         // Keep the HWND itself full-size and store the interactive shape separately.
         // OLE drag/drop resolves a target HWND before WinUI raises DragEnter; clipping
@@ -590,7 +629,11 @@ public sealed class WindowsOverlayManager : IDisposable
             return false;
 
         if (inputRegion != 0)
-            return ContainsScreenPoint(point);
+        {
+            var inside = ContainsScreenPoint(point, bounds);
+            if (inside) lastPointerInsideInput = true;
+            return inside;
+        }
 
         var region = NativeMethods.CreateRectRgn(0, 0, 0, 0);
         if (region == 0)
@@ -598,7 +641,9 @@ public sealed class WindowsOverlayManager : IDisposable
         try
         {
             var hasRegion = NativeMethods.GetWindowRgn(hwnd, region) > 0;
-            return hasRegion && PtInRegion(region, point.X - bounds.Left, point.Y - bounds.Top);
+            var inside = hasRegion && PtInRegion(region, point.X - bounds.Left, point.Y - bounds.Top);
+            if (inside) lastPointerInsideInput = true;
+            return inside;
         }
         finally
         {
@@ -618,7 +663,7 @@ public sealed class WindowsOverlayManager : IDisposable
 
     public bool TryGetPointerPosition(out double x, out double y)
     {
-        x = y = 0;
+        x = 0; y = 0;
         if (!NativeMethods.GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds))
             return false;
         x = (point.X - bounds.Left) / Scale;
@@ -631,33 +676,64 @@ public sealed class WindowsOverlayManager : IDisposable
     {
         if (outline.Count < 3) return;
         var scale = Scale;
-        var points = outline.Select(p => new NativeMethods.Point
+        var points = new NativeMethods.Point[outline.Count];
+        var minX = int.MaxValue;
+        var maxX = int.MinValue;
+        for (var i = 0; i < outline.Count; i++)
         {
-            X = (int)Math.Round(p.X * scale), Y = (int)Math.Round(p.Y * scale)
-        }).ToArray();
+            var p = outline[i];
+            var px = (int)Math.Round(p.X * scale);
+            var py = (int)Math.Round(p.Y * scale);
+            points[i] = new NativeMethods.Point { X = px, Y = py };
+            if (px < minX) minX = px;
+            if (px > maxX) maxX = px;
+        }
 
         // Remember the real expanded dock width. While the dock is collapsed,
         // Explorer/OLE still needs a reasonable pre-DragEnter acquisition target;
         // otherwise the click-through host can never become the drop target.
-        var polygonWidthPixels = points.Max(p => p.X) - points.Min(p => p.X);
+        var polygonWidthPixels = maxX - minX;
         var polygonWidthDips = polygonWidthPixels / Math.Max(scale, 0.001);
         if (polygonWidthDips > 240)
             dropAcquisitionWidthDips = Math.Clamp(polygonWidthDips, 320, CurrentHostWidthDips);
 
-        if (lastInteractionPolygon is { } previous && points.SequenceEqual(previous) &&
-            lastInteractionIcons.SequenceEqual(iconBounds ?? [])) return;
+        (int Left, int Top, int Right, int Bottom)[] pixelIcons;
+        if (iconBounds is null || iconBounds.Count == 0)
+        {
+            pixelIcons = [];
+        }
+        else
+        {
+            var list = new List<(int Left, int Top, int Right, int Bottom)>(iconBounds.Count);
+            for (var i = 0; i < iconBounds.Count; i++)
+            {
+                var bounds = iconBounds[i];
+                if (!double.IsFinite(bounds.Left) || !double.IsFinite(bounds.Top) ||
+                    !double.IsFinite(bounds.Right) || !double.IsFinite(bounds.Bottom) ||
+                    bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top) continue;
+                list.Add((
+                    (int)Math.Floor(bounds.Left * scale),
+                    (int)Math.Floor(bounds.Top * scale),
+                    (int)Math.Ceiling(bounds.Right * scale),
+                    (int)Math.Ceiling(bounds.Bottom * scale)));
+            }
+            pixelIcons = list.ToArray();
+        }
+
+        if (lastInteractionPolygon is { } previous && points.AsSpan().SequenceEqual(previous) &&
+            lastInteractionIcons.AsSpan().SequenceEqual(pixelIcons))
+        {
+            DockPerformanceDiagnostics.RecordInputRegion(rebuilt: false);
+            return;
+        }
+        DockPerformanceDiagnostics.RecordInputRegion(rebuilt: true);
         var region = NativeMethods.CreatePolygonRgn(points, points.Length, 2 /* WINDING */);
         if (region == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
         try
         {
-            foreach (var bounds in iconBounds ?? [])
+            foreach (var rect in pixelIcons)
             {
-                if (!double.IsFinite(bounds.Left) || !double.IsFinite(bounds.Top) ||
-                    !double.IsFinite(bounds.Right) || !double.IsFinite(bounds.Bottom) ||
-                    bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top) continue;
-                var extra = NativeMethods.CreateRectRgn((int)Math.Floor(bounds.Left * scale),
-                    (int)Math.Floor(bounds.Top * scale), (int)Math.Ceiling(bounds.Right * scale),
-                    (int)Math.Ceiling(bounds.Bottom * scale));
+                var extra = NativeMethods.CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
                 if (extra == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
                 try
                 {
@@ -668,7 +744,8 @@ public sealed class WindowsOverlayManager : IDisposable
             }
         }
         catch { NativeMethods.DeleteObject(region); throw; }
-        lastInteractionIcons = iconBounds?.ToArray() ?? [];
+        lastInteractionIcons = pixelIcons;
+        lastPointerInsideInput = null;
         if (!expandedInput)
         {
             if (NativeMethods.GetCursorPos(out var current)) previousPointer = current;
@@ -686,33 +763,49 @@ public sealed class WindowsOverlayManager : IDisposable
 
     private bool ContainsScreenPoint(NativeMethods.Point point) =>
         inputRegion != 0 && NativeMethods.GetWindowRect(hwnd, out var bounds) &&
+        ContainsScreenPoint(point, bounds);
+
+    private bool ContainsScreenPoint(NativeMethods.Point point, NativeMethods.Rect bounds) =>
+        inputRegion != 0 &&
         point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom &&
         PtInRegion(inputRegion, point.X - bounds.Left, point.Y - bounds.Top);
 
     private void UpdateInputTransparency()
     {
-        if (inputRegion == 0 || !NativeMethods.GetCursorPos(out var point)) return;
-        var inside = ContainsScreenPoint(point);
-        var acquiringExternalDrag = IsLeftButtonDown() && ContainsDropAcquisitionPoint(point);
+        if (inputRegion == 0 || !NativeMethods.GetCursorPos(out var point) || !NativeMethods.GetWindowRect(hwnd, out var bounds)) return;
+        var inside = ContainsScreenPoint(point, bounds);
+        var acquiringExternalDrag = !inside && IsLeftButtonDown() && ContainsDropAcquisitionPoint(point, bounds);
         SetInputTransparent(!(inside || acquiringExternalDrag));
         var moved = previousPointer is { } previous && (previous.X != point.X || previous.Y != point.Y);
         previousPointer = point;
         // Geometry movement alone must not cause a raised pill to oscillate.
         if (moved)
         {
-            if (inside) PointerMovedInsideInput?.Invoke(this, EventArgs.Empty);
-            else PointerMovedOutsideInput?.Invoke(this, EventArgs.Empty);
+            if (inside)
+            {
+                lastPointerInsideInput = true;
+                PointerMovedInsideInput?.Invoke(this, EventArgs.Empty);
+            }
+            else if (lastPointerInsideInput != false)
+            {
+                lastPointerInsideInput = false;
+                PointerMovedOutsideInput?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else if (inside)
+        {
+            lastPointerInsideInput = true;
         }
     }
 
     private static bool IsLeftButtonDown() =>
         (NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
 
-    private bool ContainsDropAcquisitionPoint(NativeMethods.Point point)
-    {
-        if (!NativeMethods.GetWindowRect(hwnd, out var bounds))
-            return false;
+    private bool ContainsDropAcquisitionPoint(NativeMethods.Point point) =>
+        NativeMethods.GetWindowRect(hwnd, out var bounds) && ContainsDropAcquisitionPoint(point, bounds);
 
+    private bool ContainsDropAcquisitionPoint(NativeMethods.Point point, NativeMethods.Rect bounds)
+    {
         var scale = Math.Max(Scale, 0.001);
         var hostWidthPixels = bounds.Right - bounds.Left;
         var hostHeightPixels = bounds.Bottom - bounds.Top;

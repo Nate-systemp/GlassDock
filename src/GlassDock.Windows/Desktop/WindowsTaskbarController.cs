@@ -180,8 +180,15 @@ public sealed class WindowsTaskbarController : ITaskbarController
         uint? currentExplorer = null;
         foreach (var hwnd in current)
         {
-            if (!IsExplorerTaskbar(hwnd, out var pid))
+            uint pid;
+            if (ownerProcess != 0 && ownedWindows.ContainsKey(hwnd) && GetOwnerProcess(hwnd) == ownerProcess)
+            {
+                pid = ownerProcess;
+            }
+            else if (!IsExplorerTaskbar(hwnd, out pid))
+            {
                 return false;
+            }
 
             if (currentExplorer is null)
                 currentExplorer = pid;
@@ -370,7 +377,14 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         if (eventType == EventObjectShow)
         {
-            if (!IsTaskbarWindow(hwnd) || GetOwnerProcess(hwnd) != ownerProcess)
+            if (objectId != 0 || childId != 0 || hwnd == 0)
+                return;
+
+            if (!ownedWindows.ContainsKey(hwnd) &&
+                (!IsTaskbarWindow(hwnd) || GetOwnerProcess(hwnd) != ownerProcess))
+                return;
+
+            if (GetOwnerProcess(hwnd) != ownerProcess)
                 return;
 
             // Preserve the original visible state before hiding a newly-created
@@ -410,25 +424,41 @@ public sealed class WindowsTaskbarController : ITaskbarController
         const uint MwmoInputAvailable = 0x0004;
         const uint PmRemove = 0x0001;
 
-        NativeMethods.MsgWaitForMultipleObjectsEx(
-            0,
-            0,
-            (uint)Math.Max(0, milliseconds),
-            QsAllInput,
-            MwmoInputAvailable);
+        var durationMs = Math.Max(0, milliseconds);
+        var startTicks = Stopwatch.GetTimestamp();
 
-        while (NativeMethods.PeekMessage(out var message, 0, 0, 0, PmRemove))
+        while (true)
         {
-            NativeMethods.TranslateMessage(ref message);
-            NativeMethods.DispatchMessage(ref message);
+            var pumped = false;
+            while (NativeMethods.PeekMessage(out var message, 0, 0, 0, PmRemove))
+            {
+                pumped = true;
+                NativeMethods.TranslateMessage(ref message);
+                NativeMethods.DispatchMessage(ref message);
+            }
+
+            var elapsedMs = (int)Stopwatch.GetElapsedTime(startTicks).TotalMilliseconds;
+            var remainingMs = durationMs - elapsedMs;
+            if (remainingMs <= 0)
+                break;
+
+            var waitResult = NativeMethods.MsgWaitForMultipleObjectsEx(
+                0,
+                0,
+                (uint)remainingMs,
+                QsAllInput,
+                pumped ? MwmoInputAvailable : 0);
+
+            if (waitResult != 0)
+                break;
         }
     }
 
     private static void HideWindow(nint hwnd)
     {
-        // Explorer may re-show or re-enable the taskbar during a foreground/shell
-        // transition. These calls are idempotent and avoid a check-then-act race.
-        NativeMethods.EnableWindow(hwnd, false);
-        NativeMethods.ShowWindow(hwnd, 0);
+        if (NativeMethods.IsWindowEnabled(hwnd))
+            NativeMethods.EnableWindow(hwnd, false);
+        if (NativeMethods.IsWindowVisible(hwnd))
+            NativeMethods.ShowWindow(hwnd, 0);
     }
 }

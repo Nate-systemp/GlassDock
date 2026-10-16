@@ -63,7 +63,7 @@ public sealed class DockAppMenuWiringTests
         // The approved compact menu scales its original geometry by 85%,
         // keeping corner, row and hover proportions consistent across modes.
         Assert.Contains("MenuSizeScale = 0.85;", window, StringComparison.Ordinal);
-        Assert.Contains("MenuCornerRadius = 9 * MenuSizeScale;", window, StringComparison.Ordinal);
+        Assert.Contains("MenuCornerRadius = 11;", window, StringComparison.Ordinal);
         Assert.Contains("MenuWidth = 258 * MenuSizeScale;", window, StringComparison.Ordinal);
         Assert.Contains("MenuRowHeight = 36 * MenuSizeScale;", window, StringComparison.Ordinal);
         Assert.Contains("MenuRowRadius = 5 * MenuSizeScale;", window, StringComparison.Ordinal);

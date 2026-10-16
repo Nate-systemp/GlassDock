@@ -144,15 +144,22 @@ internal static class ShellApplicationMetadata
         finally { if (instance is not null) Marshal.ReleaseComObject(instance); }
     }
 
+    private static volatile bool comPinnedUnavailable;
+
     internal static IReadOnlyList<PinnedApplication> ReadPinned(WindowsApplicationIconService icons)
     {
-        try
+        if (!comPinnedUnavailable)
         {
-            var comPins = ReadPinnedFromCom(icons);
-            if (comPins.Count > 0) return comPins;
-        }
-        catch (Exception exception) when (exception is COMException or InvalidCastException or IOException or UnauthorizedAccessException)
-        {
+            try
+            {
+                var comPins = ReadPinnedFromCom(icons);
+                if (comPins.Count > 0) return comPins;
+            }
+            catch (Exception exception) when (exception is COMException or InvalidCastException or IOException or UnauthorizedAccessException)
+            {
+                if (exception is InvalidCastException or COMException)
+                    comPinnedUnavailable = true;
+            }
         }
 
         return ReadPinnedFromTaskband(icons);

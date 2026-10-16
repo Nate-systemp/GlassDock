@@ -23,6 +23,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
 {
     private readonly LiquidGlassDrawingTarget? popupTarget;
     private readonly LiquidGlassRim rim = new();
+    public bool CircularHighlightsEnabled { get; set; } = true;
+    public float DockLayoutScale { get; set; } = 1;
     private readonly Action<CanvasDrawingSession, CanvasGeometry> drawRim;
     private CropEffect? popupCrop;
     private GaussianBlurEffect? popupBlur;
@@ -62,18 +64,20 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private CanvasDevice? device;
     private CanvasSwapChain? swapChain;
     private PixelShaderEffect? shader;
+    private LiquidGlassShaderState? shaderState, lensShaderState;
     private DesktopCaptureSource? capture;
     private DesktopCaptureSource.Placement placement;
     private Direct3D11CaptureFrame? currentFrame;
     private CanvasBitmap? bitmap;
     private bool disposed, failed, enabled, screenshotFrozen;
-    private int queued;
+    private readonly GlassDock.Core.Desktop.CaptureDrawGate drawGate = new();
+    private long queuedAt;
     private Vector4 dock, wave;
     private float scale = 1;
     // Stronger Clear rim bending within the existing narrow edge band.
     // The drag lens has its own material and retains its current optics.
     private LiquidGlassMaterial material = new() { RefractionStrength = 12 };
-    public LiquidGlassMaterial Material { get => material; set => material = value.Normalize(); }
+    public LiquidGlassMaterial Material { get => material; set { if (material != value) material = value.Normalize(); } }
 
     public DokyLiquidGlassSurface(nint window, DispatcherQueue queue, Func<CanvasGeometry?> geometry, Action<bool> suppressNative,
         bool popup = false)
@@ -109,7 +113,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         lensBrush?.Dispose(); lensBrush = null;
         lensSurface?.Dispose(); lensSurface = null;
         lensGraphicsDevice?.Dispose(); lensGraphicsDevice = null;
-        lensShader?.Dispose(); lensShader = null;
+        lensShader?.Dispose(); lensShader = null; lensShaderState = null;
         lensScene?.Dispose(); lensScene = null;
         lensBackdrop?.Dispose(); lensBackdrop = null;
         lensComposite?.Dispose(); lensComposite = null;
@@ -130,9 +134,17 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             else return;
         }
         dock = dockBounds; wave = waveShape; scale = dpiScale;
+        if (!active && paintDock is null && !clearActive && !enabled && !failed && capture is null)
+            return;
         clearActive = active;
-        Output.Opacity = opacity;
-        if (!active) { Output.Visibility = Visibility.Collapsed; setNativeSuppressed(false); }
+        if (Math.Abs(Output.Opacity - opacity) > 0.0001)
+            Output.Opacity = opacity;
+        if (!active)
+        {
+            if (Output.Visibility != Visibility.Collapsed)
+                Output.Visibility = Visibility.Collapsed;
+            setNativeSuppressed(false);
+        }
         if (!active && paintDock is null)
         {
             enabled = false; failed = false;
@@ -170,6 +182,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     popupExposure = new() { Source = popupBlur, Exposure = UtilityMaterial.LiquidBackdropExposure };
                 }
                 capture = new(hwnd, device.As<IDirect3DDevice>(), next);
+                if (GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled)
+                    StartupDiagnostics.Write($"Capture source: hwnd={hwnd:X} monitor={next.Monitor:X} pixels={next.MonitorWidth}x{next.MonitorHeight} popup={popupTarget is not null}");
                 capture.FrameAvailable += FrameAvailable;
                 capture.Closed += CaptureClosed;
                 SetStatus(CaptureBorderPermission.IsAllowed
@@ -179,8 +193,13 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             if (swapChain is not null && (swapChain.Size.Width != next.Width || swapChain.Size.Height != next.Height))
                 swapChain.ResizeBuffers(next.Width, next.Height);
             // The swap chain is physical pixels at 96 DPI; XAML lays out in DIPs.
-            Panel.Width = next.Width / scale; Panel.Height = next.Height / scale;
-            LensPanel.Width = Panel.Width; LensPanel.Height = Panel.Height;
+            var panelWidth = next.Width / scale;
+            var panelHeight = next.Height / scale;
+            if (Math.Abs(Panel.Width - panelWidth) > 0.01 || Math.Abs(Panel.Height - panelHeight) > 0.01)
+            {
+                Panel.Width = panelWidth; Panel.Height = panelHeight;
+                LensPanel.Width = panelWidth; LensPanel.Height = panelHeight;
+            }
             QueueDraw();
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
@@ -229,23 +248,35 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
     }
 
-    private void FrameAvailable(object? sender, EventArgs args) { if (!screenshotFrozen) QueueDraw(); }
+    private void FrameAvailable(object? sender, EventArgs args) { if (!screenshotFrozen) QueueDraw(visualChanged: false); }
     private void CaptureClosed(object? sender, EventArgs args) => dispatcher.TryEnqueue(() =>
     {
         if (!disposed && ReferenceEquals(sender, capture)) Fail(new InvalidOperationException("Monitor capture closed."));
     });
-    private void QueueDraw()
+    private void QueueDraw(bool visualChanged = true)
     {
-        if (Interlocked.Exchange(ref queued, 1) != 0) return;
-        if (!dispatcher.TryEnqueue(Draw)) Interlocked.Exchange(ref queued, 0);
+        if (!drawGate.Request(visualChanged)) return;
+        queuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        if (!dispatcher.TryEnqueue(Draw)) drawGate.EnqueueFailed();
     }
     private void Draw()
     {
-        Interlocked.Exchange(ref queued, 0);
+        var scheduledAt = queuedAt;
+        var visualChanged = drawGate.Begin();
         if (disposed || !enabled || screenshotFrozen || capture is null || shader is null || (swapChain is null && popupTarget is null)) return;
+        var started = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        long preparedAt = 0;
+        if (started != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordDrawQueueDelay(started - scheduledAt);
         try
         {
             var pending = capture.TakeFrame();
+            // A queued FrameArrived notification can outlive the frame it announced.
+            // Keep the already-presented output unless geometry/content changed.
+            if (pending is null && !visualChanged)
+            {
+                GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordEmptyCaptureDraw();
+                return;
+            }
             if (pending is not null)
             {
                 if (pending.ContentSize.Width != placement.MonitorWidth || pending.ContentSize.Height != placement.MonitorHeight)
@@ -272,6 +303,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             if (bitmap is null) return;
             var geometry = outline();
             if (geometry is null) return;
+            GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordCaptureDraw();
             shader.Source1 = bitmap;
             if (popupCrop is not null)
             {
@@ -292,6 +324,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 wave * scale + new Vector4(origin.X, 0, 0, 0), new(placement.MonitorWidth, placement.MonitorHeight), Vector4.Zero);
             if (clearActive)
             {
+                if (started != 0) preparedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 var crop = new global::Windows.Foundation.Rect(placement.X, placement.Y, placement.Width, placement.Height);
                 if (popupTarget is not null) popupTarget.Draw(device!, shader, geometry, crop, scale, drawRim);
                 else
@@ -313,6 +346,12 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 : "Liquid drag lens active · GPU dock refraction");
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
+        finally
+        {
+            if (started != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordDrawDuration(System.Diagnostics.Stopwatch.GetTimestamp() - started);
+            if (preparedAt != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordRendererTiming(
+                popupTarget is not null, preparedAt - started, System.Diagnostics.Stopwatch.GetTimestamp() - preparedAt);
+        }
     }
 
     /// <summary>Stops the live desktop capture when the dock returns to its pill.</summary>
@@ -327,17 +366,29 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private void ConfigureShader(PixelShaderEffect effect, LiquidGlassMaterial m, Vector4 bounds,
         Vector4 shape, Vector2 frame, Vector4 lens)
     {
-        effect.Properties["Dock"] = bounds; effect.Properties["Wave"] = shape;
-        effect.Properties["Optics"] = new Vector4(m.RefractionStrength * scale, m.EdgeThickness * scale,
-            m.RefractionFalloff, m.DiffusionAmount * scale);
-        effect.Properties["Lighting"] = new Vector4(m.TintOpacity, m.SpecularIntensity, m.SpecularFalloff,
-            m.SpecularAngleDegrees * MathF.PI / 180);
         lens.Y = m.ChromaticDispersion * scale;
-        effect.Properties["FrameSize"] = frame; effect.Properties["Lens"] = lens;
+        var next = new LiquidGlassShaderState(bounds, shape,
+            new(m.RefractionStrength * scale, m.EdgeThickness * scale, m.RefractionFalloff, m.DiffusionAmount * scale),
+            new(m.TintOpacity, m.SpecularIntensity, m.SpecularFalloff, m.SpecularAngleDegrees * MathF.PI / 180), frame, lens);
+        ref var previous = ref (ReferenceEquals(effect, shader) ? ref shaderState : ref lensShaderState);
+        var changes = next.ChangesFrom(previous);
+        GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordShaderChanges(changes);
+        // Property sets cross the WinRT boundary and box vectors. Retain identical
+        // constants, but write every changed bit exactly, including subpixel motion.
+        if ((changes & 1) != 0) effect.Properties["Dock"] = next.Dock;
+        if ((changes & 2) != 0) effect.Properties["Wave"] = next.Wave;
+        if ((changes & 4) != 0) effect.Properties["Optics"] = next.Optics;
+        if ((changes & 8) != 0) effect.Properties["Lighting"] = next.Lighting;
+        if ((changes & 16) != 0) effect.Properties["FrameSize"] = next.FrameSize;
+        if ((changes & 32) != 0) effect.Properties["Lens"] = next.Lens;
+        previous = next;
     }
 
-    private void DrawRim(CanvasDrawingSession drawing, CanvasGeometry geometry) =>
-        rim.Draw(drawing, geometry, dock, scale, Material);
+    private void DrawRim(CanvasDrawingSession drawing, CanvasGeometry geometry)
+    {
+        if (popupTarget is not null || CircularHighlightsEnabled)
+            rim.Draw(drawing, geometry, dock, scale, Material, dockSurface: popupTarget is null, strokeScale: popupTarget is null ? DockLayoutScale : 1);
+    }
 
     private void DrawLens(CanvasGeometry geometry)
     {
@@ -428,14 +479,16 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         Output.Visibility = Visibility.Collapsed;
         popupTarget?.Dispose();
         setNativeSuppressed(false);
-        if (capture is not null) { capture.FrameAvailable -= FrameAvailable; capture.Closed -= CaptureClosed; capture.Dispose(); capture = null; }
-        shader?.Dispose(); shader = null;
+        if (capture is not null) { capture.FrameAvailable -= FrameAvailable; capture.Closed -= CaptureClosed; }
+        shader?.Dispose(); shader = null; shaderState = null;
         rim.Dispose();
         popupExposure?.Dispose(); popupExposure = null;
         popupBlur?.Dispose(); popupBlur = null;
         popupCrop?.Dispose(); popupCrop = null;
         bitmap?.Dispose(); bitmap = null;
         currentFrame?.Dispose(); currentFrame = null;
+        // Release all effect/bitmap references to the pooled surface BEFORE its pool.
+        capture?.Dispose(); capture = null;
         Panel.SwapChain = null;
         swapChain?.Dispose(); swapChain = null;
         device = null; // Shared Win2D device is borrowed, never disposed here.

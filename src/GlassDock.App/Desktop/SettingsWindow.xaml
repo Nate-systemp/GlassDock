@@ -88,6 +88,7 @@
           <TextBlock x:Name="ClearMaterialNote" Text="Settings uses Frosted glass for readability while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
           <StackPanel x:Name="ClearOpticsControls" Spacing="10" Visibility="Collapsed">
             <TextBlock Text="Liquid Glass" FontSize="17" FontWeight="SemiBold" />
+            <ToggleSwitch x:Name="ClearCircularHighlightsToggle" Header="Circular highlights" OnContent="On" OffContent="Off" AutomationProperties.Name="Clear dock circular highlights" />
             <TextBlock Text="Adjust distortion along the Clear dock’s edges. 0 removes the bend; 12 is the default. Changes apply when you release the slider." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
             <Grid x:Name="ClearRefractionStrengthBoxRow" ColumnSpacing="12">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions>
@@ -198,17 +199,7 @@
           </Border>
           <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="18">
-              <Grid ColumnSpacing="24">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="180" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="3" VerticalAlignment="Center">
-                  <TextBlock Text="Pin dock" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="Keep Doky expanded and attached to the bottom edge of the screen. Auto-hide and peek are paused while pinned." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-                <ToggleSwitch x:Name="PinDockToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="PinDockToggleToggled" AutomationProperties.Name="Pin Doky to the bottom edge" />
-              </Grid>
+
               <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
               <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
               <Grid ColumnSpacing="24">
@@ -285,6 +276,26 @@
             <TextBlock Text="Behavior" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Fine-tune how Doky responds to you." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
+              <Grid ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="180" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Text="Pin dock" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Keep Doky visible and reserve screen space. Choose floating or bottom-attached placement below." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch x:Name="PinDockToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="PinDockToggleToggled" AutomationProperties.Name="Pin Doky to the bottom edge" />
+              </Grid>
+          <ComboBox x:Name="DockSizeBox" Header="Dock size" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="70% — Compact" /><ComboBoxItem Content="80%" /><ComboBoxItem Content="100% — Original" />
+          </ComboBox>
+          <ComboBox x:Name="PinnedPlacementBox" Header="Pinned dock placement" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Bottom-attached" /><ComboBoxItem Content="Floating" />
+          </ComboBox>
+          <NumberBox x:Name="FloatingDockGapBox" Header="Floating bottom gap (DIP at 100%)" Minimum="8" Maximum="32" SmallChange="1" Value="14" />
+          <TextBlock Text="Screen space is reserved automatically while Pin Dock is on. The floating gap scales with dock size." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+
           <Grid ColumnSpacing="24">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*" />
@@ -444,8 +455,12 @@
             <ComboBoxItem Content="Inside Dock" />
             <ComboBoxItem Content="Separate Floating Button" />
             <ComboBoxItem Content="Keyboard Shortcut Only" />
+            <ComboBoxItem Content="Split Dock" />
           </ComboBox>
-          <TextBlock Text="Floating Utilities remain visible at the top of the screen. Doky reserves a transparent strip so maximized windows start below them. Drag left or right to reposition." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+          <TextBlock Text="Separate Floating Button stays in the reserved top strip. Split Dock keeps Utilities at the far right beside the dock. Hold empty pill padding to change layout, or restore Hidden Utilities here." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+          <ComboBox x:Name="UtilitiesLayoutBox" Header="Split Utilities layout" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Expanded — All controls" /><ComboBoxItem Content="Compact — Clock only" /><ComboBoxItem Content="Hidden" />
+          </ComboBox>
           <ToggleSwitch x:Name="UtilitiesFullscreenToggle" Header="Hide during fullscreen (not used by floating top bar)" Visibility="Collapsed" />
           <ToggleSwitch x:Name="UtilitiesSnapToggle" Header="Snap to screen edges" />
           <ToggleSwitch x:Name="UtilitiesRememberToggle" Header="Remember position" />

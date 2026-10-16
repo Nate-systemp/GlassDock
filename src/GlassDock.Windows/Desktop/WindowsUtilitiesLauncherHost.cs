@@ -170,6 +170,28 @@ public sealed class WindowsUtilitiesLauncherHost : IDisposable
     private static bool RectEquals(NativeMethods.Rect a, NativeMethods.Rect b) =>
         a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
 
+    /// <summary>Limit native mouse input to the visible right-hand Split pill.
+    /// Called only when expansion starts/finishes, never on animation frames.
+    /// HWND ownership of the region transfers to Windows on success.</summary>
+    public bool SetSplitInputRegion(int windowWidth, int windowHeight, int visibleWidth)
+    {
+        if (disposed) return false;
+        windowWidth = Math.Max(1, windowWidth);
+        windowHeight = Math.Max(1, windowHeight);
+        var (left, _) = FloatingUtilityPlacement.SplitInputRegion(windowWidth, visibleWidth);
+        var region = NativeMethods.CreateRectRgn(left, 0, windowWidth, windowHeight);
+        if (region == 0) return false;
+        if (NativeMethods.SetWindowRgn(hwnd, region, true) != 0) return true;
+        NativeMethods.DeleteObject(region);
+        return false;
+    }
+
+    /// <summary>Return HWND shaping to WinUI when switching away from Split.</summary>
+    public void ClearSplitInputRegion()
+    {
+        if (!disposed) NativeMethods.SetWindowRgn(hwnd, 0, true);
+    }
+
     public double Scale => Math.Max(1, GetDpiForWindow(hwnd) / 96d);
     public (int X, int Y) Cursor()
     {

@@ -14,6 +14,7 @@ internal sealed class DockIconTransition : IDisposable
     private double expandedWidth = 560, expandedHeight = 68;
     private readonly long widthToken, heightToken, iconHeightToken;
     private bool disposed;
+    public double LayoutScale { get; set; } = 1;
 
     public void SetExpandedSize(double width, double height)
     {
@@ -40,7 +41,7 @@ internal sealed class DockIconTransition : IDisposable
         var height = double.IsFinite(icons.Height) && icons.Height > 0 ? icons.Height : 68;
         var width = double.IsFinite(surface.Width) ? surface.Width : surface.ActualWidth;
         var dockHeight = double.IsFinite(surface.Height) ? surface.Height : surface.ActualHeight;
-        var motion = DockIconMotion.FromGeometry(width, dockHeight, expandedWidth, expandedHeight, height);
+        var motion = DockIconMotion.FromGeometry(width, dockHeight, expandedWidth, expandedHeight, height, LayoutScale);
         transform.ScaleX = transform.ScaleY = motion.Scale;
         transform.TranslateY = motion.OffsetY;
         icons.Opacity = motion.Opacity;

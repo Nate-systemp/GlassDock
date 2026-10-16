@@ -19,6 +19,7 @@ internal sealed class LiquidGlassDrawingTarget : IDisposable
     private CompositionSurfaceBrush? brush;
     private SpriteVisual? visual;
     private Vector2 size;
+    private Vector2 logicalSize;
 
     public void Draw(CanvasDevice device, ICanvasImage image, CanvasGeometry geometry,
         global::Windows.Foundation.Rect source, float scale, Action<CanvasDrawingSession, CanvasGeometry> drawRim)
@@ -39,8 +40,13 @@ internal sealed class LiquidGlassDrawingTarget : IDisposable
             size = next;
         }
         if (size != next) { CanvasComposition.Resize(surface, new(next.X, next.Y)); size = next; }
-        Element.Width = next.X / scale; Element.Height = next.Y / scale;
-        visual!.Size = next / scale;
+        var nextLogical = next / scale;
+        if (logicalSize != nextLogical)
+        {
+            Element.Width = nextLogical.X; Element.Height = nextLogical.Y;
+            visual!.Size = nextLogical;
+            logicalSize = nextLogical;
+        }
         using var drawing = CanvasComposition.CreateDrawingSession(surface);
         drawing.Clear(Microsoft.UI.Colors.Transparent);
         using (drawing.CreateLayer(1, geometry))
@@ -59,5 +65,6 @@ internal sealed class LiquidGlassDrawingTarget : IDisposable
         brush?.Dispose(); brush = null;
         surface?.Dispose(); surface = null;
         graphics?.Dispose(); graphics = null;
+        logicalSize = default;
     }
 }

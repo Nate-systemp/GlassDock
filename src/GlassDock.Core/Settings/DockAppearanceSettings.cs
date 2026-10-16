@@ -22,8 +22,16 @@ public readonly record struct DockAppearanceSettings(
     private const double HorizontalPadding = 36;
     private const double MagnificationSigma = 52;
 
-    public double ButtonWidth => IconSize + 12;
-    public double ButtonHeight => IconSize + 16;
+    public double LayoutScale { get; init; } = 1;
+    public bool FitHoverSlots { get; init; }
+    public double ButtonWidth => FitHoverSlots ? Math.Max(IconSize + 12 * LayoutScale, IconSize * 1.375 + 2 * LayoutScale - IconSpacing) : IconSize + 12 * LayoutScale;
+    public double ButtonHeight => IconSize + 16 * LayoutScale;
+
+    public DockAppearanceSettings ForDock(double scale) => this with
+    {
+        LayoutScale = scale, FitHoverSlots = true, IconSize = IconSize * scale, IconSpacing = IconSpacing * scale,
+        BorderThickness = BorderThickness * scale
+    };
 
     public double TargetDockWidth(int iconCount)
     {

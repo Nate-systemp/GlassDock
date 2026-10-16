@@ -128,6 +128,9 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         AddUtilityAction("Hidden Tray", () => TrayRequested?.Invoke());
         AddUtilityAction("Calendar", () => CalendarRequested?.Invoke());
         AddUtilityAction("Utilities Settings", () => UtilitiesSettingsRequested?.Invoke());
+        AddUtilityAction("Airplane mode settings", controls.OpenAirplaneSettings);
+        AddUtilityAction("Accessibility settings", controls.OpenAccessibilitySettings);
+        AddUtilityAction("Energy saver and battery settings", controls.OpenBatterySettings);
         more.Flyout = utilityMenu;
         headingRow.Children.Add(more);
         panel.Children.Add(headingRow);

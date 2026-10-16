@@ -19,8 +19,15 @@ namespace GlassDock.App.Desktop;
 /// </summary>
 internal sealed class CalendarPopoverWindow : Window
 {
-    private const double PanelWidth = 554;
-    private const double PanelHeight = 374;
+    private const double StandardPanelWidth = 554;
+    private const double StandardPanelHeight = 374;
+    // Split Dock's clock opens a vertical, single-column calendar rather than
+    // duplicating the wide Control Center calendar or the Windows Win+N panel.
+    private const double SplitPanelWidth = 342;
+    private const double SplitPanelHeight = 448;
+    private readonly bool compactSplit;
+    private double PanelWidth => compactSplit ? SplitPanelWidth : StandardPanelWidth;
+    private double PanelHeight => compactSplit ? SplitPanelHeight : StandardPanelHeight;
     private const double Gutter = UtilityPopupStyle.Gutter;
 
     private readonly DesktopGlassBackdrop backdrop = new();
@@ -45,8 +52,10 @@ internal sealed class CalendarPopoverWindow : Window
     private bool closed;
 
     public CalendarPopoverWindow(DockAppearanceSettings appearance,
-        DockAppearanceMode dockMode, Func<bool>? utilityOwnsPointer = null)
+        DockAppearanceMode dockMode, Func<bool>? utilityOwnsPointer = null,
+        bool compactSplit = false)
     {
+        this.compactSplit = compactSplit;
         Title = "Doky Calendar";
         WindowBranding.Apply(this);
         AppWindow.IsShownInSwitchers = false;
@@ -70,8 +79,18 @@ internal sealed class CalendarPopoverWindow : Window
             Margin = new Thickness(Gutter + 19, Gutter + 17, Gutter + 19, Gutter + 17),
             ColumnSpacing = 17
         };
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(174) });
-        layout.ColumnDefinitions.Add(new ColumnDefinition());
+        if (compactSplit)
+        {
+            layout.RowSpacing = 12;
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+        else
+        {
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(174) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition());
+        }
 
         var left = new Grid { RowSpacing = 9 };
         left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -128,9 +147,30 @@ internal sealed class CalendarPopoverWindow : Window
         selectionStatus.TextWrapping = TextWrapping.Wrap;
         noteContent.Children.Add(selectionStatus);
         note.Child = noteContent;
-        Grid.SetRow(note, 2);
-        left.Children.Add(note);
-        layout.Children.Add(left);
+        if (compactSplit)
+        {
+            // Keep an elegant date/time heading above the month, and the
+            // selected-day detail below it. No Windows notification clone.
+            weekday.CharacterSpacing = 110;
+            clock.FontSize = 26;
+            period.FontSize = 12;
+            period.Margin = new Thickness(0, 0, 0, 5);
+            heading.Spacing = 3;
+            heading.Margin = new Thickness(2, 0, 0, 0);
+            left.RowDefinitions.Clear();
+            left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(left, 0);
+            layout.Children.Add(left);
+            note.Padding = new Thickness(12, 7, 12, 7);
+            Grid.SetRow(note, 2);
+            layout.Children.Add(note);
+        }
+        else
+        {
+            Grid.SetRow(note, 2);
+            left.Children.Add(note);
+            layout.Children.Add(left);
+        }
 
         var calendarLayout = new Grid
         {
@@ -184,7 +224,8 @@ internal sealed class CalendarPopoverWindow : Window
             CornerRadius = new CornerRadius(17),
             Child = calendarLayout
         };
-        Grid.SetColumn(calendarCard, 1);
+        if (compactSplit) Grid.SetRow(calendarCard, 1);
+        else Grid.SetColumn(calendarCard, 1);
         layout.Children.Add(calendarCard);
         root.Children.Add(layout);
 
@@ -371,6 +412,22 @@ internal sealed class CalendarPopoverWindow : Window
     public void Present() { presentation.Present(); timer.Start(); Refresh(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
+
+    public void PositionNearSplitClock(AppWindow owner, double scale)
+    {
+        // Align the calendar's RIGHT edge to the time pill's right edge.
+        // The panel floats above the Utilities pill, clamped to the monitor.
+        scale = double.IsFinite(scale) && scale > 0 ? scale : 1;
+        var popupWidthPx = (PanelWidth + Gutter * 2) * scale;
+        var anchorX = (owner.Size.Width - popupWidthPx / 2) / scale;
+        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, 0,
+            PanelWidth, PanelHeight);
+        // Animate from the physical clock instead of the middle of the panel.
+        presentation.SetTargetWindowGeometry(
+            owner.Position.X + owner.Size.Width - 48 * scale,
+            owner.Position.Y + owner.Size.Height / 2.0, scale);
+        host.InputHeightPixels = presentation.InputHeightPixels;
+    }
 
     public void PositionNear(AppWindow owner, double scale, double anchorX,
         double anchorY, double dockTop)

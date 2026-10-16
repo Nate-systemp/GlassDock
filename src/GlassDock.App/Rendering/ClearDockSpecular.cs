@@ -78,7 +78,7 @@ internal sealed class ClearDockSpecular : IDisposable
         }
     }
 
-    public void SetBounds(double width, double height, double top, double dockHeight, double dpi, double dockWidth, double angle = 45)
+    public void SetBounds(double width, double height, double top, double dockHeight, double dpi, double dockWidth, double angle = 45, double? leftOverride = null)
     {
         scale = dpi;
         stroke.StrokeThickness = (float)(thickness * 4 * dpi);
@@ -96,17 +96,25 @@ internal sealed class ClearDockSpecular : IDisposable
             var w = Math.Max(1, dockWidth * dpi);
             var h = Math.Max(1, dockHeight * dpi);
             var gradient = DockSpecularLighting.Gradient(w, h, angle);
-            var origin = new Vector2((float)((width - dockWidth) * dpi / 2), (float)(top * dpi));
+            var origin = new Vector2((float)((leftOverride ?? (width - dockWidth) / 2) * dpi), (float)(top * dpi));
             light.StartPoint = origin + gradient.Start;
             light.EndPoint = origin + gradient.End;
         }
     }
 
+    private BackdropCompositionTrack? pressTrack;
+    public void AnimatePress(PopupCompositionFrame[] frames, TimeSpan duration, float units)
+    {
+        pressTrack ??= new(visual, animateOpacity: false);
+        pressTrack.Bind();
+        pressTrack.Start(frames, duration, units);
+    }
     public void SetTransform(Matrix4x4 matrix) => visual.TransformMatrix = matrix;
     public void SetVisible(bool visible) => visual.IsVisible = visible;
 
     public void Dispose()
     {
+        pressTrack?.Dispose();
         Brush.Dispose(); factory.Dispose(); lightSource.Dispose(); lightSurface.Dispose(); lightVisual.Dispose(); lighting.Dispose();
         foreach (var stop in stops) stop.Dispose();
         light.Dispose(); mask.Dispose(); surface.Dispose(); capture.Dispose(); visual.Dispose(); stroke.Dispose(); white.Dispose();

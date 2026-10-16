@@ -28,13 +28,73 @@ public sealed class WindowsApplicationService : IApplicationService
     private IReadOnlyList<PinnedApplication> currentPins = Array.Empty<PinnedApplication>();
     private int pinRevision;
     private IReadOnlyList<DockApplication> currentApplications = Array.Empty<DockApplication>();
+    private sealed record CachedWindowMetadata(
+        uint HostProcessId,
+        uint ResolvedProcessId,
+        string Path,
+        int SessionId,
+        long StartTicks,
+        string Name,
+        string? AppId,
+        ApplicationIdentity Identity);
+
+    private readonly ConcurrentDictionary<nint, byte> trackedWindows = new();
+    private readonly Dictionary<nint, CachedWindowMetadata> windowMetadataCache = new();
+    private readonly int currentSessionId = Process.GetCurrentProcess().SessionId;
+    private ApplicationSnapshot? lastPublishedSnapshot;
     public event EventHandler<ApplicationSnapshot>? SnapshotChanged;
 
     public WindowsApplicationService() => callback = (_, eventId, window, objectId, childId, _, _) =>
     {
-        if (eventId == 3) activationTimes[window] = Stopwatch.GetTimestamp();
-        if (eventId == 0x8001 && objectId == 0) activationTimes.TryRemove(window, out _);
-        if (eventId is 3 or 0x0020 || (objectId == 0 && childId == 0)) RequestRefresh();
+        if (eventId == 3)
+        {
+            activationTimes[window] = Stopwatch.GetTimestamp();
+            RequestRefresh();
+            return;
+        }
+
+        if (eventId == 0x0020)
+        {
+            RequestRefresh();
+            return;
+        }
+
+        if (window == 0 || objectId != 0 || childId != 0)
+            return;
+
+        if (eventId == 0x8001)
+            activationTimes.TryRemove(window, out _);
+
+        var isTracked = trackedWindows.ContainsKey(window);
+        if (eventId is 0x8001 or 0x8003)
+        {
+            if (isTracked)
+                RequestRefresh();
+            return;
+        }
+
+        if (eventId == 0x800C)
+        {
+            if (isTracked && ApplicationNative.IsWindowVisible(window))
+                RequestRefresh();
+            return;
+        }
+
+        if (eventId is 0x8000 or 0x8002)
+        {
+            if (!isTracked)
+            {
+                if (!ApplicationNative.IsWindowVisible(window))
+                    return;
+                var style = ApplicationNative.GetWindowLongPtr(window, -16).ToInt64();
+                if ((style & 0x40000000L) != 0) // WS_CHILD
+                    return;
+            }
+            RequestRefresh();
+            return;
+        }
+
+        RequestRefresh();
     };
 
     public void Start()
@@ -103,7 +163,15 @@ public sealed class WindowsApplicationService : IApplicationService
                     var applications = pinStore.ApplyOrder(DockApplicationCollection.Combine(pins, visibleWindows));
                     Volatile.Write(ref currentApplications, applications);
                     icons.Retain(pins.Select(pin => pin.Identity.Key).Concat(windows.Select(window => window.Identity.Key)));
-                    if (!stopping) SnapshotChanged?.Invoke(this, new(pinStore.ApplyStacks(applications), pinWarning));
+                    if (!stopping)
+                    {
+                        var nextSnapshot = new ApplicationSnapshot(pinStore.ApplyStacks(applications), pinWarning);
+                        if (!SnapshotEquals(lastPublishedSnapshot, nextSnapshot))
+                        {
+                            lastPublishedSnapshot = nextSnapshot;
+                            SnapshotChanged?.Invoke(this, nextSnapshot);
+                        }
+                    }
                 }
                 catch (Exception error) when (error is COMException or Win32Exception or InvalidOperationException)
                 {
@@ -118,12 +186,61 @@ public sealed class WindowsApplicationService : IApplicationService
         finally { refresh.Dispose(); }
     }
 
+    private static bool SnapshotEquals(ApplicationSnapshot? previous, ApplicationSnapshot next)
+    {
+        if (previous is null)
+            return false;
+        if (!string.Equals(previous.Warning, next.Warning, StringComparison.Ordinal))
+            return false;
+        var prevApps = previous.Applications;
+        var nextApps = next.Applications;
+        if (prevApps.Count != nextApps.Count)
+            return false;
+        for (var i = 0; i < prevApps.Count; i++)
+        {
+            if (!DockApplicationEquals(prevApps[i], nextApps[i]))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool DockApplicationEquals(DockApplication a, DockApplication b)
+    {
+        if (!string.Equals(a.Id, b.Id, StringComparison.Ordinal) ||
+            a.Identity != b.Identity ||
+            !string.Equals(a.Name, b.Name, StringComparison.Ordinal) ||
+            !string.Equals(a.LaunchTarget, b.LaunchTarget, StringComparison.Ordinal) ||
+            a.IsPinned != b.IsPinned ||
+            a.PinAvailability != b.PinAvailability ||
+            a.Stack != b.Stack ||
+            !ReferenceEquals(a.Icon, b.Icon) ||
+            a.Windows.Count != b.Windows.Count ||
+            a.StackApps.Count != b.StackApps.Count)
+        {
+            return false;
+        }
+
+        for (var j = 0; j < a.Windows.Count; j++)
+        {
+            if (a.Windows[j] != b.Windows[j])
+                return false;
+        }
+
+        for (var j = 0; j < a.StackApps.Count; j++)
+        {
+            if (!DockApplicationEquals(a.StackApps[j], b.StackApps[j]))
+                return false;
+        }
+
+        return true;
+    }
+
     private IReadOnlyList<ApplicationWindow> ReadWindows(WindowsApplicationIconService? icons)
     {
         using var desktops = new WindowsVirtualDesktopQuery();
         var result = new List<ApplicationWindow>();
-        using var currentProcess = Process.GetCurrentProcess();
-        var sessionId = currentProcess.SessionId;
+        var activeHandles = new HashSet<nint>();
+        var sessionId = currentSessionId;
         var foreground = ApplicationNative.GetForegroundWindow();
         ApplicationNative.EnumWindows((window, _) =>
         {
@@ -141,63 +258,77 @@ public sealed class WindowsApplicationService : IApplicationService
                 if (ApplicationNative.GetWindowText(window, title, title.Capacity) == 0) return true;
                 var className = new StringBuilder(256);
                 ApplicationNative.GetClassName(window, className, className.Capacity);
-                if (className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
+                var classNameText = className.ToString();
+                if (classNameText is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
                 ApplicationNative.GetWindowThreadProcessId(window, out var pid);
                 if (pid == Environment.ProcessId) return true;
-                var path = ProcessPath(pid);
-                if (Path.GetFileName(path).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
+
+                if (!windowMetadataCache.TryGetValue(window, out var metadata) || metadata.HostProcessId != pid)
                 {
-                    var hostPid = pid;
-                    ApplicationNative.EnumChildWindows(window, (child, _) =>
+                    var resolvedPid = pid;
+                    var path = ProcessPath(resolvedPid);
+                    if (Path.GetFileName(path).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
                     {
-                        ApplicationNative.GetWindowThreadProcessId(child, out var childPid);
-                        if (childPid != hostPid && ApplicationNative.IsWindowVisible(child)) { pid = childPid; return false; }
-                        return true;
-                    }, 0);
-                    path = ProcessPath(pid);
-                }
-                if (string.IsNullOrEmpty(path) || Path.GetFileName(path).ToUpperInvariant() is
-                    "APPLICATIONFRAMEHOST.EXE" or "STARTMENUEXPERIENCEHOST.EXE" or "SHELLEXPERIENCEHOST.EXE" or
-                    "SEARCHHOST.EXE" or "TEXTINPUTHOST.EXE" or "GLASSDOCK.APP.EXE" or "GLASSDOCK.WATCHDOG.EXE") return true;
-                using var process = Process.GetProcessById((int)pid);
-                if (process.SessionId != sessionId) return true;
-                string? appId = null;
-                var iid = typeof(ApplicationNative.IPropertyStore).GUID;
-                if (ApplicationNative.SHGetPropertyStoreForWindow(window, in iid, out var properties) >= 0)
-                {
-                    try { appId = ShellApplicationMetadata.Property(properties, "System.AppUserModel.ID"); }
-                    finally { Marshal.ReleaseComObject(properties); }
-                }
-                using (var handle = ApplicationNative.OpenProcess(0x1000, false, pid))
-                {
-                    uint length = 0;
-                    if (string.IsNullOrWhiteSpace(appId) && !handle.IsInvalid &&
-                        ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, null) == 122 &&
-                        length < 32768)
-                    {
-                        var text = new StringBuilder((int)length);
-                        if (ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, text) == 0 &&
-                            !string.IsNullOrWhiteSpace(text.ToString()))
-                            appId = text.ToString();
+                        var hostPid = resolvedPid;
+                        ApplicationNative.EnumChildWindows(window, (child, _) =>
+                        {
+                            ApplicationNative.GetWindowThreadProcessId(child, out var childPid);
+                            if (childPid != hostPid && ApplicationNative.IsWindowVisible(child)) { resolvedPid = childPid; return false; }
+                            return true;
+                        }, 0);
+                        path = ProcessPath(resolvedPid);
                     }
+                    if (string.IsNullOrEmpty(path) || Path.GetFileName(path).ToUpperInvariant() is
+                        "APPLICATIONFRAMEHOST.EXE" or "STARTMENUEXPERIENCEHOST.EXE" or "SHELLEXPERIENCEHOST.EXE" or
+                        "SEARCHHOST.EXE" or "TEXTINPUTHOST.EXE" or "GLASSDOCK.APP.EXE" or "GLASSDOCK.WATCHDOG.EXE") return true;
+                    using var process = Process.GetProcessById((int)resolvedPid);
+                    var procSessionId = process.SessionId;
+                    var startTicks = process.StartTime.ToUniversalTime().Ticks;
+                    string? appId = null;
+                    var iid = typeof(ApplicationNative.IPropertyStore).GUID;
+                    if (ApplicationNative.SHGetPropertyStoreForWindow(window, in iid, out var properties) >= 0)
+                    {
+                        try { appId = ShellApplicationMetadata.Property(properties, "System.AppUserModel.ID"); }
+                        finally { Marshal.ReleaseComObject(properties); }
+                    }
+                    using (var handle = ApplicationNative.OpenProcess(0x1000, false, resolvedPid))
+                    {
+                        uint length = 0;
+                        if (string.IsNullOrWhiteSpace(appId) && !handle.IsInvalid &&
+                            ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, null) == 122 &&
+                            length < 32768)
+                        {
+                            var text = new StringBuilder((int)length);
+                            if (ApplicationNative.GetApplicationUserModelId(handle.DangerousGetHandle(), ref length, text) == 0 &&
+                                !string.IsNullOrWhiteSpace(text.ToString()))
+                                appId = text.ToString();
+                        }
+                    }
+                    // Explorer folder windows often omit their Shell-assigned taskbar identity.
+                    if (string.IsNullOrWhiteSpace(appId) && classNameText == "CabinetWClass" &&
+                        Path.GetFileName(path).Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
+                        appId = "Microsoft.Windows.Explorer";
+
+                    // Electron/Squirrel and other Win32 applications can deliberately expose no
+                    // process/window AUMID even though their Start Menu shortcut has the canonical
+                    // identity used by Windows Notification Center. Resolve that identity from Shell
+                    // metadata so running windows, pins and notification badges share one key.
+                    if (string.IsNullOrWhiteSpace(appId))
+                        appId = identityResolver.Resolve(path);
+
+                    var identity = new ApplicationIdentity(appId, path);
+                    var name = FileVersionInfo.GetVersionInfo(path).FileDescription;
+                    if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(path);
+                    metadata = new CachedWindowMetadata(pid, resolvedPid, path, procSessionId, startTicks, name, appId, identity);
+                    if (icons is not null)
+                        windowMetadataCache[window] = metadata;
                 }
-                // Explorer folder windows often omit their Shell-assigned taskbar identity.
-                if (string.IsNullOrWhiteSpace(appId) && className.ToString() == "CabinetWClass" &&
-                    Path.GetFileName(path).Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
-                    appId = "Microsoft.Windows.Explorer";
 
-                // Electron/Squirrel and other Win32 applications can deliberately expose no
-                // process/window AUMID even though their Start Menu shortcut has the canonical
-                // identity used by Windows Notification Center. Resolve that identity from Shell
-                // metadata so running windows, pins and notification badges share one key.
-                if (string.IsNullOrWhiteSpace(appId))
-                    appId = identityResolver.Resolve(path);
-
-                var identity = new ApplicationIdentity(appId, path);
-                var name = FileVersionInfo.GetVersionInfo(path).FileDescription;
-                if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(path);
-                result.Add(new(identity, name, window, (int)pid, process.StartTime.ToUniversalTime().Ticks, window == foreground,
-                    icons?.FromWindow(identity.Key, window, path, appId), title.ToString(), ApplicationNative.IsIconic(window),
+                if (metadata.SessionId != sessionId) return true;
+                activeHandles.Add(window);
+                trackedWindows[window] = 1;
+                result.Add(new(metadata.Identity, metadata.Name, window, (int)metadata.ResolvedProcessId, metadata.StartTicks, window == foreground,
+                    icons?.FromWindow(metadata.Identity.Key, window, metadata.Path, metadata.AppId), title.ToString(), ApplicationNative.IsIconic(window),
                     activationTimes.GetValueOrDefault(window))
                 { IsOnCurrentDesktop = VirtualDesktopPolicy.IsCurrent(onCurrentDesktop, cloaked) });
             }
@@ -205,6 +336,15 @@ public sealed class WindowsApplicationService : IApplicationService
             { Debug.WriteLine($"Skipping unavailable application window: {error.HResult:X8}"); }
             return true;
         }, 0);
+
+        if (icons is not null)
+        {
+            foreach (var key in windowMetadataCache.Keys.Where(handle => !activeHandles.Contains(handle)).ToArray())
+                windowMetadataCache.Remove(key);
+            foreach (var key in trackedWindows.Keys.Where(handle => !activeHandles.Contains(handle)).ToArray())
+                trackedWindows.TryRemove(key, out _);
+        }
+
         return result;
     }
 

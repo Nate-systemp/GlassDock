@@ -291,10 +291,10 @@ public sealed class GlassDockSettingsTests
         Assert.Equal(0.48, acrylic.BorderOpacity);
 
         Assert.Equal(4, clear.BlurAmount);
-        Assert.Equal(0.42, clear.Opacity);
-        Assert.Equal(1.06, clear.Saturation);
-        Assert.Equal(0xE8F3FFu, clear.Tint);
-        Assert.Equal(0.5, clear.BorderThickness);
-        Assert.Equal(0.25, clear.BorderOpacity);
+        Assert.Equal(0.36, clear.Opacity);
+        Assert.Equal(1.08, clear.Saturation);
+        Assert.Equal(0xEEF6FFu, clear.Tint);
+        Assert.Equal(0.9, clear.BorderThickness);
+        Assert.Equal(0.42, clear.BorderOpacity);
     }
 }

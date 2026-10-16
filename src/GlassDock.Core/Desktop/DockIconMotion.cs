@@ -3,8 +3,8 @@ namespace GlassDock.Core.Desktop;
 public readonly record struct DockIconMotion(double Scale, double OffsetY, double Opacity)
 {
     public static DockIconMotion FromGeometry(double width, double height,
-        double expandedWidth, double expandedHeight, double contentHeight) =>
-        At(DockTransitionTiming.Progress(width, height, expandedWidth, expandedHeight), contentHeight) with
+        double expandedWidth, double expandedHeight, double contentHeight, double layoutScale = 1) =>
+        At(DockTransitionTiming.Progress(width, height, expandedWidth, expandedHeight, layoutScale), contentHeight) with
         {
             Scale = Math.Clamp(Math.Min(width / Math.Max(1, expandedWidth), height / Math.Max(1, expandedHeight)), 0, 1)
         };

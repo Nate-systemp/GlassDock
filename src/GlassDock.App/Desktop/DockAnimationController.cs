@@ -57,6 +57,13 @@ internal sealed class DockAnimationController : IDisposable
     private TaskCompletionSource<bool>? completion;
     private bool disposed;
     private double expandedWidth = 560, expandedHeight = 68;
+    private double layoutScale = 1;
+    public void SetLayoutScale(double scale)
+    {
+        layoutScale = iconTransition.LayoutScale = scale;
+        indicator.Width = 120 * scale; indicator.Height = 5 * scale;
+        if (indicator is Border border) border.CornerRadius = new(2.5 * scale);
+    }
     private double pathStartProgress, pathStartBottom, pathTargetBottom;
     private double collapsedBottom;
     private bool pathExpanded;
@@ -70,7 +77,7 @@ internal sealed class DockAnimationController : IDisposable
     {
         if (disposed) return;
         var p = Math.Clamp(Progress, 0, 1);
-        var frame = DockTransitionGeometry.At(p, expandedWidth, expandedHeight);
+        var frame = DockTransitionGeometry.At(p, expandedWidth, expandedHeight, layoutScale);
         surface.Width = indicator.Width = frame.Width;
         surface.Height = indicator.Height = frame.Height;
         if (indicator is Border pill) pill.CornerRadius = new CornerRadius(frame.CornerRadius);
@@ -246,7 +253,7 @@ internal sealed class DockAnimationController : IDisposable
             $"AnimateAsync({expanded}, targetWidth={targetWidth}), previousPending={completion is { Task.IsCompleted: false }}");
 
         // Sample the rendered geometry before releasing its single animation clock.
-        var progress = DockTransitionTiming.Progress(surface.Width, surface.Height, targetWidth, targetHeight);
+        var progress = DockTransitionTiming.Progress(surface.Width, surface.Height, targetWidth, targetHeight, layoutScale);
         var currentBottom = surface.Margin.Bottom;
         if (expanded && progress <= .000001) collapsedBottom = currentBottom;
         var previous = active;
@@ -445,6 +452,7 @@ internal sealed class DockAnimationController : IDisposable
             hoverArtworkForeground.Children.Add(mirror.Visual);
         }
 
+        mirror.Visual.SetLayoutScale(badge.Width / 20);
         if (mirror.LastRevision != icon.HoverBadgeRevision)
         {
             mirror.Visual.SetBadge(display);

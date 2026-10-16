@@ -7,6 +7,20 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class GlassDockSettingsStoreTests
 {
+    [Theory]
+    [InlineData(.7)] [InlineData(.8)] [InlineData(1)]
+    public async Task Compact_floating_settings_survive_restart_without_changing_original_icon_preferences(double size)
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        var saved = new GlassDockSettings { DockSize = size, PinDock = true,
+            PinnedPlacement = GlassDock.Core.Desktop.PinnedDockPlacement.Floating, FloatingDockGap = 16, IconSize = 32 };
+        await store.SaveAsync(saved);
+        Assert.Equal(saved, await location.CreateStore().LoadAsync());
+        await store.SaveAsync(saved with { DockSize = 1, PinDock = false });
+        var restored = await location.CreateStore().LoadAsync();
+        Assert.Equal(1, restored.DockSize); Assert.False(restored.PinDock); Assert.Equal(32, restored.IconSize);
+    }
     [Fact]
     public async Task Optical_settings_load_old_profiles_and_roundtrip_without_resetting_user_values()
     {
@@ -16,7 +30,8 @@ public sealed class GlassDockSettingsStoreTests
         var old = await store.LoadAsync();
         Assert.Equal(12,old.ClearRefractionStrength); Assert.Equal(45,old.SpecularHighlightAngle);
         Assert.True(old.CircularHighlightsEnabled);
-        var edited = old with { ClearRefractionStrength=17.5,SpecularHighlightAngle=135,CircularHighlightsEnabled=false };
+        Assert.True(old.ClearCircularHighlightsEnabled);
+        var edited = old with { ClearRefractionStrength=17.5,SpecularHighlightAngle=135,CircularHighlightsEnabled=false,ClearCircularHighlightsEnabled=false };
         await store.SaveAsync(edited);
         Assert.Equal(edited,await location.CreateStore().LoadAsync());
         Assert.Equal(32,edited.IconSize); Assert.True(edited.PinDock);

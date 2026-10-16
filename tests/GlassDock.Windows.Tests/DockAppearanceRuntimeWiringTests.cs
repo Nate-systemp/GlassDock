@@ -36,7 +36,8 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("icon.Configure(appearance.IconSize, DockHoverMagnification<FrameworkElement>.HoverScale);", dock, StringComparison.Ordinal);
         Assert.DoesNotContain("animation.SetMaximumMagnificationScale", dock, StringComparison.Ordinal);
         Assert.Contains("UseSolidSurface = true", dock, StringComparison.Ordinal);
-        Assert.Contains("desktopBackdrop.CircularHighlightsEnabled = settingsSession.Current.CircularHighlightsEnabled;", dock, StringComparison.Ordinal);
+        Assert.Contains("? settingsSession.Current.ClearCircularHighlightsEnabled : settingsSession.Current.CircularHighlightsEnabled;", dock, StringComparison.Ordinal);
+        Assert.Contains("liquidGlass.CircularHighlightsEnabled = settingsSession.Current.ClearCircularHighlightsEnabled;", dock, StringComparison.Ordinal);
         Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
         Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
         Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);

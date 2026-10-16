@@ -60,6 +60,7 @@ public sealed record GlassDockSettings
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public UtilitiesPlacement UtilitiesPlacement { get; init; }
+    public UtilitiesLayout UtilitiesLayout { get; init; } = UtilitiesLayout.Expanded;
     public bool UtilitiesHideFullscreen { get; init; } = true;
     public bool UtilitiesSnapEdges { get; init; } = true;
     public bool UtilitiesRememberPosition { get; init; } = true;
@@ -83,9 +84,13 @@ public sealed record GlassDockSettings
     public bool HoverWaveEnabled { get; init; } = DefaultHoverWaveEnabled;
     public bool HoverToExpandOnly { get; init; } = DefaultHoverToExpandOnly;
     public bool PinDock { get; init; } = DefaultPinDock;
+    public double DockSize { get; init; } = .70;
+    public GlassDock.Core.Desktop.PinnedDockPlacement PinnedPlacement { get; init; } = GlassDock.Core.Desktop.PinnedDockPlacement.BottomAttached;
+    public double FloatingDockGap { get; init; } = 14;
     public double ClearRefractionStrength { get; init; } = DefaultClearRefractionStrength;
     public double SpecularHighlightAngle { get; init; } = DefaultSpecularHighlightAngle;
     public bool CircularHighlightsEnabled { get; init; } = DefaultCircularHighlightsEnabled;
+    public bool ClearCircularHighlightsEnabled { get; init; } = true;
     public GlassMaterialMode GlassMaterialMode { get; init; } = DefaultGlassMaterialMode;
     public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
@@ -105,6 +110,9 @@ public sealed record GlassDockSettings
         return settings with
         {
             SchemaVersion = CurrentSchemaVersion,
+            DockSize = settings.DockSize is .8 or 1 ? settings.DockSize : .70,
+            PinnedPlacement = Enum.IsDefined(settings.PinnedPlacement) ? settings.PinnedPlacement : GlassDock.Core.Desktop.PinnedDockPlacement.BottomAttached,
+            FloatingDockGap = Bound(settings.FloatingDockGap, 8, 32, 14),
             ClearRefractionStrength = Bound(settings.ClearRefractionStrength, 0, 20, DefaultClearRefractionStrength),
             SpecularHighlightAngle = Bound(settings.SpecularHighlightAngle, 0, 360, DefaultSpecularHighlightAngle),
             BottomMargin = bottomMargin,
@@ -156,6 +164,7 @@ public sealed record GlassDockSettings
                 ? settings.DockAppearanceMode
                 : DefaultDockAppearanceMode,
             UtilitiesPlacement = Enum.IsDefined(settings.UtilitiesPlacement) ? settings.UtilitiesPlacement : UtilitiesPlacement.InsideDock,
+            UtilitiesLayout = Enum.IsDefined(settings.UtilitiesLayout) ? settings.UtilitiesLayout : UtilitiesLayout.Expanded,
             UtilitiesShortcutKey = settings.UtilitiesShortcutKey is 0x20 or 0x55 ? settings.UtilitiesShortcutKey : 0x55,
             UtilitiesX = settings.UtilitiesX is double x && double.IsFinite(x) ? x : null,
             UtilitiesY = settings.UtilitiesY is double y && double.IsFinite(y) ? y : null,

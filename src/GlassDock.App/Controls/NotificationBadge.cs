@@ -41,6 +41,14 @@ internal sealed class NotificationBadge : Grid
     private CompositionScopedBatch? batch;
     private int revision;
     private bool awaitingLoad;
+    private double layoutScale = 1;
+    internal void SetLayoutScale(double scale)
+    {
+        layoutScale = scale;
+        Width = Height = 20 * scale;
+        number.FontSize = 10 * scale;
+        ApplyPresentationGeometry();
+    }
 
     internal FrameworkElement LensBody => body;
     internal string LensText => number.Visibility == Visibility.Visible ? number.Text : string.Empty;
@@ -102,7 +110,7 @@ internal sealed class NotificationBadge : Grid
         var text = ElementCompositionPreview.GetElementVisual(number);
         var glow = ElementCompositionPreview.GetElementVisual(pulse);
         var animatedDisplay = transition == BadgeTransition.Remove ? previous : state.Display;
-        var diameter = animatedDisplay.Kind == BadgeKind.Count ? 20f : 8f;
+        var diameter = (float)((animatedDisplay.Kind == BadgeKind.Count ? 20 : 8) * layoutScale);
         shell.CenterPoint = glow.CenterPoint = new(diameter / 2, diameter / 2, 0);
         text.CenterPoint = new((float)Math.Max(1, number.ActualWidth) / 2, (float)Math.Max(1, number.ActualHeight) / 2, 0);
 
@@ -166,7 +174,7 @@ internal sealed class NotificationBadge : Grid
     {
         var presentation = display ?? state.Display;
         var count = presentation.Kind == BadgeKind.Count;
-        var diameter = count ? 20d : 8d;
+        var diameter = (count ? 20d : 8d) * layoutScale;
         body.Width = body.Height = diameter;
         pulse.Width = pulse.Height = diameter;
         fill.CornerRadius = pulse.CornerRadius = new CornerRadius(diameter / 2);

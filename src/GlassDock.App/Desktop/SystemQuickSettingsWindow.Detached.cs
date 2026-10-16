@@ -1,3 +1,4 @@
+using static GlassDock.App.Desktop.SystemControlStyle;
 using GlassDock.Windows.Desktop;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -68,7 +69,18 @@ internal sealed partial class SystemQuickSettingsWindow
         batteryRow.ColumnDefinitions.Add(new() { Width = new(24) }); batteryRow.ColumnDefinitions.Add(new());
         batteryRow.Children.Add(new FontIcon { Glyph = "\uE83F", FontSize = 18, Foreground = theme.Primary });
         Grid.SetColumn(detachedBattery, 1); batteryRow.Children.Add(detachedBattery);
-        var batteryCard = Surface(batteryRow); Grid.SetRow(batteryCard, 2); panel.Children.Add(batteryCard);
+        // Keep the existing utility menu reachable in this compact panel too.
+        var moreMenu = (Button)headingRow.Children.Last();
+        var footerRow = new Grid { ColumnSpacing = 6 };
+        footerRow.ColumnDefinitions.Add(new()); footerRow.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var batteryAction = Button(batteryRow, "Battery settings", controls.OpenBatterySettings, double.NaN, 20);
+        batteryAction.MinHeight = 0;
+        footerRow.Children.Add(batteryAction);
+        var menuButton = Button(Icon("\uE712", 14), "More system settings", () => { }, 20, 20);
+        menuButton.MinHeight = 0;
+        menuButton.Flyout = moreMenu.Flyout;
+        Grid.SetColumn(menuButton, 1); footerRow.Children.Add(menuButton);
+        var batteryCard = Surface(footerRow); Grid.SetRow(batteryCard, 2); panel.Children.Add(batteryCard);
         artworkKey = null;
     }
 

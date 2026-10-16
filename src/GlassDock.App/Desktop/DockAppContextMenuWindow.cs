@@ -26,12 +26,14 @@ internal sealed class DockAppContextMenuWindow : Window
     // layout, colors, hover treatment, or native glass/screenshot pipeline.
     private const double MenuSizeScale = 0.85;
     private static double MenuSize(double value) => value * MenuSizeScale;
-    private const double MenuCornerRadius = 9 * MenuSizeScale;
+    private const double MenuCornerRadius = 11;
     private const double MenuWidth = 258 * MenuSizeScale;
     private const double MenuRowHeight = 36 * MenuSizeScale;
     private const double MenuRowRadius = 5 * MenuSizeScale;
     private readonly nint dock;
     private readonly Grid root = new();
+    private readonly Grid body;
+    private readonly StackPanel footer;
     private readonly StackPanel rows = new();
     private readonly AdaptiveAppIcon icon = new((int)Math.Round(MenuSize(20)), 1, showTile: false);
     private readonly TextBlock title = new() { FontFamily = new("Segoe UI Variable Text"), FontSize = MenuSize(13), FontWeight = Microsoft.UI.Text.FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis,
@@ -100,15 +102,15 @@ internal sealed class DockAppContextMenuWindow : Window
             Background = theme.Overlay, BorderBrush = theme.TileBorder,
             BorderThickness = new(1), IsHitTestVisible = false };
         root.Children.Add(chrome);
-        var body = new Grid { Margin = new(Gutter + MenuSize(3)), RowSpacing = MenuSize(1) };
+        body = new Grid { Margin = new(Gutter + MenuSize(3)), RowSpacing = MenuSize(1) };
         body.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         body.RowDefinitions.Add(new() { Height = GridLength.Auto });
         scroll = new ScrollViewer { Content = rows, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollMode = ScrollMode.Disabled };
         body.Children.Add(scroll);
         // Match the native Jump List hierarchy: actions first, compact app
         // identity at the bottom, separated by a single hairline divider.
-        var footer = new StackPanel { Spacing = 0 };
+        footer = new StackPanel { Spacing = 0 };
         footer.Children.Add(new Border { Height = 1, Margin = new(MenuSize(11), MenuSize(7), MenuSize(11), MenuSize(3)), Background = theme.Divider });
         var header = new Grid { Margin = new(MenuSize(14), MenuSize(7), MenuSize(10), MenuSize(4)), ColumnSpacing = MenuSize(11) };
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
@@ -207,7 +209,7 @@ internal sealed class DockAppContextMenuWindow : Window
         root.RequestedTheme = mode == DockAppearanceMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
         UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: MenuCornerRadius);
         glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
-        { CornerRadius = MenuCornerRadius, ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0 });
+        { CornerRadius = MenuCornerRadius, ShadowOpacity = 0.28, ShadowBlur = 20, ShadowOffset = 5, BorderOpacity = 0, EdgeHighlight = 0 });
     }
 
     public void Show(DockApplicationItem item, IReadOnlyList<DockAppMenuEntry> commands, double anchorX, double dockTop, string stateText = "")
@@ -404,10 +406,12 @@ internal sealed class DockAppContextMenuWindow : Window
         if (!IsOpen) return;
         var (area, dpi, dockBounds) = WindowPreviewPlacement.GetArea(dock);
         scale = dpi;
+        rows.Measure(new global::Windows.Foundation.Size(MenuWidth, double.PositiveInfinity));
+        footer.Measure(new global::Windows.Foundation.Size(MenuWidth, double.PositiveInfinity));
+        var naturalHeight = rows.DesiredSize.Height + footer.DesiredSize.Height + MenuSize(body.RowSpacing) + (Gutter + MenuSize(3)) * 2 + 4;
         var bounds = WindowPreviewLayout.Position(new(area.X, area.Y, area.Width, area.Height),
             new(dockBounds.X, dockBounds.Y, dockBounds.Width, dockBounds.Height), scale, anchor, top + 2,
-            MenuWidth + Gutter * 2, Math.Min(MenuSize(480), (status.Visibility == Visibility.Visible ? MenuSize(93) : MenuSize(87)) + rows.Children.Sum(child =>
-                child is Button ? MenuRowHeight : child is TextBlock ? MenuSize(28) : MenuSize(13))));
+            MenuWidth + Gutter * 2, Math.Min(MenuSize(480), naturalHeight));
         AppWindow.MoveAndResize(new((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height));
         UpdateBounds();
     }

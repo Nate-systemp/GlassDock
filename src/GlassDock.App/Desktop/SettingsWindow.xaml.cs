@@ -147,6 +147,8 @@ public sealed partial class SettingsWindow : Window
 
         DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
         UtilitiesPlacementBox.SelectedIndex = (int)settings.UtilitiesPlacement;
+        UtilitiesLayoutBox.SelectedIndex = (int)settings.UtilitiesLayout;
+        UtilitiesLayoutBox.IsEnabled = settings.UtilitiesPlacement == UtilitiesPlacement.SplitDock;
         UtilitiesFullscreenToggle.IsOn = settings.UtilitiesHideFullscreen;
         UtilitiesSnapToggle.IsOn = settings.UtilitiesSnapEdges;
         UtilitiesRememberToggle.IsOn = settings.UtilitiesRememberPosition;
@@ -165,6 +167,10 @@ public sealed partial class SettingsWindow : Window
         ClearRefractionStrengthBox.Value = settings.ClearRefractionStrength;
         SpecularHighlightAngleBox.Value = settings.SpecularHighlightAngle;
         CircularHighlightsToggle.IsOn = settings.CircularHighlightsEnabled;
+        ClearCircularHighlightsToggle.IsOn = settings.ClearCircularHighlightsEnabled;
+        DockSizeBox.SelectedIndex = settings.DockSize switch { .8 => 1, 1 => 2, _ => 0 };
+        PinnedPlacementBox.SelectedIndex = (int)settings.PinnedPlacement;
+        FloatingDockGapBox.Value = settings.FloatingDockGap;
         HoverWaveToggle.IsOn = settings.HoverWaveEnabled;
         HoverToExpandOnlyToggle.IsOn = settings.HoverToExpandOnly;
         PinDockToggle.IsOn = settings.PinDock;
@@ -329,6 +335,8 @@ public sealed partial class SettingsWindow : Window
     private void UpdateBehaviorControlAvailability()
     {
         var autoHideAvailable = !PinDockToggle.IsOn;
+        PinnedPlacementBox.IsEnabled = PinDockToggle.IsOn;
+        FloatingDockGapBox.IsEnabled = PinDockToggle.IsOn && PinnedPlacementBox.SelectedIndex == 1;
         AutoHideDelayBox.IsEnabled = autoHideAvailable;
         PeekDelayBox.IsEnabled = autoHideAvailable;
     }
@@ -622,6 +630,7 @@ public sealed partial class SettingsWindow : Window
             {
                 DockAppearanceMode = SelectedDockAppearance,
                 UtilitiesPlacement = (UtilitiesPlacement)Math.Max(0, UtilitiesPlacementBox.SelectedIndex),
+                UtilitiesLayout = (UtilitiesLayout)Math.Max(0, UtilitiesLayoutBox.SelectedIndex),
                 // The floating top bar is always visible; persist the new behavior.
                 UtilitiesHideFullscreen = false,
                 UtilitiesSnapEdges = UtilitiesSnapToggle.IsOn,
@@ -632,7 +641,11 @@ public sealed partial class SettingsWindow : Window
                 NotificationBadgesEnabled = NotificationBadgesToggle.IsOn,
                 ClearRefractionStrength = ClearRefractionStrengthBox.Value,
                 SpecularHighlightAngle = SpecularHighlightAngleBox.Value,
-                CircularHighlightsEnabled = CircularHighlightsToggle.IsOn
+                CircularHighlightsEnabled = CircularHighlightsToggle.IsOn,
+                ClearCircularHighlightsEnabled = ClearCircularHighlightsToggle.IsOn,
+                DockSize = DockSizeBox.SelectedIndex switch { 1 => .8, 2 => 1, _ => .70 },
+                PinnedPlacement = (GlassDock.Core.Desktop.PinnedDockPlacement)Math.Max(0, PinnedPlacementBox.SelectedIndex),
+                FloatingDockGap = FloatingDockGapBox.Value
             };
 
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
@@ -741,7 +754,8 @@ public sealed partial class SettingsWindow : Window
             BorderOpacity = GlassDockSettings.DefaultBorderOpacity,
             ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
             SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle,
-            CircularHighlightsEnabled = GlassDockSettings.DefaultCircularHighlightsEnabled
+            CircularHighlightsEnabled = GlassDockSettings.DefaultCircularHighlightsEnabled,
+            ClearCircularHighlightsEnabled = true
         });
 
         await SaveRecoverySettingsAsync(edited, "Appearance reset to defaults.");

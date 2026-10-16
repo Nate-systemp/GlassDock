@@ -27,21 +27,21 @@ public sealed class PinDockRuntimeWiringTests
 
         Assert.Contains("public bool PinDock { get; init; }", settings, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PinDockToggle\"", settingsUi, StringComparison.Ordinal);
-        Assert.Contains("private const double PinnedDockClipDepth = ExpandedDockCornerRadius;", dock, StringComparison.Ordinal);
-        Assert.Contains("var targetSurfaceBottom = pin ? -PinnedDockClipDepth : BottomMargin;", dock, StringComparison.Ordinal);
-        Assert.Contains("var targetContentBottom = pin ? 0 : BottomMargin;", dock, StringComparison.Ordinal);
+        Assert.Contains("private double PinnedDockClipDepth => Sizing.ClipDepth;", dock, StringComparison.Ordinal);
+        Assert.Contains("var targetSurfaceBottom = pin ? Sizing.SurfaceBottom : BottomMargin;", dock, StringComparison.Ordinal);
+        Assert.Contains("var targetContentBottom = pin ? Sizing.Gap : BottomMargin;", dock, StringComparison.Ordinal);
         Assert.Contains("var targetSurfaceHeight = ExpandedDockHeight + (pin ? PinnedDockClipDepth : 0);", dock, StringComparison.Ordinal);
         Assert.Contains("if (DockPinLock || previews.HoldsDock || SystemPopupOpen) return;", dock, StringComparison.Ordinal);
         Assert.Contains("if (DockPinLock || collapseDelay is { IsCancellationRequested: false }", dock, StringComparison.Ordinal);
         Assert.Contains("if (DockPinLock || pillHideDelay is not null", dock, StringComparison.Ordinal);
         Assert.Contains("await ApplyPinDockModeAsync(pin: true, animate: true);", dock, StringComparison.Ordinal);
-        Assert.Contains("windowManager.SetReservedBottomSpace(ExpandedDockHeight);", dock, StringComparison.Ordinal);
+        Assert.Contains("windowManager.SetReservedBottomSpace(Sizing.ReservedHeight);", dock, StringComparison.Ordinal);
         Assert.Contains("windowManager.ClearBottomWorkAreaReservation();", dock, StringComparison.Ordinal);
         Assert.Contains("NativeMethods.SHAppBarMessage(AbmNew, ref registration)", overlayManager, StringComparison.Ordinal);
         Assert.Contains("NativeMethods.SHAppBarMessage(AbmQueryPos, ref data);", overlayManager, StringComparison.Ordinal);
         Assert.Contains("NativeMethods.SHAppBarMessage(AbmSetPos, ref data);", overlayManager, StringComparison.Ordinal);
         Assert.Contains("preexistingBottomWorkAreaPixels", overlayManager, StringComparison.Ordinal);
-        Assert.Contains("desiredTotalPixels - preexistingBottomWorkAreaPixels", overlayManager, StringComparison.Ordinal);
+        Assert.Contains("DockSizing.AdditionalReservationPixels(reservedBottomSpaceDips,", overlayManager, StringComparison.Ordinal);
         Assert.Contains("info.Monitor.Bottom - info.Work.Bottom", overlayManager, StringComparison.Ordinal);
         Assert.Contains("ClearBottomWorkAreaReservation();", overlayManager, StringComparison.Ordinal);
     }

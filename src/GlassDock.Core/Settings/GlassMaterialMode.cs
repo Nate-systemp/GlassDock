@@ -38,12 +38,12 @@ public static class DockMaterialStylePresets
         GlassMaterialMode.Clear => new()
         {
             BlurAmount = 4,
-            Opacity = 0.42,
-            Saturation = 1.06,
-            Brightness = 1.03,
-            Tint = 0xE8F3FF,
-            BorderThickness = 0.5,
-            BorderOpacity = 0.25
+            Opacity = 0.36,
+            Saturation = 1.08,
+            Brightness = 1.05,
+            Tint = 0xEEF6FF,
+            BorderThickness = 0.9,
+            BorderOpacity = 0.42
         },
         _ => throw new UnreachableException()
     };

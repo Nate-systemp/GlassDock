@@ -19,12 +19,58 @@ namespace GlassDock.App.Desktop;
 /// <summary>Retained preview host. DWM owns live pixels; XAML owns card chrome.</summary>
 internal sealed class WindowPreviewWindow : Window
 {
+    private const double PreviewCornerRadius = 16;
     private readonly Canvas root = new();
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
-    private readonly Border solid = new() { IsHitTestVisible = false, CornerRadius = new(20) };
+    private readonly Border chrome = new() { IsHitTestVisible = false, CornerRadius = new(PreviewCornerRadius), BorderThickness = new(1) };
+    private readonly Border innerGlow = new() { IsHitTestVisible = false, CornerRadius = new(PreviewCornerRadius - 1), BorderThickness = new(1, 1, 1, 0) };
+    private readonly LinearGradientBrush previewGlassFill = new()
+    {
+        StartPoint = new(0.08, 0),
+        EndPoint = new(0.92, 1),
+        GradientStops =
+        {
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(236, 195, 203, 216), Offset = 0 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(236, 224, 232, 244), Offset = 0.53 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(236, 184, 194, 209), Offset = 1 }
+        }
+    };
+    private readonly LinearGradientBrush glassEdge = new()
+    {
+        StartPoint = new(0, 0),
+        EndPoint = new(1, 1),
+        GradientStops =
+        {
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(205, 246, 249, 253), Offset = 0 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(105, 207, 217, 229), Offset = 0.52 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(165, 130, 143, 160), Offset = 1 }
+        }
+    };
+    private readonly LinearGradientBrush topHighlightEdge = new()
+    {
+        StartPoint = new(0.5, 0),
+        EndPoint = new(0.5, 1),
+        GradientStops =
+        {
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(90, 255, 255, 255), Offset = 0 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(20, 255, 255, 255), Offset = 0.35 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(0, 255, 255, 255), Offset = 1 }
+        }
+    };
+    private readonly LinearGradientBrush innerGlowFill = new()
+    {
+        StartPoint = new(0.5, 0),
+        EndPoint = new(0.5, 0.45),
+        GradientStops =
+        {
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(26, 255, 255, 255), Offset = 0 },
+            new GradientStop { Color = global::Windows.UI.Color.FromArgb(0, 255, 255, 255), Offset = 1 }
+        }
+    };
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
     private readonly UtilityPopupTheme theme = new();
+    private readonly InteractiveGlassWindowHost host;
     private readonly WindowPreviewPlacement placement;
     private readonly WindowPreviewSession session;
     private readonly WindowFrameCache frameCache;
@@ -90,9 +136,18 @@ internal sealed class WindowPreviewWindow : Window
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         placement = new(hwnd, inspection);
         desktopFocus = new(hwnd, frameCache);
+        host = new(hwnd)
+        {
+            EnableHostBackdropBrush = true,
+            UseDockLayeredTransparency = true
+        };
+        try { host.Configure(); }
+        catch { host.Dispose(); Close(); throw; }
+        chrome.Child = innerGlow;
+        innerGlow.BorderBrush = topHighlightEdge;
+        innerGlow.Background = innerGlowFill;
         root.Children.Add(glass);
-        root.Children.Add(solid);
-        solid.Background = theme.Overlay;
+        root.Children.Add(chrome);
         ApplyAppearance(appearance, mode);
         // As with the dock/utilities, attach after Content and native setup.
         SystemBackdrop = backdrop;
@@ -129,6 +184,8 @@ internal sealed class WindowPreviewWindow : Window
         };
         theme.StyleButton(more);
         more.Background = theme.Tile;
+        more.CornerRadius = new(8);
+        more.FontFamily = new("Segoe UI Variable Text");
         animation = DispatcherQueue.CreateTimer();
         animation.Interval = TimeSpan.FromMilliseconds(16);
         animation.Tick += (_, _) =>
@@ -154,6 +211,8 @@ internal sealed class WindowPreviewWindow : Window
             desktopFocus.Dispose();
             ClearCards();
             placement.Dispose();
+            host.Dispose();
+            SystemBackdrop = null;
         };
     }
 
@@ -163,7 +222,32 @@ internal sealed class WindowPreviewWindow : Window
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         // Alpha 1 is an input surface, not a separate material overlay.
         root.Background = new SolidColorBrush(DockControlPalette.Surface(mode, 1));
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 20);
+        if (mode.GlassStyle() is not null)
+        {
+            theme.Primary.Color = global::Windows.UI.Color.FromArgb(255, 22, 29, 40);
+            theme.Secondary.Color = global::Windows.UI.Color.FromArgb(255, 60, 70, 85);
+            var alpha = mode switch
+            {
+                DockAppearanceMode.Frosted => (byte)246,
+                DockAppearanceMode.Acrylic => (byte)240,
+                _ => (byte)232
+            };
+            previewGlassFill.GradientStops[0].Color = global::Windows.UI.Color.FromArgb(alpha, 195, 203, 216);
+            previewGlassFill.GradientStops[1].Color = global::Windows.UI.Color.FromArgb(alpha, 224, 232, 244);
+            previewGlassFill.GradientStops[2].Color = global::Windows.UI.Color.FromArgb(alpha, 184, 194, 209);
+            chrome.Background = previewGlassFill;
+            chrome.BorderBrush = glassEdge;
+            innerGlow.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            chrome.Background = theme.Overlay;
+            chrome.BorderBrush = theme.TileBorder;
+            innerGlow.Visibility = Visibility.Collapsed;
+        }
+        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 16);
+        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        { CornerRadius = 16, ShadowOpacity = 0.32, ShadowBlur = 24, ShadowOffset = 6, BorderOpacity = 0, EdgeHighlight = 0 });
         if (isShown) Draw();
     }
 
@@ -340,7 +424,7 @@ internal sealed class WindowPreviewWindow : Window
             root.Children.Clear();
             liquid.Attach();
             root.Children.Add(glass);
-            root.Children.Add(solid);
+            root.Children.Add(chrome);
             page = frame.Page;
             windowCount = frame.Total;
             compact = frame.Compact;
@@ -365,9 +449,11 @@ internal sealed class WindowPreviewWindow : Window
 
     private Card CreateCard(ApplicationWindow window)
     {
-        var title = new TextBlock { FontSize = 12, Foreground = theme.Primary,
+        var title = new TextBlock { FontFamily = new("Segoe UI Variable Text"), FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = theme.Primary,
             TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        var fallback = new TextBlock { FontSize = 12, Foreground = theme.Secondary,
+        var fallback = new TextBlock { FontFamily = new("Segoe UI Variable Text"), FontSize = 11,
+            FontWeight = Microsoft.UI.Text.FontWeights.Normal, Foreground = theme.Secondary,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         // Account for the card's one-DIP border: identical bounds to the live DWM image.
         var cached = new Image { Stretch = Stretch.Uniform, Margin = new(5, 33, 5, 5), IsHitTestVisible = false };
@@ -381,19 +467,20 @@ internal sealed class WindowPreviewWindow : Window
         content.Children.Add(fallback);
         content.Children.Add(cached);
         content.Children.Add(header);
-        var border = new Border { CornerRadius = new(12),
+        var border = new Border { CornerRadius = new(10),
             BorderThickness = new(1), BorderBrush = theme.TileBorder, Background = theme.Tile, Child = content };
         var button = new Button { Content = border, Padding = new(0), BorderThickness = new(0),
             Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0, 0, 0, 0)),
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         theme.StyleButton(button);
-        button.CornerRadius = new(12);
+        button.CornerRadius = new(10);
         // A sibling rather than a child of the activation button. Its click
         // cannot bubble through the card activation handler.
         var close = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 10, Foreground = theme.Primary },
             Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new(0),
             BorderThickness = new(0), Background = theme.Tile, Opacity = 0, IsHitTestVisible = false };
         theme.StyleButton(close);
+        close.CornerRadius = new(6);
         var card = new Card { Window = window, Button = button, CloseButton = close, Border = border,
             Title = title, Fallback = fallback, Cached = cached, Thumbnail = new(hwnd, window) };
         button.PointerEntered += (_, _) =>
@@ -449,11 +536,12 @@ internal sealed class WindowPreviewWindow : Window
             // All layers, including native thumbnails, use the same fade and travel.
             var travel = 6 * (1 - visibility);
             root.Opacity = visibility;
-            glass.Width = solid.Width = width;
-            glass.Height = solid.Height = Math.Max(0, height - 12);
+            glass.Width = chrome.Width = width;
+            glass.Height = chrome.Height = Math.Max(0, height - 12);
             Canvas.SetTop(glass, travel);
-            Canvas.SetTop(solid, travel);
-            backdrop.SetBounds(width, height, width, Math.Max(0, height - 12 - travel), 12, dpi, visibility);
+            Canvas.SetTop(chrome, travel);
+            host.InputHeightPixels = (int)Math.Round(Math.Max(0, height - 12) * dpi);
+            backdrop.SetBounds(width, height, width, Math.Max(0, height - 12 - travel), PreviewCornerRadius, dpi, visibility);
             for (var index = frameCards.Length - 1; index >= 0; index--)
             {
                 if (!isShown || revision != renderRevision) return;
@@ -528,7 +616,7 @@ internal sealed class WindowPreviewWindow : Window
         root.Children.Clear();
         liquid.Attach();
         root.Children.Add(glass);
-        root.Children.Add(solid);
+        root.Children.Add(chrome);
     }
 
     private void QueueRefresh()

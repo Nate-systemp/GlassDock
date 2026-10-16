@@ -23,6 +23,7 @@ public sealed class DesktopCaptureSource : IDisposable
     private GraphicsCaptureSession? session;
     private bool excluded;
     private bool screenshotPaused;
+    private bool countedSession;
     public event EventHandler? FrameAvailable;
     public event EventHandler? Closed;
 
@@ -67,6 +68,8 @@ public sealed class DesktopCaptureSource : IDisposable
                 "Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
                 session.MinUpdateInterval = TimeSpan.FromSeconds(1d / 60);
             session.StartCapture();
+            countedSession = true;
+            GlassDock.Core.Desktop.DockPerformanceDiagnostics.CaptureSessionChanged(1);
         }
         catch
         {
@@ -77,6 +80,7 @@ public sealed class DesktopCaptureSource : IDisposable
 
     private void StopFramePool()
     {
+        if (countedSession) { countedSession = false; GlassDock.Core.Desktop.DockPerformanceDiagnostics.CaptureSessionChanged(-1); }
         session?.Dispose(); session = null;
         if (pool is not null) pool.FrameArrived -= FrameArrived;
         pool?.Dispose(); pool = null;
@@ -112,9 +116,31 @@ public sealed class DesktopCaptureSource : IDisposable
         StartFramePool();
     }
 
-    private void FrameArrived(Direct3D11CaptureFramePool sender, object args) => FrameAvailable?.Invoke(this, EventArgs.Empty);
+    private void FrameArrived(Direct3D11CaptureFramePool sender, object args)
+    {
+        var started = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        try { FrameAvailable?.Invoke(this, EventArgs.Empty); }
+        finally
+        {
+            if (started != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordCaptureCallback(System.Diagnostics.Stopwatch.GetTimestamp() - started);
+        }
+    }
     private void ItemClosed(GraphicsCaptureItem sender, object args) => Closed?.Invoke(this, EventArgs.Empty);
-    public Direct3D11CaptureFrame? TakeFrame() => pool?.TryGetNextFrame();
+    public Direct3D11CaptureFrame? TakeFrame()
+    {
+        var currentPool = pool;
+        var latest = currentPool?.TryGetNextFrame();
+        if (latest is null) return null;
+        try
+        {
+            // Two-buffer pool: consume at most one newer queued frame. Never
+            // spin against a live producer or render an obsolete desktop sample.
+            var newer = currentPool!.TryGetNextFrame();
+            if (newer is not null) { latest.Dispose(); latest = newer; }
+            return latest;
+        }
+        catch { latest.Dispose(); throw; }
+    }
     public void Dispose()
     {
         if (pool is not null) pool.FrameArrived -= FrameArrived;

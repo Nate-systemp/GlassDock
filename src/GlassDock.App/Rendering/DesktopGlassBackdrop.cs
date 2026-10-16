@@ -24,8 +24,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         PopupOptics = optics;
         PopupSurfaceChanged?.Invoke(this, EventArgs.Empty);
     }
+    // Popup-only right-edge anchoring: the Split Utilities HWND stays fixed while
+    // its glass surface grows LEFT. NaN retains the existing centered behavior.
+    internal double SurfaceRightInset { get; set; } = double.NaN;
+    private double SurfaceLeft => double.IsNaN(SurfaceRightInset)
+        ? (lastWindowWidth - lastWidth) / 2
+        : lastWindowWidth - lastWidth - SurfaceRightInset;
     internal (Vector4 Bounds, float Radius, float Scale) PopupGeometry =>
-        (new((float)((lastWindowWidth - lastWidth) / 2),
+        (new((float)SurfaceLeft,
             (float)(lastWindowHeight - lastBottom - lastHeight), (float)lastWidth, (float)lastHeight),
             (float)Math.Min(material.CornerRadius, Math.Min(lastWidth, lastHeight) / 2), (float)lastScale);
     private GlassDock.Core.Desktop.HomeCardRect[]? surfaceRegions;
@@ -44,6 +50,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     public bool UseInnerEdge { get; set; }
     public bool UseDockSpecular { get; set; }
     public bool CircularHighlightsEnabled { get; set; } = true;
+    public double DockLayoutScale { get; set; } = 1;
     public double SpecularHighlightAngle { get; set; } = 45;
     // Popup-only: soften Acrylic's lightly diffused base so the 12% base stream
     // cannot bring sharp wallpaper details back over the blurred material.
@@ -84,13 +91,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private Matrix4x4? presentationTransform;
     private BackdropCompositionTrack? bodyTrack, rimTrack;
 
-    public void AnimatePresentation(PopupCompositionFrame[] frames, TimeSpan duration)
+    public void AnimatePresentation(PopupCompositionFrame[] frames, TimeSpan duration, bool press = false)
     {
         if (visual is null) return;
         bodyTrack ??= new BackdropCompositionTrack(visual);
         bodyTrack.Bind();
         var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
         bodyTrack.Start(frames, duration, units);
+        if (press) clearSpecular?.AnimatePress(frames, duration, (float)lastScale * 2);
         if (edgeVisual is not null)
         {
             rimTrack ??= new BackdropCompositionTrack(edgeVisual, animateOpacity: false);
@@ -575,8 +583,12 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         RenderingModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private bool boundsDirty = true;
+    private double lastSurfaceRightInset = double.NaN;
+
     public void Apply(GlassMaterial value)
     {
+        boundsDirty = true;
         material = RefractionLayer.ForNativeBackend(value);
         if (edgeShape is not null)
         {
@@ -631,7 +643,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                     // Solid surfaces keep their opaque body; only the shared rim
                     // receives lighting. A white catch needs more contrast on Light.
                     clearSpecular.Apply(UseDockSpecular
-                        ? material with { BorderThickness = .35, BorderOpacity = UseSolidSurface
+                        ? material with { BorderThickness = .35 * DockLayoutScale, BorderOpacity = UseSolidSurface
                             ? (solidAppearance == DockAppearanceMode.Light ? .45 : .24) : .28 }
                         : material, diagonalCatches: UseDockSpecular);
                     clearSpecular.SetVisible(true);
@@ -653,13 +665,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                         StartupDiagnostics.Write("Clear specular cleanup failed", disposeError);
                     }
                     clearSpecular = null;
-                    output.Source = edgeEffect ?? specularBody;
+                    output.Source = UseDockSpecular && dockStyle == GlassMaterialMode.Clear ? specularBody : edgeEffect ?? specularBody;
                 }
             }
             else
             {
                 clearSpecular?.SetVisible(false);
-                output.Source = edgeEffect ?? specularBody;
+                output.Source = UseDockSpecular && dockStyle == GlassMaterialMode.Clear ? specularBody : edgeEffect ?? specularBody;
             }
         }
         UpdateMaskPath();
@@ -669,7 +681,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     {
         if (!hasBounds || clearSpecular is null) return;
         clearSpecular.SetBounds(lastWindowWidth, lastWindowHeight,
-            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale, lastWidth, SpecularHighlightAngle);
+            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale, lastWidth, SpecularHighlightAngle, SurfaceLeft);
     }
 
     public void SetSolidAppearance(
@@ -712,7 +724,28 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         double scale,
         double opacity = 1)
     {
+        var insetSame = (double.IsNaN(lastSurfaceRightInset) && double.IsNaN(SurfaceRightInset)) ||
+                        Math.Abs(lastSurfaceRightInset - SurfaceRightInset) < 0.001;
+        if (hasBounds && !boundsDirty && insetSame &&
+            Math.Abs(lastWindowWidth - windowWidth) < 0.001 &&
+            Math.Abs(lastWindowHeight - windowHeight) < 0.001 &&
+            Math.Abs(lastWidth - width) < 0.001 &&
+            Math.Abs(lastHeight - height) < 0.001 &&
+            Math.Abs(lastBottom - bottom) < 0.001 &&
+            Math.Abs(lastScale - scale) < 0.0001 &&
+            Math.Abs(lastOpacity - opacity) < 0.0001)
+        {
+            GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordBackdropUpdate(updated: false);
+            return;
+        }
+
+        var startTicks = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+
         hasBounds = true;
+        boundsDirty = false;
+        lastSurfaceRightInset = SurfaceRightInset;
         lastWindowWidth = windowWidth;
         lastWindowHeight = windowHeight;
         lastWidth = width;
@@ -730,6 +763,11 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             scale,
             opacity);
         PopupSurfaceChanged?.Invoke(this, EventArgs.Empty);
+
+        if (startTicks != 0)
+            GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordBackdropUpdate(
+                updated: true,
+                System.Diagnostics.Stopwatch.GetTimestamp() - startTicks);
     }
 
     private void ApplyBounds(
@@ -814,17 +852,33 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
         }
 
+        var clampedHalfWidth = Math.Max(24, halfWidth);
+        var clampedRise = Math.Max(0, rise);
+        var clampedStrength = Math.Clamp(strength, 0, 1);
+
+        if (waveEnabled &&
+            Math.Abs(waveCenterX - centerX) < 0.001 &&
+            Math.Abs(waveHalfWidth - clampedHalfWidth) < 0.001 &&
+            Math.Abs(waveRise - clampedRise) < 0.001 &&
+            Math.Abs(waveStrength - clampedStrength) < 0.0001)
+        {
+            return;
+        }
+
         waveEnabled = true;
         waveCenterX = centerX;
-        waveHalfWidth = Math.Max(24, halfWidth);
-        waveRise = Math.Max(0, rise);
-        waveStrength = Math.Clamp(strength, 0, 1);
+        waveHalfWidth = clampedHalfWidth;
+        waveRise = clampedRise;
+        waveStrength = clampedStrength;
 
         UpdateMaskPath();
     }
 
     public void ClearDockWave()
     {
+        if (!waveEnabled && waveStrength <= 0)
+            return;
+
         waveEnabled = false;
         waveStrength = 0;
         UpdateMaskPath();
@@ -873,7 +927,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
         }
 
-        var left = (lastWindowWidth - lastWidth) / 2;
+        var left = SurfaceLeft;
         var top = lastWindowHeight - lastBottom - lastHeight;
         var right = left + lastWidth;
         var bottom = top + lastHeight;
@@ -951,7 +1005,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         }
 
         var outline = GlassDock.Core.Desktop.DockWaveGeometry.Create(
-            (lastWindowWidth - lastWidth) / 2,
+            SurfaceLeft,
             lastWindowHeight - lastBottom - lastHeight, lastWidth, lastHeight,
             material.CornerRadius, waveCenterX, waveHalfWidth, waveRise,
             waveEnabled ? waveStrength : 0);
