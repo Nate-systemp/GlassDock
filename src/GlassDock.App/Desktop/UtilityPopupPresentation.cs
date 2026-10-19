@@ -25,6 +25,7 @@ internal sealed class UtilityPopupPresentation
     public event EventHandler? Dismissed;
     public event EventHandler? Hidden;
     public bool IsVisible => requested && !finished;
+    public Func<bool>? RetainOnDeactivation { get; set; }
     private PopupCompositionTrack? track;
     private CompositionScopedBatch? batch;
     private readonly PopupCompositionFrame[] frames = new PopupCompositionFrame[33];
@@ -47,6 +48,7 @@ internal sealed class UtilityPopupPresentation
             if (finished) return;
             if (args.WindowActivationState == WindowActivationState.Deactivated)
             {
+                if (RetainOnDeactivation?.Invoke() == true) return;
                 // Pointer-down activates the dock before Button.Click (pointer-up).
                 // That interaction belongs to the utility toggle, not outside-dismiss.
                 if (activated && started)
@@ -57,7 +59,7 @@ internal sealed class UtilityPopupPresentation
                     root.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
                         () =>
                         {
-                            if (!finished && UtilityPopupRequests.ShouldDismissOnDeactivation(
+                            if (!finished && RetainOnDeactivation?.Invoke() != true && UtilityPopupRequests.ShouldDismissOnDeactivation(
                                 utilityInteraction, observedRevision, revision)) Dismiss();
                         });
                 }

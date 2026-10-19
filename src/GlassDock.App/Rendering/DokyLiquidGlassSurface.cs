@@ -25,10 +25,51 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private readonly LiquidGlassRim rim = new();
     public bool CircularHighlightsEnabled { get; set; } = true;
     public float DockLayoutScale { get; set; } = 1;
+    public float PopupRimStrokeScale { get; set; } = 1;
+    public bool UseMaterialLighting { get; set; }
+    // Keep Control Center GPU blur settings in the renderer to avoid
+    // coupling this App build to newly introduced Core constants.
+    private const float ControlCenterPanelBlur = ControlCenterGlassMaterial.PanelBlur;
+    private const float ControlCenterControlBlur = ControlCenterGlassMaterial.ControlBlur;
+    // Explicit local diagnostic only: one GPU render saved per renderer lifetime.
+    private readonly string? materialSnapshotPath = Environment.GetEnvironmentVariable("DOKY_GLASS_SNAPSHOT");
+    private int materialSnapshotFrames;
+    private bool materialSnapshotTaken;
+    private Vector2? materialPointer;
+    private Vector4? panelLighting, regionLighting;
+    public void SetMaterialPointer(Vector2? point)
+    {
+        if (materialPointer == point) return;
+        materialPointer = point;
+        if (UseMaterialLighting && enabled) QueueDraw();
+    }
     private readonly Action<CanvasDrawingSession, CanvasGeometry> drawRim;
     private CropEffect? popupCrop;
     private GaussianBlurEffect? popupBlur;
+    private GaussianBlurEffect? controlBlur;
     private ExposureEffect? popupExposure;
+    private PopupGlassRegion[] popupRegions = [];
+    private readonly List<(PixelShaderEffect Shader, CanvasGeometry Clip)> regionResources = [];
+    private float regionScale;
+    private Vector4? regionOrigin;
+    private readonly LiquidGlassRim controlRim = new();
+    public LiquidGlassMaterial ControlMaterial { get; set; } = new();
+    private LiquidGlassMaterial? regionMaterial;
+    public void SetPopupRegions(PopupGlassRegion[] regions)
+    {
+        if (popupRegions.AsSpan().SequenceEqual(regions)) return;
+        popupRegions = regions;
+        ReleaseRegions();
+        if (enabled) QueueDraw();
+    }
+    private void ReleaseRegions()
+    {
+        foreach (var region in regionResources) { region.Shader.Dispose(); region.Clip.Dispose(); }
+        regionResources.Clear();
+        regionOrigin = null;
+        regionLighting = null;
+        controlRim.Dispose(); regionMaterial = null;
+    }
     public bool PreserveDockBackdrop { get; set; }
     public FrameworkElement Output => popupTarget?.Element ?? (FrameworkElement)Panel;
     public CanvasSwapChainPanel Panel { get; } = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
@@ -55,6 +96,11 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private GlassMaterial dockMaterial = new();
     private static readonly LiquidGlassMaterial LensMaterial = new LiquidGlassMaterial
     { RefractionStrength = 11, EdgeThickness = 17, DiffusionAmount = .35f, ChromaticDispersion = .85f, SpecularIntensity = .20f }.Normalize();
+    // Shared drag-pill optical family, softened for small readable frosted controls.
+    private static readonly LiquidGlassMaterial FrostedControlMaterial = (LensMaterial with
+    { RefractionStrength = 3, EdgeThickness = 8, ChromaticDispersion = .2f, SpecularIntensity = .12f }).Normalize();
+    internal static LiquidGlassMaterial ControlOptics(LiquidGlassMaterial source) =>
+        FrostedControlMaterial with { SpecularAngleDegrees = source.SpecularAngleDegrees };
     public string Status { get; private set; } = "Liquid inactive";
     public event EventHandler? StatusChanged;
     private readonly nint hwnd;
@@ -170,6 +216,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             {
                 device = CanvasDevice.GetSharedDevice();
                 shader = new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
+                panelLighting = null;
                 if (popupTarget is null)
                 {
                     swapChain = new CanvasSwapChain(device, next.Width, next.Height, 96);
@@ -179,6 +226,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 {
                     popupCrop = new();
                     popupBlur = new() { Source = popupCrop, BorderMode = EffectBorderMode.Hard };
+                    controlBlur = new() { Source = popupCrop, BorderMode = EffectBorderMode.Hard, CacheOutput = true };
                     popupExposure = new() { Source = popupBlur, Exposure = UtilityMaterial.LiquidBackdropExposure };
                 }
                 capture = new(hwnd, device.As<IDirect3DDevice>(), next);
@@ -315,18 +363,28 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     Math.Min(placement.MonitorWidth, placement.X + placement.Width + margin) - x,
                     Math.Min(placement.MonitorHeight, placement.Y + placement.Height + margin) - y);
                 popupCrop.Source = bitmap;
-                popupBlur!.BlurAmount = PreserveDockBackdrop ? 0 : UtilityMaterial.LiquidBackdropBlur * scale;
+                // Stronger real desktop blur for the Clear Control Center only; no
+                // extra opaque/tinted XAML layer and no change to other popups.
+                var panelBlur = UseMaterialLighting ? ControlCenterPanelBlur
+                    : UtilityMaterial.LiquidBackdropBlur;
+                popupBlur!.BlurAmount = PreserveDockBackdrop ? 0 : panelBlur * scale;
                 popupExposure!.Exposure = PreserveDockBackdrop ? 0 : UtilityMaterial.LiquidBackdropExposure;
                 shader.Source1 = popupExposure;
             }
             var origin = new Vector2(placement.X, placement.Y);
             ConfigureShader(shader, Material, dock * scale + new Vector4(origin, 0, 0),
                 wave * scale + new Vector4(origin.X, 0, 0, 0), new(placement.MonitorWidth, placement.MonitorHeight), Vector4.Zero);
+            var surface = MaterialLighting(1);
+            if (panelLighting != surface) { shader.Properties["Surface"] = surface; panelLighting = surface; }
             if (clearActive)
             {
                 if (started != 0) preparedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 var crop = new global::Windows.Foundation.Rect(placement.X, placement.Y, placement.Width, placement.Height);
-                if (popupTarget is not null) popupTarget.Draw(device!, shader, geometry, crop, scale, drawRim);
+                if (popupTarget is not null)
+                {
+                    popupTarget.Draw(device!, shader, geometry, crop, scale, drawRim);
+                    TrySaveMaterialSnapshot(geometry, crop);
+                }
                 else
                 {
                     using (var drawing = swapChain!.CreateDrawingSession(Microsoft.UI.Colors.Transparent))
@@ -386,8 +444,145 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
 
     private void DrawRim(CanvasDrawingSession drawing, CanvasGeometry geometry)
     {
-        if (popupTarget is not null || CircularHighlightsEnabled)
-            rim.Draw(drawing, geometry, dock, scale, Material, dockSurface: popupTarget is null, strokeScale: popupTarget is null ? DockLayoutScale : 1);
+        if (UseMaterialLighting && popupTarget is not null)
+        {
+            // The shader derives restrained reflections from the actual curved
+            // surface normals. Do not add fixed-position corner glints here.
+        }
+        else if (popupTarget is not null || CircularHighlightsEnabled)
+            rim.Draw(drawing, geometry, dock, scale, Material, dockSurface: popupTarget is null, strokeScale: popupTarget is null ? DockLayoutScale : PopupRimStrokeScale);
+        if (popupTarget is not null) DrawControlGlass(drawing);
+    }
+
+    private void TrySaveMaterialSnapshot(CanvasGeometry geometry, global::Windows.Foundation.Rect crop)
+    {
+        if (!UseMaterialLighting || string.IsNullOrWhiteSpace(materialSnapshotPath) || materialSnapshotTaken ||
+            popupRegions.Length == 0 || ++materialSnapshotFrames < 6) return;
+        materialSnapshotTaken = true;
+        CanvasRenderTarget? target = null;
+        CanvasRenderTarget? backdropTarget = null;
+        try
+        {
+            // Save the exact source crop alongside the material output. This is
+            // opt-in and one-shot; it lets us distinguish a capture/coordinate
+            // failure from a shader/material issue without guessing from colors.
+            backdropTarget = new CanvasRenderTarget(device!, (float)crop.Width, (float)crop.Height, 96);
+            using (var drawing = backdropTarget.CreateDrawingSession())
+            {
+                drawing.Clear(Microsoft.UI.Colors.Transparent);
+                drawing.DrawImage(bitmap!, Vector2.Zero, crop);
+            }
+            target = new CanvasRenderTarget(device!, (float)crop.Width, (float)crop.Height, 96);
+            using (var drawing = target.CreateDrawingSession())
+            {
+                drawing.Clear(Microsoft.UI.Colors.Transparent);
+                using (drawing.CreateLayer(1, geometry))
+                {
+                    drawing.DrawImage(shader, Vector2.Zero, crop);
+                    DrawRim(drawing, geometry);
+                }
+            }
+            var metadata = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Pid = Environment.ProcessId, Scale = scale, PanelOptics = Material, ControlOptics = ControlMaterial,
+                Width = crop.Width, Height = crop.Height,
+                CaptureMonitor = new { placement.MonitorWidth, placement.MonitorHeight },
+                CaptureCrop = new { placement.X, placement.Y, placement.Width, placement.Height },
+                Regions = popupRegions.Select(r => new { X = r.Bounds.X, Y = r.Bounds.Y, Width = r.Bounds.Z, Height = r.Bounds.W, r.Radius }).ToArray()
+            });
+            _ = SaveMaterialSnapshotAsync(target, materialSnapshotPath, metadata);
+            target = null; // asynchronous saver owns this one diagnostic texture
+            _ = SaveBackdropSnapshotAsync(backdropTarget, Path.ChangeExtension(materialSnapshotPath, ".backdrop.png"));
+            backdropTarget = null;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { StartupDiagnostics.Write("Control Center material snapshot failed", error); }
+        finally { target?.Dispose(); backdropTarget?.Dispose(); }
+    }
+
+    private static async Task SaveBackdropSnapshotAsync(CanvasRenderTarget target, string path)
+    {
+        using (target)
+        {
+            try { await target.SaveAsync(path, CanvasBitmapFileFormat.Png); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { StartupDiagnostics.Write("Control Center backdrop snapshot save failed", error); }
+        }
+    }
+
+    private static async Task SaveMaterialSnapshotAsync(CanvasRenderTarget target, string path, string metadata)
+    {
+        using (target)
+        {
+            try
+            {
+                await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
+                await File.WriteAllTextAsync(path + ".json", metadata);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { StartupDiagnostics.Write("Control Center material snapshot save failed", error); }
+        }
+    }
+
+    private Vector4 MaterialLighting(float kind)
+    {
+        if (!UseMaterialLighting || popupTarget is null) return Vector4.Zero;
+        var point = materialPointer ?? new Vector2(dock.X + dock.Z / 2, dock.Y + dock.W / 2);
+        return new(kind, placement.X + point.X * scale, placement.Y + point.Y * scale, materialPointer.HasValue ? 1 : 0);
+    }
+
+    private void DrawControlGlass(CanvasDrawingSession drawing)
+    {
+        if (popupRegions.Length == 0 || device is null || controlBlur is null) return;
+        var blur = (UseMaterialLighting ? ControlCenterControlBlur : 8) * scale;
+        if (controlBlur.BlurAmount != blur) controlBlur.BlurAmount = blur;
+        if (regionScale != scale) { ReleaseRegions(); regionScale = scale; }
+        if (regionResources.Count == 0)
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin"));
+            foreach (var region in popupRegions)
+            {
+                var b = region.Bounds * scale;
+                var radius = Math.Min(region.Radius * scale, Math.Min(b.Z, b.W) / 2);
+                regionResources.Add((new PixelShaderEffect(bytes), CanvasGeometry.CreateRoundedRectangle(device,
+                    b.X, b.Y, b.Z, b.W, radius, radius)));
+            }
+        }
+        var origin = new Vector4(placement.X, placement.Y, 0, 0);
+        var configure = regionOrigin != origin || regionMaterial != ControlMaterial;
+        var lighting = MaterialLighting(2);
+        for (var i = 0; i < popupRegions.Length; i++)
+        {
+            var b = popupRegions[i].Bounds * scale;
+            var radius = Math.Min(popupRegions[i].Radius * scale, Math.Min(b.Z, b.W) / 2);
+            var (effect, clip) = regionResources[i];
+            effect.Source1 = controlBlur; // one shared cropped blur, never a capture per control
+            if (configure)
+            {
+                effect.Properties["Dock"] = b + origin;
+                effect.Properties["Wave"] = new Vector4(b.X + origin.X + b.Z / 2, b.Z / 2, 0, radius);
+                effect.Properties["Optics"] = new Vector4(ControlMaterial.RefractionStrength * scale, ControlMaterial.EdgeThickness * scale, ControlMaterial.RefractionFalloff, ControlMaterial.DiffusionAmount * scale);
+                effect.Properties["Lighting"] = new Vector4(ControlMaterial.TintOpacity, ControlMaterial.SpecularIntensity, ControlMaterial.SpecularFalloff, ControlMaterial.SpecularAngleDegrees * MathF.PI / 180);
+                effect.Properties["FrameSize"] = new Vector2(placement.MonitorWidth, placement.MonitorHeight);
+                effect.Properties["Lens"] = new Vector4(0, ControlMaterial.ChromaticDispersion * scale, 0, 0);
+            }
+            if (regionLighting != lighting) effect.Properties["Surface"] = lighting;
+            try
+            {
+                // Clip each shader pass to its exact rounded control geometry.
+                // The old lighting branch rendered an extended rectangular halo
+                // without a per-card clip, which could escape a pill's bounds.
+                using (drawing.CreateLayer(1, clip))
+                {
+                    drawing.DrawImage(effect, new Vector2(b.X, b.Y), new global::Windows.Foundation.Rect(
+                        b.X + placement.X, b.Y + placement.Y, b.Z, b.W));
+                    if (!UseMaterialLighting)
+                        controlRim.Draw(drawing, clip, popupRegions[i].Bounds, scale, ControlMaterial);
+                }
+            }
+            finally { effect.Source1 = null; } // also release on draw/device failure
+        }
+        regionOrigin = origin; regionMaterial = ControlMaterial; regionLighting = lighting;
     }
 
     private void DrawLens(CanvasGeometry geometry)
@@ -474,6 +669,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
+        ReleaseRegions();
         screenshotFrozen = false;
         ReleaseLens();
         Output.Visibility = Visibility.Collapsed;
@@ -484,6 +680,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         rim.Dispose();
         popupExposure?.Dispose(); popupExposure = null;
         popupBlur?.Dispose(); popupBlur = null;
+        controlBlur?.Dispose(); controlBlur = null;
         popupCrop?.Dispose(); popupCrop = null;
         bitmap?.Dispose(); bitmap = null;
         currentFrame?.Dispose(); currentFrame = null;

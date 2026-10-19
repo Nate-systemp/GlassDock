@@ -30,17 +30,18 @@ public sealed class SplitUtilitiesCalendarHoverWiringTests
         Assert.Contains("LayoutRequested", Read("DesktopOverlayWindow.cs"));
     }
     [Fact]
-    public void Split_clock_uses_right_aligned_vertical_doky_calendar_and_other_modes_keep_their_layout()
+    public void Every_placement_uses_the_vertical_split_calendar_while_split_keeps_its_clock_anchor()
     {
         var popup = Read("CalendarPopoverWindow.cs");
-        Assert.Contains("bool compactSplit = false", popup, StringComparison.Ordinal);
+        Assert.Contains("bool compactSplit = true", popup, StringComparison.Ordinal);
         Assert.Contains("SplitPanelWidth = 342", popup, StringComparison.Ordinal);
         Assert.Contains("SplitPanelHeight = 448", popup, StringComparison.Ordinal);
         Assert.Contains("PositionNearSplitClock(AppWindow owner, double scale)", popup, StringComparison.Ordinal);
         Assert.Contains("if (compactSplit) Grid.SetRow(calendarCard, 1)", popup, StringComparison.Ordinal);
         Assert.Contains("else Grid.SetColumn(calendarCard, 1)", popup, StringComparison.Ordinal);
         var dock = Read("DesktopOverlayWindow.cs");
-        Assert.Contains("compactSplit: utilitiesPlacement == UtilitiesPlacement.SplitDock", dock, StringComparison.Ordinal);
+        Assert.Contains("compactSplit: true", dock, StringComparison.Ordinal);
+        Assert.DoesNotContain("compactSplit: utilitiesPlacement == UtilitiesPlacement.SplitDock", dock, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -41,11 +41,10 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
         Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
         Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);
-        // The detached Utilities pill uses Frosted glass, while docked Utilities
-        // follow the selected dock appearance. Validate the mapping and each
-        // popup's use of its resolved mode (rather than requiring the old call).
+        // All utility placements follow the selected dock appearance. Verify
+        // the shared mode flows into each existing popup window.
         Assert.Contains("private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode)", dock, StringComparison.Ordinal);
-        Assert.Contains("utilitiesPlacement == UtilitiesPlacement.InsideDock ? dockMode : DockAppearanceMode.Frosted;", dock, StringComparison.Ordinal);
+        Assert.Contains("private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode) => dockMode;", dock, StringComparison.Ordinal);
         Assert.Contains("var utilityMode = UtilityPopupMode(dockAppearance);", dock, StringComparison.Ordinal);
         Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
         Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);

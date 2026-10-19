@@ -5,8 +5,8 @@ namespace GlassDock.Core.Materials;
 public static class UtilityMaterial
 {
     // Clear popup readability pass; foreground controls/thumbnails are never inputs.
-    public const float LiquidBackdropBlur = 8;
-    public const float LiquidBackdropExposure = -1.25f;
+    public const float LiquidBackdropBlur = 2.5f;
+    public const float LiquidBackdropExposure = 0f;
     public static LiquidGlassMaterial PopupOptics(LiquidGlassMaterial dockOptics) =>
         (dockOptics with { SpecularIntensity = .26f }).Normalize();
     // A dashboard repeats small neighboring surfaces. Dock-sized shadows overlap

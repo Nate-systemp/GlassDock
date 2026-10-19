@@ -23,6 +23,9 @@ internal sealed class UtilityPopupTheme
     public SolidColorBrush Hover { get; } = new();
     public SolidColorBrush Pressed { get; } = new();
     public SolidColorBrush Track { get; } = new();
+    public SolidColorBrush EnabledIndicator { get; } = new();
+    public SolidColorBrush EnabledText { get; } = new();
+    public SolidColorBrush SliderInk { get; } = new();
     public DockAppearanceMode Mode { get; private set; }
 
     public UtilityPopupTheme() => Apply(DockAppearanceMode.Dark);
@@ -66,6 +69,11 @@ internal sealed class UtilityPopupTheme
         AccentText.Color = foreground;
         Divider.Color = foreground with { A = 48 };
         Track.Color = DockControlPalette.Surface(mode, 70);
+        EnabledIndicator.Color = mode == DockAppearanceMode.Light
+            ? Color.FromArgb(255, 45, 99, 196)
+            : Color.FromArgb(255, 47, 108, 219);
+        EnabledText.Color = Color.FromArgb(255, 255, 255, 255);
+        SliderInk.Color = DockControlPalette.SolidSurface(mode);
         // No second material scrim above native glass. Solid modes use the
         // same neutral finishes as the main dock.
         Overlay.Color = mode switch

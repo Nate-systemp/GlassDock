@@ -21,8 +21,9 @@ internal sealed class CalendarPopoverWindow : Window
 {
     private const double StandardPanelWidth = 554;
     private const double StandardPanelHeight = 374;
-    // Split Dock's clock opens a vertical, single-column calendar rather than
-    // duplicating the wide Control Center calendar or the Windows Win+N panel.
+    // Split Dock's compact vertical calendar is the shared default for Inside Dock,
+    // Floating Button, and Split Dock. The legacy wide variant is retained only
+    // for compatibility with any existing explicit callers.
     private const double SplitPanelWidth = 342;
     private const double SplitPanelHeight = 448;
     private readonly bool compactSplit;
@@ -53,7 +54,7 @@ internal sealed class CalendarPopoverWindow : Window
 
     public CalendarPopoverWindow(DockAppearanceSettings appearance,
         DockAppearanceMode dockMode, Func<bool>? utilityOwnsPointer = null,
-        bool compactSplit = false)
+        bool compactSplit = true)
     {
         this.compactSplit = compactSplit;
         Title = "Doky Calendar";

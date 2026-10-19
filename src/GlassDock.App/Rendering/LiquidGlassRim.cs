@@ -33,7 +33,7 @@ internal sealed class LiquidGlassRim : IDisposable
         brush.EndPoint = (origin + gradient.End) * scale;
         brush.Opacity = Math.Clamp(material.SpecularIntensity * 2.4f, 0, 1);
         drawing.Antialiasing = CanvasAntialiasing.Antialiased;
-        if (dockSurface) DrawDockLight(drawing, geometry, bounds, scale);
+        DrawDockLight(drawing, geometry, bounds, scale);
         // The body's exact vector clip retains the inner half of a 1.4-DIP stroke.
         // Coverage is resolved by Direct2D, not a subpixel exponential sampled once per pixel.
         if (dockSurface) brush.Opacity *= .55f;

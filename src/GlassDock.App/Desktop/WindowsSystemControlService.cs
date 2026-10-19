@@ -15,6 +15,7 @@ internal readonly record struct WindowsSystemSnapshot(
 
 internal sealed class WindowsSystemControlService
 {
+    public GlassDock.Windows.Desktop.SystemControlAutomation QuickControls { get; } = new();
     private static readonly Type? MmDeviceEnumeratorType =
         Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"), throwOnError: false);
 
@@ -134,8 +135,9 @@ internal sealed class WindowsSystemControlService
 
     public void OpenNetworkSettings() => OpenSettings("ms-settings:network-wifi");
     public void OpenBluetoothSettings() => OpenSettings("ms-settings:bluetooth");
-    public void OpenFocusSettings() => OpenSettings("ms-settings:quietmomentshome");
+    public void OpenFocusSettings() => OpenSettings("ms-settings:quiethours");
     public void OpenAirplaneSettings() => OpenSettings("ms-settings:network-airplanemode");
+    public void OpenHotspotSettings() => OpenSettings("ms-settings:network-mobilehotspot");
     public void OpenDisplaySettings() => OpenSettings("ms-settings:display");
     public void OpenNightLightSettings() => OpenSettings("ms-settings:nightlight");
     public void OpenNotificationSettings() => OpenSettings("ms-settings:notifications");

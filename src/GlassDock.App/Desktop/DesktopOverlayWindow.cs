@@ -1440,7 +1440,9 @@ public sealed partial class DesktopOverlayWindow : Window
         }
         quickSettingsOpen = true;
         NotifyFloatingUtilitiesPopupChanged();
-        quickSettings.SetDetachedLayout(utilitiesPlacement != UtilitiesPlacement.InsideDock);
+        // Use the same Control Center content for all utility placements.
+        // Placement only determines where the popup opens, not its UI layout.
+        quickSettings.SetDetachedLayout(true);
         if (utilitiesPlacement != UtilitiesPlacement.InsideDock && floatingUtilities is not null)
             PositionDetachedUtilities();
         else
@@ -1556,7 +1558,8 @@ public sealed partial class DesktopOverlayWindow : Window
         {
             calendarWindow = cachedCalendarPopoverWindow ??= new CalendarPopoverWindow(
                 Appearance, UtilityPopupMode(settingsSession.Current.DockAppearanceMode),
-                UtilityOwnsPointer, compactSplit: utilitiesPlacement == UtilitiesPlacement.SplitDock);
+                // Share Split Dock's compact vertical Calendar UI across all placements.
+                UtilityOwnsPointer, compactSplit: true);
         }
         catch (Exception error)
         {
@@ -1634,10 +1637,8 @@ public sealed partial class DesktopOverlayWindow : Window
         return false;
     }
 
-    // Panels opened from the floating pill are always Frosted glass. Panels opened from the
-    // utility cluster inside the dock keep following the dock's own appearance.
-    private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode) =>
-        utilitiesPlacement == UtilitiesPlacement.InsideDock ? dockMode : DockAppearanceMode.Frosted;
+    // All utility popups follow the selected dock appearance, regardless of placement.
+    private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode) => dockMode;
 
     private void RefreshUtilityPopupAppearance()
     {
@@ -1713,7 +1714,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private void PositionDetachedUtilities()
     {
         if (utilitiesPlacement == UtilitiesPlacement.InsideDock || floatingUtilities is null || quickSettings is null) return;
-        quickSettings.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0);
+        quickSettings.PositionNear(floatingUtilities.AppWindow, floatingUtilities.Scale, 32, 32, 0, belowRight: true);
     }
 
     private void ToggleQuickSettings() => RequestUtility();

@@ -22,8 +22,7 @@ internal sealed class FloatingUtilitiesWindow : Window
     private const double CompactWidth = 102, ExpandedGap = 8, AnimationMilliseconds = 200;
     // Align the Utilities pill just below the dock surface centerline.
     private const double SplitVerticalOffset = 4;
-    // The floating pill is always Clear liquid glass, whatever the dock uses.
-    private const DockAppearanceMode PillMode = DockAppearanceMode.Clear;
+    // The pill follows the same appearance selection as the dock and its popups.
     private double pillWidth = FallbackContentWidth + SidePadding * 2;
     private readonly StackPanel status = new() { Orientation = Orientation.Horizontal, Spacing = 0, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly StackPanel systemIcons = new() { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
@@ -597,10 +596,11 @@ internal sealed class FloatingUtilitiesWindow : Window
         CancelHold();
         backdrop.SurfaceRightInset = Split ? SurfaceGutter : double.NaN;
         glass.Margin = button.Margin = hoverHighlight.Margin = new(SurfaceGutter);
-        theme.Apply(PillMode);
+        var mode = value.DockAppearanceMode;
+        theme.Apply(mode);
         tray.Visibility = Split ? Visibility.Visible : Visibility.Collapsed;
-        root.RequestedTheme = ElementTheme.Dark;
-        UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, PillMode, Diameter / 2);
+        root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
+        UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, mode, Diameter / 2);
         if (Split)
         {
             // Fix the clock to the right side of the pill while the hidden

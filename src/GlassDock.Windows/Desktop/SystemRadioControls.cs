@@ -19,6 +19,16 @@ public sealed class SystemRadioControls
             var radios = (await Radio.GetRadiosAsync()).Where(r => r.Kind == kind).ToArray();
             if (radios.Length == 0) return new("Unavailable", false, false);
             var on = radios.Count(r => r.State == RadioState.On);
+            if (kind == RadioKind.WiFi && on > 0)
+            {
+                try
+                {
+                    var profile = global::Windows.Networking.Connectivity.NetworkInformation.GetInternetConnectionProfile();
+                    if (profile?.IsWlanConnectionProfile == true && profile.WlanConnectionProfileDetails.GetConnectedSsid() is { Length: > 0 } ssid)
+                        return new(ssid, true, true);
+                }
+                catch (Exception) { /* A restricted profile must not hide the working radio. */ }
+            }
             return new(on == radios.Length ? "On" : on > 0 ? "Mixed" :
                 radios.All(r => r.State == RadioState.Off) ? "Off" : "Unavailable", on > 0, true);
         }

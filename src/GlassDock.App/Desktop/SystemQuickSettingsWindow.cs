@@ -19,6 +19,7 @@ namespace GlassDock.App.Desktop;
 internal sealed partial class SystemQuickSettingsWindow : Window
 {
     private const double PanelWidth = 474, PanelHeight = 336, Gutter = 16;
+    private const double UnifiedPanelWidth = 294, UnifiedPanelHeight = 470;
     private readonly WindowsSystemControlService controls;
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
@@ -84,8 +85,10 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         root.Children.Add(new Border
         {
             Margin = new Thickness(Gutter),
-            CornerRadius = new CornerRadius(28),
+            CornerRadius = new CornerRadius(26),
             Background = theme.Overlay,
+            BorderBrush = depth.Edge,
+            BorderThickness = new Thickness(.6),
             IsHitTestVisible = false
         });
         panel = new Grid
@@ -104,11 +107,11 @@ internal sealed partial class SystemQuickSettingsWindow : Window
             () => _ = ToggleRadioAsync(RadioKind.WiFi), () => _ = ShowWifiAsync(), out networkFrame);
         bluetoothTile = AddTile(tiles, 1, "\uE702", "Bluetooth", bluetoothDetail,
             () => _ = ToggleRadioAsync(RadioKind.Bluetooth), () => _ = ShowBluetoothAsync(), out bluetoothFrame);
-        AddTile(tiles, 2, "\uE708", "Focus", focusDetail, null,
-            () => ShowInformation("Focus", "Focus is " + SystemRadioControls.FocusStatus() + ". Direct control requires restricted Windows API access.", controls.OpenFocusSettings), out _);
-        AddTile(tiles, 3, "\uE709", "Airplane", Label("Unsupported", 10, 155), null,
-            () => ShowInformation("Airplane mode", "Windows does not expose a supported airplane-mode toggle here.", controls.OpenAirplaneSettings), out airplaneFrame);
-        AddTile(tiles, 3, "\uE706", "Night Light", Label("Settings", 10), null, controls.OpenNightLightSettings, out nightFrame);
+        AddTile(tiles, 2, "\uE708", "Focus", focusDetail, () => _ = ToggleWindowsControlAsync(WindowsQuickControl.Focus),
+            ShowFocusUnavailable, out _);
+        AddTile(tiles, 3, "\uE709", "Airplane", Label("Unavailable", 10, 155), () => _ = ToggleWindowsControlAsync(WindowsQuickControl.Airplane),
+            () => ShowInformation("Airplane mode", "The primary button operates Windows' Airplane mode control. Settings may appear briefly.", controls.OpenAirplaneSettings), out airplaneFrame);
+        AddTile(tiles, 3, "\uE706", "Night Light", Label("", 10), () => _ = ToggleWindowsControlAsync(WindowsQuickControl.NightLight), ShowNightLightUnavailable, out nightFrame);
         nightFrame.Visibility = Visibility.Collapsed;
         heading = Label("Control Center", 16);
         heading.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
@@ -191,13 +194,7 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         details.RowDefinitions.Add(new RowDefinition());
         var backGlyph = Icon("\uE72B", 18);
         backGlyph.Foreground = theme.Primary;
-        details.Children.Add(Button(backGlyph, "Back to controls", () =>
-        {
-            detailRevision++;
-            detailLifetime?.Cancel();
-            details.Visibility = Visibility.Collapsed;
-            panel.Visibility = Visibility.Visible;
-        }, 36, 30));
+        details.Children.Add(Button(backGlyph, "Back to controls", ReturnToControls, 36, 30));
         AddRow(details, 1, detailMessage);
         AddRow(details, 2, new ScrollViewer { Content = detailItems, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         root.Children.Add(details);
@@ -209,6 +206,7 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         detailMessage.Foreground = theme.Secondary;
         Content = root;
         presentation = new UtilityPopupPresentation(this, root, backdrop, utilityOwnsPointer);
+        presentation.RetainOnDeactivation = () => windowsControlBusy && SystemControlAutomation.IsSettingsForeground();
         host = new InteractiveGlassWindowHost(WinRT.Interop.WindowNative.GetWindowHandle(this))
         {
             EnableHostBackdropBrush = true,
@@ -218,6 +216,12 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         catch { host.Dispose(); Close(); throw; }
         SystemBackdrop = backdrop;
         liquid = new(this, root, backdrop);
+        liquid.UseMaterialLighting = true;
+        liquid.OuterRimStrokeScale = .8f;
+        depth.RegisterGlass = liquid.RegisterControl;
+        panel.Loaded += (_, _) => SetControlTypography(panel);
+        panel.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => liquid.RefreshControls());
+        panel.SizeChanged += (_, _) => liquid.RefreshControls();
         ApplyAppearance(appearance, dockMode);
         root.SizeChanged += (_, _) => UpdateBackdrop();
         root.Loaded += (_, _) =>
@@ -230,7 +234,9 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         refreshTimer.Interval = TimeSpan.FromSeconds(1);
         refreshTimer.Tick += (_, _) => { Refresh(); if (detached) _ = RefreshMediaAsync(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); };
         presentation.Hidden += (_, _) => { refreshTimer.Stop(); detailRevision++; detailLifetime?.Cancel(); };
+        Activated += (_, args) => { if (args.WindowActivationState != WindowActivationState.Deactivated) _ = RefreshHardwareAsync(); };
         root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Dismiss(); } };
+        AttachInputTrace();
         Closed += (_, _) => { closed = true; lifetime.Cancel(); detailLifetime?.Cancel(); refreshTimer.Stop(); detailLifetime?.Dispose(); lifetime.Dispose(); host.Dispose(); };
     }
 
@@ -240,9 +246,10 @@ internal sealed partial class SystemQuickSettingsWindow : Window
     {
         currentAppearance = appearance; currentMode = mode;
         theme.Apply(mode);
+        ApplyControlCenterPalette(mode);
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
-        if (detached) UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, mode);
+        if (detached) UtilityPopupStyle.ApplyDockMatched(glass, backdrop, appearance, mode, 26);
         UpdateTileContrast(networkTile, lastWifiOn);
         UpdateTileContrast(bluetoothTile, lastBluetoothOn);
         // Resource brushes track the live palette; changing the appearance also
@@ -260,7 +267,7 @@ internal sealed partial class SystemQuickSettingsWindow : Window
     public void RetargetClosed() => presentation.RetargetClosed();
     public void BeginScreenshot() => liquid.BeginScreenshotMode();
     public void EndScreenshot() => liquid.EndScreenshotMode();
-    public void Present() { presentation.Present(); refreshTimer.Start(); Refresh(); if (DateTime.UtcNow >= nextHardwareRefresh) _ = RefreshHardwareAsync(); }
+    public void Present() { presentation.Present(); refreshTimer.Start(); Refresh(); _ = RefreshHardwareAsync(); }
     public void CloseImmediately() => presentation.CloseImmediately();
     public void Dismiss() => presentation.Dismiss();
 
@@ -269,9 +276,13 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         double scale,
         double anchorX,
         double anchorY,
-        double dockTop)
+        double dockTop,
+        bool belowRight = false)
     {
-        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop, detached ? 270 : PanelWidth, detached ? 280 : PanelHeight, detached);
+        // The compact Control Center layout is shared by every placement;
+        // anchor placement must not depend on which content layout is active.
+        UtilityPopupStyle.Position(AppWindow, owner, scale, anchorX, dockTop,
+            detached ? UnifiedPanelWidth : PanelWidth, detached ? UnifiedPanelHeight : PanelHeight, belowRight);
         presentation.SetTargetWindowGeometry(
             owner.Position.X + anchorX * scale,
             owner.Position.Y + anchorY * scale,
@@ -290,8 +301,8 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         heading.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
         headingRow.Visibility = heading.Visibility;
         Grid.SetRow(tiles, value ? 1 : 0);
-        // Reuse the same sliders and their handlers. The compact layout follows
-        // the reference's volume-then-brightness order.
+        // Reuse the same native sliders and event handlers in the shared layout.
+        // Their appearance is different, but their behavior is unchanged.
         foreach (var child in panel.Children.OfType<Border>())
         {
             if (child.Height == 1) { child.Visibility = value ? Visibility.Collapsed : Visibility.Visible; continue; }
@@ -336,11 +347,12 @@ internal sealed partial class SystemQuickSettingsWindow : Window
         }
         airplaneFrame.Visibility = value ? Visibility.Collapsed : Visibility.Visible;
         nightFrame.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
-        panel.Margin = new(Gutter + (value ? 14 : 18));
+        panel.Margin = new(Gutter + (value ? 12 : 18));
         panel.RowSpacing = value ? 6 : 10;
         if (value) BuildDetachedModules();
-        liquid.UseDockOptics = value;
+        liquid.UseDockOptics = false;
         ApplyAppearance(currentAppearance, currentMode);
+        liquid.RefreshControls();
     }
 
 
@@ -354,6 +366,8 @@ internal sealed partial class SystemQuickSettingsWindow : Window
             batteryDetail.Text = snapshot.HasBattery ? $"{snapshot.BatteryPercent}%{(snapshot.PluggedIn ? " · Charging" : "")}" : "AC power";
             if (detachedBattery is not null) detachedBattery.Text = snapshot.HasBattery
                 ? $"{snapshot.BatteryPercent}%   ·   {(snapshot.PluggedIn ? "Plugged in" : "On battery")}" : "AC power";
+            if (batteryStatus is not null) batteryStatus.Visibility = snapshot.HasBattery ? Visibility.Visible : Visibility.Collapsed;
+            if (volumeSvg is not null) icons.Set(volumeSvg, snapshot.Muted ? "mute" : snapshot.VolumePercent < 50 ? "volume-low" : "volume-high");
             volumeValue.Text = snapshot.Muted ? "Muted" : $"{snapshot.VolumePercent}%";
             volumeSlider.Value = snapshot.VolumePercent;
         }
@@ -364,39 +378,53 @@ internal sealed partial class SystemQuickSettingsWindow : Window
     {
         if (closed || presentation?.IsVisible != true || hardwareBusy) return;
         hardwareBusy = true;
+        var controlRevision = windowsControlRevision;
         try
         {
             var wifi = await radios.ReadAsync(RadioKind.WiFi);
             var bluetooth = await radios.ReadAsync(RadioKind.Bluetooth);
+            var shortcutState = await SystemQuickControlStatus.ReadAsync();
+            var windowsState = windowsControlBusy ? null : await controls.QuickControls.ReadAsync(lifetime.Token);
             var level = brightnessBusy ? null : await DisplayBrightnessControl.ReadAsync();
             if (closed || presentation?.IsVisible != true) return;
+            shortcutStatus = shortcutState;
+            if (!windowsControlBusy && controlRevision == windowsControlRevision && windowsState is not null)
+            {
+                windowsControlState = windowsState;
+                UpdateWindowsControlStates();
+            }
+            UpdateShortcutStates();
             networkDetail.Text = wifi.Text;
             bluetoothDetail.Text = bluetooth.Text;
             lastWifiOn = wifi.IsOn;
             lastBluetoothOn = bluetooth.IsOn;
-            networkFrame.Background = wifi.IsOn ? theme.AccentFill : theme.Tile;
-            bluetoothFrame.Background = bluetooth.IsOn ? theme.AccentFill : theme.Tile;
+            if (!detached)
+            {
+                networkFrame.Background = wifi.IsOn ? theme.AccentFill : theme.Tile;
+                bluetoothFrame.Background = bluetooth.IsOn ? theme.AccentFill : theme.Tile;
+            }
             UpdateTileContrast(networkTile, wifi.IsOn);
             UpdateTileContrast(bluetoothTile, bluetooth.IsOn);
             networkTile.IsEnabled = wifi.Available && !radioBusy;
             bluetoothTile.IsEnabled = bluetooth.Available && !radioBusy;
-            focusDetail.Text = SystemRadioControls.FocusStatus();
             if (!brightnessBusy)
             {
                 syncing = true;
                 brightness.IsEnabled = level.HasValue;
+                if (brightnessSvg is not null) icons.Set(brightnessSvg, "brightness", disabled: !level.HasValue);
                 brightnessValue.Text = level is { } value ? $"{value}%" : "—";
                 if (level.HasValue) brightness.Value = level.Value;
                 ToolTipService.SetToolTip(brightness, level.HasValue ? "Built-in display brightness" : "Direct brightness unsupported");
                 syncing = false;
             }
         }
+        catch (OperationCanceledException) when (closed) { }
         finally { hardwareBusy = false; nextHardwareRefresh = DateTime.UtcNow.AddSeconds(5); }
     }
 
     private async Task ToggleRadioAsync(RadioKind kind)
     {
-        if (closed || radioBusy) return;
+        if (closed || radioBusy || windowsControlBusy) return;
         radioBusy = true;
         networkTile.IsEnabled = bluetoothTile.IsEnabled = false;
         var message = await radios.ToggleAsync(kind, lifetime.Token);
@@ -432,6 +460,19 @@ internal sealed partial class SystemQuickSettingsWindow : Window
             }
         }
         finally { brightnessBusy = false; }
+    }
+
+    private void ReturnToControls()
+    {
+        detailRevision++;
+        detailLifetime?.Cancel();
+        depth.ResetInteraction();
+        details.Visibility = Visibility.Collapsed;
+        panel.Visibility = Visibility.Visible;
+        // Visibility alone does not guarantee new SizeChanged/Loaded events.
+        // Finish the Viewbox arrangement before sampling its glass regions.
+        root.UpdateLayout();
+        liquid.RefreshControls();
     }
 
     private int BeginDetails(string title, Action settings, Action? refresh = null)
@@ -620,13 +661,28 @@ internal sealed partial class SystemQuickSettingsWindow : Window
     private void UpdateTileContrast(Button tile, bool active)
     {
         if (!tileVisuals.TryGetValue(tile, out var visuals)) return;
-        var foreground = active ? theme.AccentText : theme.Primary;
-        visuals.Glyph.Foreground = foreground;
-        visuals.Title.Foreground = foreground;
-        visuals.Detail.Foreground = active ? theme.AccentText : theme.Secondary;
-        visuals.Chevron.Foreground = active ? theme.AccentText : theme.Muted;
+        if (detached)
+        {
+            if (tile == networkTile) depth.SetActive(networkFrame, active);
+            else if (tile == bluetoothTile) depth.SetActive(bluetoothFrame, active);
+        }
+        if (detached)
+        {
+            UpdateControlIcon(tile, tile == networkTile ? "wifi" : "bluetooth");
+            var clearActive = currentMode == DockAppearanceMode.Clear && active;
+            visuals.Title.Foreground = clearActive ? activeTitle : active ? theme.EnabledText : theme.Primary;
+            visuals.Detail.Foreground = clearActive ? activeSubtitle : active ? theme.EnabledText : theme.Secondary;
+            var frame = tile == networkTile ? networkFrame : bluetoothFrame;
+            if (((Grid)frame.Child).Children[2] is Button more && more.Content is Image arrow)
+                icons.Set(arrow, "expand", darkInk: clearActive);
+            return;
+        }
+        tile.Background = active ? theme.EnabledIndicator : theme.Track;
+        visuals.Glyph.Foreground = active ? theme.EnabledText : theme.Primary;
+        visuals.Title.Foreground = theme.Primary;
+        visuals.Detail.Foreground = theme.Secondary;
+        visuals.Chevron.Foreground = theme.Muted;
     }
-
     private Button ActionChip(string glyph, string text, Action action)
     {
         var row = new StackPanel
