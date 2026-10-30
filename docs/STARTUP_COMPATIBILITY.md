@@ -47,7 +47,7 @@ A native fail-fast inside WinUI cannot be recovered with a managed catch block.
 2. In PowerShell run:
    `& "$env:LOCALAPPDATA\Natesystemp.GlassDock\current\GlassDock.App.exe" --basic-rendering --controls`
 3. Confirm the dock opens and stays running for one minute. Expand it, open and
-   close a utility popup, then use Exit Doky. Confirm the taskbar restores.
+   close an app popup, then use Exit Doky. Confirm the taskbar restores.
 4. Run the same command without `--basic-rendering` and repeat with advanced composition.
 5. Send `%LOCALAPPDATA%\GlassDock\startup.log` and any new Event Viewer/WER entry
    if either fails. No settings need to be deleted or reset.

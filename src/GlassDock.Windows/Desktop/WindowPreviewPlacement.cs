@@ -30,7 +30,7 @@ public sealed class WindowPreviewPlacement : IDisposable
                 ? (exStyle | 0x080C0000L) & ~0x80L
                 : (exStyle | 0x08080080L) & ~0x40000L)
         );
-        // Match the dock/utilities' native desktop sampling client.
+        // Match the dock's native desktop sampling client.
         if (!NativeMethods.SetLayeredWindowAttributes(window, 0, 255, 2))
             throw new Win32Exception();
 

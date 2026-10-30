@@ -11,7 +11,7 @@ public sealed class LiquidGlassShaderStateTests
 
     [Fact]
     public void New_or_recreated_effect_requires_all_parameters()
-        => Assert.Equal(63, Original.ChangesFrom(null));
+        => Assert.Equal(LiquidGlassShaderState.All, Original.ChangesFrom(null));
 
     [Fact]
     public void Identical_frames_need_no_property_writes()
@@ -29,6 +29,9 @@ public sealed class LiquidGlassShaderStateTests
         Assert.Equal(8, (Original with { Lighting = tiny }).ChangesFrom(Original));
         Assert.Equal(16, (Original with { FrameSize = Vector2.Zero }).ChangesFrom(Original));
         Assert.Equal(32, (Original with { Lens = tiny }).ChangesFrom(Original));
+        Assert.Equal(64, (Original with { Surface = tiny }).ChangesFrom(Original));
+        Assert.Equal(128, (Original with { Profile = tiny }).ChangesFrom(Original));
+        Assert.Equal(256, (Original with { Reflections = tiny }).ChangesFrom(Original));
     }
 
     [Fact]

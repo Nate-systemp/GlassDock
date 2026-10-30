@@ -18,7 +18,6 @@ public static class SettingsCatalog
         new SettingsPageEntry("Behavior", "Behavior", "\uE713"),
         new SettingsPageEntry("Displays", "Displays", "\uE7F4"),
         new SettingsPageEntry("System", "System", "\uE80A"),
-        new SettingsPageEntry("Utilities", "Utilities", "\uE713"),
         new SettingsPageEntry("Advanced", "Advanced", "\uE90F"),
         new SettingsPageEntry("About", "About", "\uE946")
     });
@@ -28,8 +27,9 @@ public static class SettingsCatalog
         new SettingsSearchEntry("General", "Start with Windows", "LaunchAtStartupToggle", "startup login launch"),
         new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted acrylic clear liquid glass theme"),
         new SettingsSearchEntry("Appearance", "Blur and opacity", "GlassControls", "diffusion tint transparency material"),
-        new SettingsSearchEntry("Appearance", "Clear edge refraction", "ClearRefractionStrengthBox", "liquid glass distortion strength"),
-        new SettingsSearchEntry("Appearance", "Highlight position", "SpecularHighlightAngleBox", "specular rim lighting angle"),
+        new SettingsSearchEntry("Appearance", "Liquid Glass optics", "GlassControls", "refraction depth dispersion frost splay distortion falloff softness"),
+        new SettingsSearchEntry("Appearance", "Highlights", "GlassControls", "light angle intensity specular rim position reflections shine glints"),
+        new SettingsSearchEntry("Appearance", "Custom glass presets", "GlassControls", "save rename duplicate delete reset advanced components"),
         new SettingsSearchEntry("Appearance", "Circular highlights", "CircularHighlightsToggle", "toggle rim circular light reflections all dock modes"),
         new SettingsSearchEntry("Appearance", "Clear circular highlights", "ClearCircularHighlightsToggle", "liquid glass reflections"),
         new SettingsSearchEntry("Dock", "Icon size", "IconSizeBox", "size scale layout"),
@@ -50,8 +50,6 @@ public static class SettingsCatalog
         new SettingsSearchEntry("Displays", "Bottom spacing", "BottomMarginBox", "position margin"),
         new SettingsSearchEntry("System", "Taskbar recovery", "ResumeTaskbarButton", "restore windows suppression safe mode"),
         new SettingsSearchEntry("System", "Input helper", "HelperStatusText", "elevated keyboard uac"),
-        new SettingsSearchEntry("Utilities", "Utilities placement", "UtilitiesPlacementBox", "floating detach shortcut control center"),
-        new SettingsSearchEntry("Utilities", "Utilities layout", "UtilitiesLayoutBox", "expanded compact hidden restore split clock"),
         new SettingsSearchEntry("Advanced", "Rendering status", "RenderingStatusText", "diagnostics fallback capture"),
         new SettingsSearchEntry("Advanced", "Reset preferences", "ResetSection", "defaults placement appearance reset"),
         new SettingsSearchEntry("About", "Version and updates", "CheckUpdatesButton", "update version github release"),

@@ -31,7 +31,7 @@ public sealed class PinDockRuntimeWiringTests
         Assert.Contains("var targetSurfaceBottom = pin ? Sizing.SurfaceBottom : BottomMargin;", dock, StringComparison.Ordinal);
         Assert.Contains("var targetContentBottom = pin ? Sizing.Gap : BottomMargin;", dock, StringComparison.Ordinal);
         Assert.Contains("var targetSurfaceHeight = ExpandedDockHeight + (pin ? PinnedDockClipDepth : 0);", dock, StringComparison.Ordinal);
-        Assert.Contains("if (DockPinLock || previews.HoldsDock || SystemPopupOpen) return;", dock, StringComparison.Ordinal);
+        Assert.Contains("if (DockPinLock || previews.HoldsDock || StackPopupOpen) return;", dock, StringComparison.Ordinal);
         Assert.Contains("if (DockPinLock || collapseDelay is { IsCancellationRequested: false }", dock, StringComparison.Ordinal);
         Assert.Contains("if (DockPinLock || pillHideDelay is not null", dock, StringComparison.Ordinal);
         Assert.Contains("await ApplyPinDockModeAsync(pin: true, animate: true);", dock, StringComparison.Ordinal);

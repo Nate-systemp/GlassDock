@@ -24,12 +24,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         PopupOptics = optics;
         PopupSurfaceChanged?.Invoke(this, EventArgs.Empty);
     }
-    // Popup-only right-edge anchoring: the Split Utilities HWND stays fixed while
-    // its glass surface grows LEFT. NaN retains the existing centered behavior.
-    internal double SurfaceRightInset { get; set; } = double.NaN;
-    private double SurfaceLeft => double.IsNaN(SurfaceRightInset)
-        ? (lastWindowWidth - lastWidth) / 2
-        : lastWindowWidth - lastWidth - SurfaceRightInset;
+    private double SurfaceLeft => (lastWindowWidth - lastWidth) / 2;
     internal (Vector4 Bounds, float Radius, float Scale) PopupGeometry =>
         (new((float)SurfaceLeft,
             (float)(lastWindowHeight - lastBottom - lastHeight), (float)lastWidth, (float)lastHeight),
@@ -52,17 +47,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     public bool CircularHighlightsEnabled { get; set; } = true;
     public double DockLayoutScale { get; set; } = 1;
     public double SpecularHighlightAngle { get; set; } = 45;
-    // Popup-only: soften Acrylic's lightly diffused base so the 12% base stream
-    // cannot bring sharp wallpaper details back over the blurred material.
-    // The main dock and Clear composition paths never enable this option.
-    public bool UsePopupBlur { get; set; }
-    // The dock's validated CreateBackdropBrush path is the default for
-    // utility popups once their native HWNDs have the same layered DWM client.
-    // Optional host sampling can be enabled for an A/B runtime comparison on
-    // Windows versions where the regular source does not include desktop pixels.
-    public bool UseHostBackdropForPopup { get; set; }
-    private bool ConnectedSourceIsHost => UsePopupBlur && UseHostBackdropForPopup;
-    private bool connectedWithHostBackdrop;
+    public LiquidGlassMaterial? VisualMaterial { get; set; }
     private GlassMaterialMode? dockStyle;
     private ClearDockSpecular? clearSpecular;
     // An optional Clear-only composition path must not crash the entire dock
@@ -72,33 +57,27 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     public void ApplyMainDock(GlassMaterialMode style, GlassMaterial value)
     {
+        var qualityChanged = material.BlurQuality != value.BlurQuality;
         dockStyle = style;
         Apply(value);
+        if (qualityChanged) RebuildConnectedSurface();
     }
     /// <summary>
     /// Uses the existing vector mask and wave geometry with a solid color
-    /// source. This is used only by the main dock; utility popups retain the
-    /// desktop backdrop/material graph.
+    /// source for plain dock finishes.
     /// </summary>
     public bool UseSolidSurface { get; set; }
-    private double presentationScaleX = 1;
-    private double presentationScaleY = 1;
-    private double presentationOffsetX;
-    private double presentationOffsetY;
-    private double presentationX;
-    private double presentationY;
     private double presentationOpacity = 1;
-    private Matrix4x4? presentationTransform;
+    private Matrix4x4 presentationTransform = Matrix4x4.Identity;
     private BackdropCompositionTrack? bodyTrack, rimTrack;
 
-    public void AnimatePresentation(PopupCompositionFrame[] frames, TimeSpan duration, bool press = false)
+    public void AnimatePresentation(PopupCompositionFrame[] frames, TimeSpan duration)
     {
         if (visual is null) return;
         bodyTrack ??= new BackdropCompositionTrack(visual);
         bodyTrack.Bind();
         var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
         bodyTrack.Start(frames, duration, units);
-        if (press) clearSpecular?.AnimatePress(frames, duration, (float)lastScale * 2);
         if (edgeVisual is not null)
         {
             rimTrack ??= new BackdropCompositionTrack(edgeVisual, animateOpacity: false);
@@ -120,67 +99,20 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         ApplyPresentation();
     }
 
-    // Backward-compatible uniform transform used by existing callers.
-    public void SetPresentation(double scale, double offsetY, double originX, double originY, double opacity) =>
-        SetPresentation(scale, scale, 0, offsetY, originX, originY, opacity);
-
-    /// <summary>
-    /// Applies the same affine presentation transform used by a utility popup's
-    /// content to the desktop-glass mask and inner edge. Values are in DIPs.
-    /// </summary>
-    public void SetPresentation(
-        double scaleX,
-        double scaleY,
-        double offsetX,
-        double offsetY,
-        double originX,
-        double originY,
-        double opacity)
-    {
-        presentationTransform = null;
-        presentationScaleX = double.IsFinite(scaleX) ? Math.Max(0, scaleX) : 1;
-        presentationScaleY = double.IsFinite(scaleY) ? Math.Max(0, scaleY) : 1;
-        presentationOffsetX = double.IsFinite(offsetX) ? offsetX : 0;
-        presentationOffsetY = double.IsFinite(offsetY) ? offsetY : 0;
-        presentationX = double.IsFinite(originX) ? originX : 0;
-        presentationY = double.IsFinite(originY) ? originY : 0;
-        presentationOpacity = double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 1;
-        ApplyPresentation();
-    }
-
     private void ApplyPresentation()
     {
         if (visual is null)
             return;
 
         var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
-        var origin = new Vector3(
-            (float)presentationX * units,
-            (float)presentationY * units,
-            0);
-        var translation = new Vector3(
-            (float)presentationOffsetX * units,
-            (float)presentationOffsetY * units,
-            0);
-
-        var matrix = Matrix4x4.CreateTranslation(-origin) *
-            Matrix4x4.CreateScale(
-                (float)presentationScaleX,
-                (float)presentationScaleY,
-                1) *
-            Matrix4x4.CreateTranslation(origin + translation);
-
-        if (presentationTransform is { } transform)
-        {
-            // Conjugate the complete projective matrix, including perspective,
-            // from DIPs into the mask's supersampled physical coordinates.
-            matrix = Matrix4x4.CreateScale(1 / units, 1 / units, 1) * transform *
-                Matrix4x4.CreateScale(units, units, 1);
-        }
+        // Conjugate the complete projective matrix, including perspective,
+        // from DIPs into the mask's supersampled physical coordinates.
+        var matrix = Matrix4x4.CreateScale(1 / units, 1 / units, 1) * presentationTransform *
+            Matrix4x4.CreateScale(units, units, 1);
 
         clearSpecular?.SetTransform(matrix);
         visual.TransformMatrix = matrix;
-        visual.Opacity = liquidActive ? 0 : (float)(presentationOpacity * lastOpacity);
+        visual.Opacity = liquidActive ? 0 : (float)(presentationOpacity * lastOpacity * (VisualMaterial?.SurfaceOpacity ?? 1));
 
         if (edgeVisual is not null)
             edgeVisual.TransformMatrix = matrix;
@@ -308,53 +240,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         }
     }
 
-    /// <summary>
-    /// Switch the sampling source directly on the existing effect brush. Never
-    /// detach or rebuild a cached utility SystemBackdrop on a mode change:
-    /// WinUI may have a queued configuration callback against its native target.
-    /// Keeping the brush, mask, specular edge, and HWND intact also preserves
-    /// live popup presentation animations.
-    /// </summary>
-    public void RefreshPopupBackdropSource()
-    {
-        // Preserve Window.SystemBackdrop and both existing composition
-        // effect objects. Only the *source brush* can change live.
-        var wantsHost = ConnectedSourceIsHost;
-        if (compositor is null || effect is null || UseSolidSurface ||
-            connectedWithHostBackdrop == wantsHost)
-            return;
-
-        W.CompositionBackdropBrush? replacement = null;
-        try
-        {
-            replacement = wantsHost
-                ? compositor.CreateHostBackdropBrush()
-                : compositor.CreateBackdropBrush();
-            effect.SetSourceParameter("Backdrop", replacement);
-            effect.SetSourceParameter("BaseBackdrop", replacement);
-            var previous = source;
-            source = replacement;
-            replacement = null;
-            connectedWithHostBackdrop = wantsHost;
-            previous?.Dispose();
-            RenderingMode = connectedWithHostBackdrop
-                ? "Native utility backdrop · opt-in host source"
-                : UsePopupBlur
-                    ? "Native utility backdrop · main-dock layered source"
-                    : "Native system backdrop · shared glass graph";
-            System.Diagnostics.Debug.WriteLine($"[UtilityBackdrop] Switched native source: {RenderingMode}");
-            StartupDiagnostics.Write($"Utility backdrop source: {RenderingMode}");
-            RenderingModeChanged?.Invoke(this, EventArgs.Empty);
-        }
-        catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
-        {
-            // Do not tear down a functioning popup when optional host sampling
-            // is unsupported (e.g. DWM disabled or remote desktop session).
-            StartupDiagnostics.Write("Utility host backdrop source unavailable", error);
-            replacement?.Dispose();
-        }
-    }
-
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(target, xamlRoot);
@@ -472,20 +357,12 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var stage = "backdrop source";
         try
         {
-            // Default to the same source as the WORKING main dock. Previously
-            // utility HWNDs omitted WS_EX_LAYERED, so unlike the dock they did
-            // not have a compatible desktop sampling client. The optional host
-            // brush remains available as a controlled A/B diagnostic path.
-            connectedWithHostBackdrop = ConnectedSourceIsHost;
-            source = connectedWithHostBackdrop
-                ? compositor.CreateHostBackdropBrush()
-                : compositor.CreateBackdropBrush();
+            source = compositor.CreateBackdropBrush();
             stage = "effect factory";
-            // Separate named leaves keep the graph tree-shaped. The selected main-dock
-            // style controls base diffusion; popups retain their fully blurred base.
+            // Separate named leaves keep the graph tree-shaped.
             factory = compositor.CreateEffectFactory(
-                GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop"), new W.CompositionEffectSourceParameter("BaseBackdrop")),
-                GlassEffectGraph.Properties.Concat(["BaseBlur.BlurAmount"]));
+                GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop"), new W.CompositionEffectSourceParameter("BaseBackdrop"), material.BlurQuality),
+                GlassEffectGraph.Properties.Concat(new[] { "BaseBlur.BlurAmount" }));
             stage = "effect brush";
             effect = factory.CreateBrush();
             effect.SetSourceParameter("Backdrop", source);
@@ -549,16 +426,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 edgeEffect.SetSourceParameter("EdgeMask", edgeMask);
                 output.Source = edgeEffect;
             }
-            RenderingMode = connectedWithHostBackdrop
-                ? "Native utility backdrop · opt-in host source"
-                : UsePopupBlur
-                    ? "Native utility backdrop · main-dock layered source"
-                    : "Native system backdrop · shared glass graph";
-            System.Diagnostics.Debug.WriteLine($"[UtilityBackdrop] {RenderingMode}; " +
-                $"blur={material.BlurAmount:0.##} DIP; host={connectedWithHostBackdrop}");
-            if (UsePopupBlur)
-                StartupDiagnostics.Write($"Utility backdrop connected: {RenderingMode}, " +
-                    $"blur={material.BlurAmount:0.##} DIP");
+            RenderingMode = "Native system backdrop · shared glass graph";
             stage = "material parameters";
             Apply(material);
 
@@ -584,7 +452,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     }
 
     private bool boundsDirty = true;
-    private double lastSurfaceRightInset = double.NaN;
 
     public void Apply(GlassMaterial value)
     {
@@ -619,12 +486,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 effect.Properties.InsertScalar(name, scalar);
 
             var baseBlur = DockMaterialRendering.BaseBlur(dockStyle, material.BlurAmount);
-            if (UsePopupBlur && dockStyle == GlassMaterialMode.Acrylic)
-            {
-                // Maintain Acrylic's two-layer texture but diffuse the
-                // backdrop sufficiently in utility popups to be noticeable.
-                baseBlur = Math.Max(baseBlur, Math.Min(material.BlurAmount, 18));
-            }
             effect.Properties.InsertScalar("BaseBlur.BlurAmount", (float)baseBlur);
 
             effect.Properties.InsertColor(
@@ -632,7 +493,8 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 GlassEffectGraph.Tint(material));
         }
 
-        W.CompositionBrush? specularBody = UseSolidSurface ? solidSurface : effect;
+        W.CompositionBrush? specularBody = UseSolidSurface ? solidSurface :
+            VisualMaterial is { EdgeOpacity: > 0 } ? edgeEffect ?? effect : effect;
         if ((UseInnerEdge || UseDockSpecular) && specularBody is not null && fallback is null && output is not null)
         {
             if (CircularHighlightsEnabled && (UseDockSpecular || dockStyle == GlassMaterialMode.Clear) && surfaceRegions is null && !clearSpecularUnavailable)
@@ -640,12 +502,13 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 try
                 {
                     clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, specularBody);
+                    clearSpecular.Brush.SetSourceParameter("Body", specularBody);
                     // Solid surfaces keep their opaque body; only the shared rim
                     // receives lighting. A white catch needs more contrast on Light.
                     clearSpecular.Apply(UseDockSpecular
                         ? material with { BorderThickness = .35 * DockLayoutScale, BorderOpacity = UseSolidSurface
                             ? (solidAppearance == DockAppearanceMode.Light ? .45 : .24) : .28 }
-                        : material, diagonalCatches: UseDockSpecular);
+                        : material, diagonalCatches: UseDockSpecular, optics: VisualMaterial);
                     clearSpecular.SetVisible(true);
                     UpdateClearBounds();
                     ApplyPresentation();
@@ -681,7 +544,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     {
         if (!hasBounds || clearSpecular is null) return;
         clearSpecular.SetBounds(lastWindowWidth, lastWindowHeight,
-            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale, lastWidth, SpecularHighlightAngle, SurfaceLeft);
+            lastWindowHeight - lastBottom - lastHeight, lastHeight, lastScale, lastWidth, SpecularHighlightAngle);
     }
 
     public void SetSolidAppearance(
@@ -724,9 +587,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         double scale,
         double opacity = 1)
     {
-        var insetSame = (double.IsNaN(lastSurfaceRightInset) && double.IsNaN(SurfaceRightInset)) ||
-                        Math.Abs(lastSurfaceRightInset - SurfaceRightInset) < 0.001;
-        if (hasBounds && !boundsDirty && insetSame &&
+        if (hasBounds && !boundsDirty &&
             Math.Abs(lastWindowWidth - windowWidth) < 0.001 &&
             Math.Abs(lastWindowHeight - windowHeight) < 0.001 &&
             Math.Abs(lastWidth - width) < 0.001 &&
@@ -745,7 +606,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         hasBounds = true;
         boundsDirty = false;
-        lastSurfaceRightInset = SurfaceRightInset;
         lastWindowWidth = windowWidth;
         lastWindowHeight = windowHeight;
         lastWidth = width;
@@ -1152,6 +1012,5 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         source = null;
         solidSurface = null;
         compositor = null;
-        connectedWithHostBackdrop = false;
     }
 }

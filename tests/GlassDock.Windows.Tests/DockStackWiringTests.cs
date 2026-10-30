@@ -5,13 +5,25 @@ namespace GlassDock.Windows.Tests;
 public sealed class DockStackWiringTests
 {
     [Fact]
+    public void Folder_preview_uses_four_native_icons_in_two_rows_without_thumbnail_recursion()
+    {
+        var icon = Read("src/GlassDock.App/Controls/AdaptiveAppIcon.cs");
+        Assert.Contains("Math.Min(4, apps.Count)", icon);
+        Assert.Contains("(depth % 2) * (size + gap)", icon);
+        Assert.Contains("(depth / 2) * (size + gap)", icon);
+        Assert.Contains("Stretch = Stretch.Uniform", icon);
+        Assert.Contains("IconRasterizer.Downsample(original, targetWidth, targetHeight)", icon);
+        Assert.Contains("XamlRoot?.RasterizationScale", icon);
+    }
+
+    [Fact]
     public void PopupUsesSharedServicesAndDismissalPaths()
     {
         var popup = Read("src/GlassDock.App/Desktop/DockStackWindow.cs");
         var wiring = Read("src/GlassDock.App/Desktop/DesktopOverlayWindow.Stacks.cs");
         Assert.Contains("WindowActivationState.Deactivated", popup);
         Assert.Contains("VirtualKey.Escape", popup);
-        Assert.Contains("UtilityPopupStyle.Apply", popup);
+        Assert.Contains("PopupStyle.Apply", popup);
         Assert.Contains("revision != generation", popup);
         Assert.Contains("!stackWindow.IsClosing", wiring);
         Assert.Contains("applicationService.LaunchOrActivate(app)", wiring);

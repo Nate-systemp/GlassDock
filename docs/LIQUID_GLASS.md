@@ -60,7 +60,7 @@ certification of Clear; user observation is required.
 
 ## Rendering path
 
-Clear on each main dock opts into `DokyLiquidGlassSurface`. Other appearances and all Home/utility/stack/action surfaces keep their existing renderer. Pre-existing Home work is preserved.
+Clear on each main dock opts into `DokyLiquidGlassSurface`. Other appearances and Home, stack, and action surfaces keep their existing rendering paths. Pre-existing Home work is preserved.
 
 Windows Graphics Capture supplies BGRA GPU monitor surfaces. `DesktopCaptureSource` requests the monitor associated with that dock HWND, uses two pooled frames, disables cursor capture, and saves/restores the dock's display affinity. `WDA_EXCLUDEFROMCAPTURE` prevents recursively capturing the dock itself. Windows' capture indicator is left enabled; no privacy permission or OS setting is changed.
 

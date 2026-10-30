@@ -12,6 +12,17 @@ public sealed class LiquidGlassPerformanceWiringTests
         return File.ReadAllText(Path.Combine(root!.FullName, relative));
     }
     [Fact]
+    public void Drag_lens_traverses_the_shared_contrast_stage_before_exposure()
+    {
+        var source = Read("src/GlassDock.App/Rendering/DokyLiquidGlassSurface.cs");
+        Assert.Contains("lensContrast = (ContrastEffect)lensComposite.Sources[0]", source);
+        Assert.Contains("lensExposure = (ExposureEffect)lensContrast.Source", source);
+        Assert.DoesNotContain("lensExposure = (ExposureEffect)lensComposite.Sources[0]", source);
+        var drag = Read("src/GlassDock.App/Desktop/DesktopOverlayWindow.DragLens.cs");
+        Assert.DoesNotContain("target.X -=", drag);
+    }
+
+    [Fact]
     public void Pooled_surfaces_are_released_before_capture_pool_shutdown()
     {
         var source = Read("src/GlassDock.App/Rendering/DokyLiquidGlassSurface.cs");

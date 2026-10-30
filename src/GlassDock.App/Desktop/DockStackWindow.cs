@@ -29,7 +29,7 @@ internal sealed class DockStackWindow : Window
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new(Gutter), IsHitTestVisible = false };
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
-    private readonly UtilityPopupTheme theme = new();
+    private readonly PopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly nint dock;
     private readonly Func<DockApplication, bool> launch;
@@ -86,8 +86,8 @@ internal sealed class DockStackWindow : Window
     public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
     {
         theme.Apply(mode); root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode);
-        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        PopupStyle.Apply(glass, backdrop, appearance, mode);
+        glass.Apply(GlassDock.Core.Materials.PopupMaterial.CreateForPopup(appearance, mode) with
         { ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0 });
         foreach (var icon in appIcons.Values) icon.SetDockAppearance(mode);
     }

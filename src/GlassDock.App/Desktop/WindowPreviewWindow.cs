@@ -69,7 +69,7 @@ internal sealed class WindowPreviewWindow : Window
     };
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
-    private readonly UtilityPopupTheme theme = new();
+    private readonly PopupTheme theme = new();
     private readonly InteractiveGlassWindowHost host;
     private readonly WindowPreviewPlacement placement;
     private readonly WindowPreviewSession session;
@@ -149,7 +149,7 @@ internal sealed class WindowPreviewWindow : Window
         root.Children.Add(glass);
         root.Children.Add(chrome);
         ApplyAppearance(appearance, mode);
-        // As with the dock/utilities, attach after Content and native setup.
+        // Attach after Content and native setup.
         SystemBackdrop = backdrop;
         liquid = new(this, root, backdrop);
 
@@ -245,8 +245,8 @@ internal sealed class WindowPreviewWindow : Window
             chrome.BorderBrush = theme.TileBorder;
             innerGlow.Visibility = Visibility.Collapsed;
         }
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 16);
-        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        PopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: 16);
+        glass.Apply(GlassDock.Core.Materials.PopupMaterial.CreateForPopup(appearance, mode) with
         { CornerRadius = 16, ShadowOpacity = 0.32, ShadowBlur = 24, ShadowOffset = 6, BorderOpacity = 0, EdgeHighlight = 0 });
         if (isShown) Draw();
     }

@@ -60,8 +60,7 @@ public sealed partial class DesktopOverlayWindow
     {
         if (item.Application.Stack is null) return;
         if (stackWindow?.IsOpen == true && !stackWindow.IsClosing && stackWindow.StackId == item.Id && !rename) { stackWindow.Hide(); return; }
-        previews.Hide(); utilityRequests.Reset(); utilityTransitionPending = false;
-        CloseQuickSettings(); CloseSystemTray(); CloseCalendar();
+        previews.Hide();
         if (stackWindow is null)
         {
             stackWindow = new(WinRT.Interop.WindowNative.GetWindowHandle(this), app => applicationService.LaunchOrActivate(app),

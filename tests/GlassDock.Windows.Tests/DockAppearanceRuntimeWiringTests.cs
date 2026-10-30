@@ -31,7 +31,7 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("count * Appearance.ButtonWidth", dock, StringComparison.Ordinal);
         Assert.Contains("Math.Max(0, count - 1) * Appearance.IconSpacing", dock, StringComparison.Ordinal);
         Assert.Contains("windowManager.CurrentHostWidthDips", dock, StringComparison.Ordinal);
-        Assert.Contains("applicationWidth + UtilityClusterWidth", dock, StringComparison.Ordinal);
+        Assert.Contains("Math.Min(maximumWidth, applicationWidth)", dock, StringComparison.Ordinal);
         Assert.Contains("new AdaptiveAppIcon(Appearance.IconSize, DockHoverMagnification<FrameworkElement>.HoverScale, showTile: false)", dock, StringComparison.Ordinal);
         Assert.Contains("icon.Configure(appearance.IconSize, DockHoverMagnification<FrameworkElement>.HoverScale);", dock, StringComparison.Ordinal);
         Assert.DoesNotContain("animation.SetMaximumMagnificationScale", dock, StringComparison.Ordinal);
@@ -41,19 +41,6 @@ public sealed class DockAppearanceRuntimeWiringTests
         Assert.Contains("desktopBackdrop.SetSolidAppearance(mode, opacity, cornerRadius);", dock, StringComparison.Ordinal);
         Assert.Contains("const double opacity = 1;", dock, StringComparison.Ordinal);
         Assert.Contains("dockWaveRim.StrokeThickness = 0;", dock, StringComparison.Ordinal);
-        // All utility placements follow the selected dock appearance. Verify
-        // the shared mode flows into each existing popup window.
-        Assert.Contains("private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode)", dock, StringComparison.Ordinal);
-        Assert.Contains("private DockAppearanceMode UtilityPopupMode(DockAppearanceMode dockMode) => dockMode;", dock, StringComparison.Ordinal);
-        Assert.Contains("var utilityMode = UtilityPopupMode(dockAppearance);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(appearance, utilityMode);", dock, StringComparison.Ordinal);
-        // Live placement changes must refresh already-created popup windows.
-        Assert.Contains("var mode = UtilityPopupMode(settingsSession.Current.DockAppearanceMode);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemQuickSettingsWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedSystemTrayWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
-        Assert.Contains("cachedCalendarPopoverWindow?.ApplyAppearance(Appearance, mode);", dock, StringComparison.Ordinal);
         Assert.Contains("double targetHeight = 68", animation, StringComparison.Ordinal);
         Assert.Contains("DockHoverMagnification<FrameworkElement>", animation, StringComparison.Ordinal);
         Assert.DoesNotContain("MagnificationSigma", animation, StringComparison.Ordinal);

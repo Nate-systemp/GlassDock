@@ -2,6 +2,8 @@
 
 Current source audit, 2026-09-28. Class 1 = intentionally internal/technical; class 2 = product-facing branding requiring replacement.
 
+This is a dated source inventory. Paths to utility files below record the 2026-09-28 audit and do not describe the current source tree; those utility files have since been removed.
+
 Class 2 remaining in active application branding: **0**. Settings/About labels, titles, descriptions, update messages and accessibility labels use Doky. The displayed settings-file path remains the real compatibility path; OS exception details may also contain real filenames. These are technical information, not branding.
 
 Changes in this cleanup:

@@ -47,6 +47,8 @@ public sealed class DragLensMotionTests
             var target = DragLensMotion.PointerTarget(pointer, grab);
             motion.Step(.016, target, 54, null, precisePointer: true);
             Assert.Equal(pointer, motion.Position - grab);
+            Assert.InRange(Vector2.Distance(motion.Position, new Vector2(motion.Bounds.X + motion.Bounds.Z / 2,
+                motion.Bounds.Y + motion.Bounds.W / 2)), 0, .001f);
         }
     }
 

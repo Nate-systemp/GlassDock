@@ -6,7 +6,7 @@ Implemented in the existing Settings window, October 7, 2026. No commit, packagi
 
 The dock owns a `RetainedWindowSlot<SettingsWindow>`. The window previously contained eight XAML pages, forced Light colors, editable controls with an Apply action, and immediate-save handlers for Pin Dock and badges. `GlassDockSettingsSession` is the normalized application-wide state. `GlassDockSettingsStore` serializes it atomically to the existing user profile. Startup, recovery and updater actions already had dedicated implementations; those are reused.
 
-The dock and utilities use `DesktopGlassBackdrop`, shared material presets, `UtilityPopupStyle`, `GlassSurface`, and `DockControlPalette`. The Clear dock and drag lens additionally use the existing GPU shader and desktop capture surface. Settings reuses the material infrastructure; it does not create a capture session or another dock.
+The dock and its app popups use `DesktopGlassBackdrop`, shared material presets, `PopupStyle`, `GlassSurface`, and `DockControlPalette`. The Clear dock and drag lens additionally use the existing GPU shader and desktop capture surface. Settings reuses the material infrastructure; it does not create a capture session or another dock.
 
 ## Shell, navigation and search
 
@@ -52,7 +52,7 @@ Controls retain keyboard focus visuals and automation names. Selected modes/navi
 - `src/GlassDock.App/Desktop/SettingsWindow.xaml`: complete retained nine-page shell and controls.
 - `src/GlassDock.App/Desktop/SettingsWindow.xaml.cs`: navigation, live transactions, reset confirmations, optical values; earlier centering work preserved.
 - `src/GlassDock.App/Desktop/DesktopOverlayWindow.cs`: pass representative existing icons to Settings and apply the two requested optical settings; other pending dock work preserved.
-- `src/GlassDock.Windows/Desktop/InteractiveGlassWindowHost.cs`: opt-in preservation of normal Settings chrome and DIP minimum size; existing utility defaults unchanged.
+- `src/GlassDock.Windows/Desktop/InteractiveGlassWindowHost.cs`: opt-in preservation of normal Settings chrome and DIP minimum size.
 - `src/GlassDock.Core/Settings/GlassDockSettings.cs` and `GlassDockSettingsSession.cs`: safe persisted optical defaults, normalization and reset defaults.
 - `src/GlassDock.Core/Materials/LiquidGlassMaterial.cs`: bounded lighting angle.
 - `src/GlassDock.App/Rendering/ClearDockSpecular.cs`, `DesktopGlassBackdrop.cs`, `DokyLiquidGlassSurface.cs`, `Shaders/LiquidGlass.hlsl`, `Shaders/LiquidGlass.bin`: requested live optical settings, native/GPU projection parity.
@@ -82,7 +82,7 @@ Temporary transformation scripts and before-edit copies are under ignored `artif
 - Runtime: an earlier iteration's Settings window was opened and visually inspected. That exposed excessive transparency in Clear and absent sliders; both were corrected. The final build was launched and its path verified. Live screenshots confirmed readable Frosted Settings, visible working slider controls, integrated caption buttons, and clean General/Appearance layouts. The user is inspecting the UI. Full appearance switching, slider persistence, search/focus, resize/DPI, close/reopen/persistence, reset cancellation, and actual dock optical changes still require confirmation.
 - Development executable: `C:\Dev\GlassDock\src\GlassDock.App\bin\Debug\net10.0-windows10.0.26100.0\win-x64\GlassDock.App.exe`.
 
-Remaining manual regression checks: stacking/reorder/unstack, external file-drop, badges, previews, magnification, Pin Dock/auto-hide/AppBar, multi-monitor modes, bare Win/Win+Space/normal Windows shortcuts, utilities, Home, repeated Settings lifecycle and sustained resource behavior. Automated tests do not establish these desktop behaviors.
+Remaining manual regression checks: stacking/reorder/unstack, external file-drop, badges, previews, magnification, Pin Dock/auto-hide/AppBar, multi-monitor modes, bare Win/Win+Space/normal Windows shortcuts, Home, repeated Settings lifecycle and sustained resource behavior. Automated tests do not establish these desktop behaviors.
 
 No full-window GPU refraction, new helper installer, stack-behavior preference, language selector or unsupported dock scale/corner-radius option was invented. The helper's live connection state is not currently exposed to Settings. General feature descriptions are intentionally informational where the backend provides no preference.
 

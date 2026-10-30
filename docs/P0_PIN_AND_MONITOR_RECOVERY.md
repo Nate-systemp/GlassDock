@@ -2,6 +2,8 @@
 
 Validation date: 2026-10-13. No commit, push, tag or release performed. Existing unrelated working-tree changes were preserved.
 
+Historical repair record. Its Utilities findings and follow-up checks describe the 2026-10-13 implementation; the standalone Utilities windows and entry points have since been removed. The pin and monitor relocation findings remain relevant.
+
 ## Status and evidence
 
 **Bug 1: IMPLEMENTED — MANUAL TEST PENDING.** The user confirmed that the missing-target pin shows a question-mark tile and Unpin is available. Restart and actual Unpin/layout verification remain pending.

@@ -16,6 +16,7 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
     private CompositionBackdropBrush? backdrop;
     private GlassMaterial material = new();
     private readonly UISettings uiSettings = new();
+    private Compositor? connectedCompositor;
 
 
     public string RenderingMode { get; private set; } = "Connecting native Composition";
@@ -27,11 +28,12 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
 
     public void Connect(Compositor compositor)
     {
+        connectedCompositor = compositor;
         if (CompositionBrush is not null) return;
         try
         {
             var source = new CompositionEffectSourceParameter("Backdrop");
-            factory = compositor.CreateEffectFactory(GlassEffectGraph.Create(source), GlassEffectGraph.Properties);
+            factory = compositor.CreateEffectFactory(GlassEffectGraph.Create(source, quality: material.BlurQuality), GlassEffectGraph.Properties);
             effect = factory.CreateBrush();
             backdrop = compositor.CreateBackdropBrush();
             effect.SetSourceParameter("Backdrop", backdrop);
@@ -50,7 +52,13 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
 
     public void Apply(GlassMaterial value, bool animate)
     {
+        var qualityChanged = material.BlurQuality != value.BlurQuality;
         material = RefractionLayer.ForNativeBackend(value);
+        if (qualityChanged && effect is not null && connectedCompositor is { } compositor)
+        {
+            Release();
+            Connect(compositor);
+        }
         if (effect is null) return;
         animate &= uiSettings.AnimationsEnabled;
         foreach (var (name, scalar) in GlassEffectGraph.Scalars(material)) Scalar(name, scalar, animate);

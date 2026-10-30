@@ -93,7 +93,6 @@ public sealed partial class DesktopOverlayWindow
             if (index >= 0 && index < reorderSlotCenters.Length)
             {
                 merge = new(dragLensIconsLeft + (float)reorderSlotCenters[index], dragLensBase.Y);
-                target.X -= (float)Appearance.IconSize * .65f;
             }
         }
         if (dragLensClosing)

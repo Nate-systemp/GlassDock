@@ -47,9 +47,15 @@ public sealed class DragLensMotion
         // Never smooth the icon itself while the mouse owns it: that creates
         // a distance-dependent grab offset on fast/long drags. The glass lens
         // bounds can still ease independently.
+        var previousPosition = Position;
         Position = closing
             ? Vector2.Lerp(releaseStart, releaseDestination ?? target, eased)
             : precisePointer ? target : Vector2.Lerp(Position, target, follow);
+        if (precisePointer && !closing)
+        {
+            var delta = Position - previousPosition;
+            Bounds += new Vector4(delta.X, delta.Y, 0, 0);
+        }
         var left = Position.X - size / 2;
         var right = Position.X + size / 2;
         if (!closing && mergeTarget is { } merge)

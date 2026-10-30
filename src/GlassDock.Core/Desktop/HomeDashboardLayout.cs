@@ -23,19 +23,11 @@ public sealed record HomeDashboardLayout(double Width, double Height, double Con
         var right = inner - left - gap;
         var top = inset + search + gap;
         var body = h - top - inset;
-        var pinHeight = 174d;
-        var runningHeight = 134d;
-        var quickHeight = (body - gap * 2) * .33;
-        var mediaHeight = (body - gap * 2) * .32;
         return new(width, height, fit,
         [
             new(inset, inset, inner, search),
-            new(inset, top, left, pinHeight),
-            new(inset, top + pinHeight + gap, left, runningHeight),
-            new(inset, top + pinHeight + runningHeight + gap * 2, left, 112),
-            new(inset + left + gap, top, right, quickHeight),
-            new(inset + left + gap, top + quickHeight + gap, right, mediaHeight),
-            new(inset + left + gap, top + quickHeight + mediaHeight + gap * 2, right, body - quickHeight - mediaHeight - gap * 2)
+            new(inset, top, left, body),
+            new(inset + left + gap, top, right, body)
         ]);
     }
 }

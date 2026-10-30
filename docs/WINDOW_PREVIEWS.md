@@ -2,7 +2,7 @@
 
 Hovering a running dock application for 300 ms opens its existing HWND group.
 The coordinator provides a 400 ms leave grace period and retains the dock hold
-through the closing animation. Reorder, external drag, utility popups and shutdown
+through the closing animation. Reorder, external drag, dock popups and shutdown
 prevent conflicting preview entry. Existing application identity/grouping is reused.
 
 `WindowPreviewWindow` owns the retained card chrome and shared dock material.
@@ -37,7 +37,7 @@ reconciliation, so minimized snapped/maximized mirrors do not use a different
 normal restored rectangle. Without a prior visible observation, placement falls
 back to Windows' restored bounds.
 
-Appearance updates reuse `UtilityPopupStyle`, `UtilityPopupTheme`, `GlassSurface`
+Appearance updates reuse `PopupStyle`, `PopupTheme`, `GlassSurface`
 and `DesktopGlassBackdrop`. Native setup precedes backdrop attachment. Dark,
 Light, Frosted, Acrylic and Clear use the dock's existing settings. Animation
 uses the Windows animation-enabled preference and stops its timer when settled.

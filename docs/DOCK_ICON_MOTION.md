@@ -21,7 +21,7 @@ derive their presentation from it. There is no independent progress to accumulat
 drift over repeated reversals. Existing remaining-distance timing still applies.
 
 The parent transform includes icon content, stack layers, notification badges,
-running indicators and the utility cluster. Individual child Composition scales
+running indicators. Individual child Composition scales
 still provide hover magnification and their existing smooth return to 1. Nothing
 resets those scales to 1 at collapse start. XAML applies the transform in DIPs.
 

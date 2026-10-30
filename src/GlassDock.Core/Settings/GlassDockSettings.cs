@@ -59,15 +59,9 @@ public sealed record GlassDockSettings
     public const double MaximumBorderOpacity = 1;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
-    public UtilitiesPlacement UtilitiesPlacement { get; init; }
-    public UtilitiesLayout UtilitiesLayout { get; init; } = UtilitiesLayout.Expanded;
-    public bool UtilitiesHideFullscreen { get; init; } = true;
-    public bool UtilitiesSnapEdges { get; init; } = true;
-    public bool UtilitiesRememberPosition { get; init; } = true;
-    public bool UtilitiesShortcutEnabled { get; init; } = true;
-    public int UtilitiesShortcutKey { get; init; } = 0x55;
-    public double? UtilitiesX { get; init; }
-    public double? UtilitiesY { get; init; }
+    public GlassVisualProfile? GlassVisuals { get; init; }
+    public CustomGlassPreset[] CustomGlassPresets { get; init; } = [];
+    public Guid? SelectedCustomGlassPreset { get; init; }
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
     public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
     public bool SuppressWindowsTaskbar { get; init; } = true;
@@ -107,9 +101,16 @@ public sealed record GlassDockSettings
             ? Math.Clamp(settings.BottomMargin, MinimumBottomMargin, MaximumBottomMargin)
             : DefaultBottomMargin;
 
+        var presets = (settings.CustomGlassPresets ?? []).Where(p => p is not null && p.Id != Guid.Empty)
+            .DistinctBy(p => p.Id).Take(64).Select(p => p.Normalize()).ToArray();
+
         return settings with
         {
             SchemaVersion = CurrentSchemaVersion,
+            GlassVisuals = settings.GlassVisuals?.Normalize(),
+            CustomGlassPresets = presets.Length == 0 ? Array.Empty<CustomGlassPreset>() :
+                settings.CustomGlassPresets is not null && presets.SequenceEqual(settings.CustomGlassPresets)
+                ? settings.CustomGlassPresets : presets,
             DockSize = settings.DockSize is .8 or 1 ? settings.DockSize : .70,
             PinnedPlacement = Enum.IsDefined(settings.PinnedPlacement) ? settings.PinnedPlacement : GlassDock.Core.Desktop.PinnedDockPlacement.BottomAttached,
             FloatingDockGap = Bound(settings.FloatingDockGap, 8, 32, 14),
@@ -163,11 +164,6 @@ public sealed record GlassDockSettings
             DockAppearanceMode = Enum.IsDefined(settings.DockAppearanceMode)
                 ? settings.DockAppearanceMode
                 : DefaultDockAppearanceMode,
-            UtilitiesPlacement = Enum.IsDefined(settings.UtilitiesPlacement) ? settings.UtilitiesPlacement : UtilitiesPlacement.InsideDock,
-            UtilitiesLayout = Enum.IsDefined(settings.UtilitiesLayout) ? settings.UtilitiesLayout : UtilitiesLayout.Expanded,
-            UtilitiesShortcutKey = settings.UtilitiesShortcutKey is 0x20 or 0x55 ? settings.UtilitiesShortcutKey : 0x55,
-            UtilitiesX = settings.UtilitiesX is double x && double.IsFinite(x) ? x : null,
-            UtilitiesY = settings.UtilitiesY is double y && double.IsFinite(y) ? y : null,
             DockDisplayMode = Enum.IsDefined(settings.DockDisplayMode)
                 ? settings.DockDisplayMode
                 : DefaultDockDisplayMode

@@ -42,7 +42,8 @@ public sealed class GlassDockSettingsSession
         Current.BorderOpacity)
     {
         ClearRefractionStrength = Current.ClearRefractionStrength,
-        SpecularHighlightAngle = Current.SpecularHighlightAngle
+        SpecularHighlightAngle = Current.SpecularHighlightAngle,
+        VisualMaterial = Current.GlassVisuals?.DockMaterial
     };
 
     public event EventHandler<GlassDockSettingsChangedEventArgs>? Changed;
@@ -143,6 +144,8 @@ public sealed class GlassDockSettingsSession
             GlassDockSettings.DefaultHoverToExpandOnly) with
         {
             DockAppearanceMode = GlassDockSettings.DefaultDockAppearanceMode,
+            GlassVisuals = null,
+            SelectedCustomGlassPreset = null,
             ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
             SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle,
             LaunchAtStartup = Current.LaunchAtStartup,

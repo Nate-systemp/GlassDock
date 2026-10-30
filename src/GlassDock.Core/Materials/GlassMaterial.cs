@@ -7,6 +7,8 @@ public sealed record GlassMaterial
     public double Opacity { get; init; } = 0.88;
     public double Saturation { get; init; } = 1.15;
     public double Brightness { get; init; } = 1.08;
+    public double Contrast { get; init; } = 1;
+    public int BlurQuality { get; init; } = 1;
     public uint Tint { get; init; } = 0xDCEAFF;
     public double BorderOpacity { get; init; } = 0.48;
     public double BorderThickness { get; init; } = 1;
@@ -24,6 +26,8 @@ public sealed record GlassMaterial
         Opacity = Bound(Opacity, 0, 1, 0.88),
         Saturation = Bound(Saturation, 0, 2, 1.15),
         Brightness = Bound(Brightness, 0.25, 2, 1.08),
+        Contrast = Bound(Contrast, 0.25, 2, 1),
+        BlurQuality = Math.Clamp(BlurQuality, 0, 2),
         Tint = Tint & 0xFFFFFF,
         BorderOpacity = Bound(BorderOpacity, 0, 1, 0.48),
         BorderThickness = Bound(BorderThickness, 0, 6, 1),

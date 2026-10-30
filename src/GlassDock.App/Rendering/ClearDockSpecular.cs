@@ -60,25 +60,29 @@ internal sealed class ClearDockSpecular : IDisposable
         Brush = factory.CreateBrush(); Brush.SetSourceParameter("Body", body); Brush.SetSourceParameter("Light", lightSource);
     }
 
-    public void Apply(GlassMaterial material, bool diagonalCatches = false)
+    public void Apply(GlassMaterial material, bool diagonalCatches = false, LiquidGlassMaterial? optics = null)
     {
         diagonal = diagonalCatches;
-        thickness = material.BorderThickness;
+        thickness = material.BorderThickness * (optics?.HighlightWidth / 1.4 ?? 1);
         stroke.StrokeThickness = (float)(thickness * 4 * scale);
         for (var i = 0; i < stops.Length; i++)
         {
             var t = i / 16d;
             // Short, smoothly faded opposing catches; the middle stays unlit.
             var alpha = diagonal
-                ? material.BorderOpacity * (Math.Exp(-Math.Pow((t - .10) / .13, 2))
-                    + .65 * Math.Exp(-Math.Pow((t - .90) / .13, 2)))
+                ? material.BorderOpacity * (Math.Exp(-Math.Pow((t - (optics?.HighlightPosition ?? .10)) / (optics?.HighlightSoftness ?? .13), 2))
+                    + .65 * Math.Exp(-Math.Pow((t - Math.Min(1, (optics?.HighlightPosition ?? .10) + (optics?.HighlightSpread ?? .80))) / (optics?.HighlightSoftness ?? .13), 2)))
                 : DockMaterialRendering.SpecularAlpha(t, material.BorderOpacity);
+            if (optics is not null)
+                alpha = Math.Pow(Math.Max(0, alpha), optics.SpecularFalloff / 2.5) *
+                    optics.SpecularIntensity / .16 * optics.OuterGlint *
+                    (optics.TopLight * (1 - t) + optics.BottomLight * t);
             stops[i].Color = global::Windows.UI.Color.FromArgb(
                 (byte)Math.Round(255 * Math.Clamp(thickness > 0 ? alpha : 0, 0, 1)), 255, 255, 255);
         }
     }
 
-    public void SetBounds(double width, double height, double top, double dockHeight, double dpi, double dockWidth, double angle = 45, double? leftOverride = null)
+    public void SetBounds(double width, double height, double top, double dockHeight, double dpi, double dockWidth, double angle = 45)
     {
         scale = dpi;
         stroke.StrokeThickness = (float)(thickness * 4 * dpi);
@@ -96,25 +100,17 @@ internal sealed class ClearDockSpecular : IDisposable
             var w = Math.Max(1, dockWidth * dpi);
             var h = Math.Max(1, dockHeight * dpi);
             var gradient = DockSpecularLighting.Gradient(w, h, angle);
-            var origin = new Vector2((float)((leftOverride ?? (width - dockWidth) / 2) * dpi), (float)(top * dpi));
+            var origin = new Vector2((float)((width - dockWidth) / 2 * dpi), (float)(top * dpi));
             light.StartPoint = origin + gradient.Start;
             light.EndPoint = origin + gradient.End;
         }
     }
 
-    private BackdropCompositionTrack? pressTrack;
-    public void AnimatePress(PopupCompositionFrame[] frames, TimeSpan duration, float units)
-    {
-        pressTrack ??= new(visual, animateOpacity: false);
-        pressTrack.Bind();
-        pressTrack.Start(frames, duration, units);
-    }
     public void SetTransform(Matrix4x4 matrix) => visual.TransformMatrix = matrix;
     public void SetVisible(bool visible) => visual.IsVisible = visible;
 
     public void Dispose()
     {
-        pressTrack?.Dispose();
         Brush.Dispose(); factory.Dispose(); lightSource.Dispose(); lightSurface.Dispose(); lightVisual.Dispose(); lighting.Dispose();
         foreach (var stop in stops) stop.Dispose();
         light.Dispose(); mask.Dispose(); surface.Dispose(); capture.Dispose(); visual.Dispose(); stroke.Dispose(); white.Dispose();

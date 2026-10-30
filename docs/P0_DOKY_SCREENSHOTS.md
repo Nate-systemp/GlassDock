@@ -42,5 +42,5 @@ Manual test in **Clear** while dock is expanded:
 - This implements Win+Shift+S only; **arbitrary third-party screen recordings/capture utilities are not covered** by the temporary snapshot mode.
 - The frozen frame does not animate during the Snipping selection. That is intentional: drawing a new WGC frame while temporarily screenshot-visible would bring back the capture recursion.
 - If Snipping Tool does not update the clipboard (for example an abandoned selection), normal capture automatically resumes after at most 45 seconds. Another application changing the clipboard while the selection is open may resume the glass early.
-- Independent Clear utility popups may still be excluded from screenshots; this patch targets the main dock(s).
+- Independent Clear dock popups may still be excluded from screenshots; this patch targets the main dock(s).
 - Windows GPU/WinUI behavior and capture permissions vary; the feature is **not verified on physical Windows hardware** in this environment. Revert the included files if build or screenshot validation fails.

@@ -26,8 +26,8 @@ public sealed partial class GlassLabView : UserControl
     public GlassLabView()
     {
         InitializeComponent();
-        presetButtons.AddRange([(FrostedButton, GlassMaterialPreset.Frosted),
-            (ClearButton, GlassMaterialPreset.Clear), (RefractiveButton, GlassMaterialPreset.Refractive)]);
+        presetButtons.AddRange(new[] { (FrostedButton, GlassMaterialPreset.Frosted),
+            (ClearButton, GlassMaterialPreset.Clear), (RefractiveButton, GlassMaterialPreset.Refractive) });
         CreatePreviewContent();
         CreateControls();
         DrawScene(0);

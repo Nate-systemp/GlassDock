@@ -23,11 +23,10 @@ internal sealed partial class GlassHomeWindow : Window
     private readonly GlassDockSettingsSession settingsSession;
     private readonly DockApplicationsViewModel applications;
     private readonly Func<DockApplication, Task<bool>> activateApplication;
-    private readonly Action showSettings;
     private readonly nint owner;
     private readonly nint hwnd;
     private readonly DesktopGlassBackdrop backdrop = new();
-    private readonly UtilityPopupTheme theme = new();
+    private readonly PopupTheme theme = new();
     private readonly Grid root = new() { UseLayoutRounding = true };
     private readonly Canvas dashboard = new();
     private readonly InteractiveGlassWindowHost host;
@@ -50,7 +49,6 @@ internal sealed partial class GlassHomeWindow : Window
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
     };
     private readonly TextBlock searchStatus = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
-    private readonly DispatcherQueueTimer statusTimer;
     private readonly DispatcherQueueTimer focusRetry;
     private HomeDashboardLayout layout = HomeDashboardLayout.Create(960, 660);
     private HomeMonitorArea area = new(0, 0, 960, 660, 1);
@@ -64,20 +62,18 @@ internal sealed partial class GlassHomeWindow : Window
     public event EventHandler? HomeVisibilityChanged;
 
     public GlassHomeWindow(GlassDockSettingsSession settingsSession, WindowsApplicationService applicationService,
-        WindowsSystemControlService systemControls, nint owner, Action showSettings,
+        nint owner,
         Func<DockApplication, Task<bool>> activateApplication)
     {
         this.settingsSession = settingsSession;
         lastDisplayMode = settingsSession.DisplayMode;
         applications = new DockApplicationsViewModel(applicationService, DispatcherQueue, ownsService: false);
-        this.systemControls = systemControls;
         this.owner = owner;
-        this.showSettings = showSettings;
         this.activateApplication = activateApplication;
         Title = "Doky Home";
         WindowBranding.Apply(this);
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        // Configure the desktop client BEFORE connecting the backdrop, as on utilities.
+        // Configure the desktop client before connecting the backdrop.
         host = new(hwnd) { UseDockLayeredTransparency = true };
         host.Configure();
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
@@ -90,9 +86,6 @@ internal sealed partial class GlassHomeWindow : Window
         Content = root;
         ApplyAppearance();
         if ((Application.Current as App)?.BasicRendering != true) SystemBackdrop = backdrop;
-        statusTimer = DispatcherQueue.CreateTimer();
-        statusTimer.Interval = TimeSpan.FromSeconds(3);
-        statusTimer.Tick += StatusTick;
         focusRetry = DispatcherQueue.CreateTimer();
         focusRetry.Interval = TimeSpan.FromMilliseconds(20);
         focusRetry.Tick += FocusTick;
@@ -126,8 +119,6 @@ internal sealed partial class GlassHomeWindow : Window
         host.ActivateForUserInput();
         focusAttempts = 0;
         focusRetry.Start();
-        statusTimer.Start();
-        _ = RefreshControlsAsync();
         HomeVisibilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -136,9 +127,7 @@ internal sealed partial class GlassHomeWindow : Window
         if (closed || !IsVisible) return;
         IsVisible = false;
         visibilityRevision++;
-        statusTimer.Stop();
         focusRetry.Stop();
-        controlCancellation?.Cancel();
         AppWindow.Hide();
         HomeVisibilityChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -180,7 +169,6 @@ internal sealed partial class GlassHomeWindow : Window
         if (IsVisible) ConfigurePlacement(resolveMonitor: displayChanged);
     }
     private void ApplicationsChanged(object? sender, EventArgs e) { if (IsVisible && !closed) RefreshApplications(); }
-    private void StatusTick(DispatcherQueueTimer sender, object e) => _ = RefreshControlsAsync();
     private void RootLoaded(object sender, RoutedEventArgs e) => UpdateMaterialBounds();
     private void WindowChanged(AppWindow sender, AppWindowChangedEventArgs e)
     {
@@ -188,7 +176,7 @@ internal sealed partial class GlassHomeWindow : Window
     }
     private void RootKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (!dialogOpen && e.Key == global::Windows.System.VirtualKey.Escape) { HideHome(); e.Handled = true; }
+        if (e.Key == global::Windows.System.VirtualKey.Escape) { HideHome(); e.Handled = true; }
     }
     private void OnActivated(object sender, WindowActivatedEventArgs e) => active = e.WindowActivationState != WindowActivationState.Deactivated;
     private void FocusTick(DispatcherQueueTimer sender, object e)
@@ -203,9 +191,8 @@ internal sealed partial class GlassHomeWindow : Window
     private void OnClosed(object sender, WindowEventArgs e)
     {
         closed = true; IsVisible = false; visibilityRevision++;
-        statusTimer.Stop(); focusRetry.Stop();
-        statusTimer.Tick -= StatusTick; focusRetry.Tick -= FocusTick;
-        controlCancellation?.Cancel(); controlCancellation?.Dispose();
+        focusRetry.Stop();
+        focusRetry.Tick -= FocusTick;
         settingsSession.Changed -= SettingsChanged;
         systemTheme.ColorValuesChanged -= OnSystemThemeChanged;
         applications.SnapshotApplied -= ApplicationsChanged;

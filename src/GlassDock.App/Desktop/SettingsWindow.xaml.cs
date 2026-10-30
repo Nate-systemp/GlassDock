@@ -112,15 +112,9 @@ public sealed partial class SettingsWindow : Window
         SetNumberFormat(IconSizeBox, 0);
         SetNumberFormat(IconSpacingBox, 0);
         SetNumberFormat(BottomMarginBox, 0);
-        SetNumberFormat(GlassBlurAmountBox, 0);
         SetNumberFormat(MagnificationScaleBox, 2);
-        SetNumberFormat(BorderThicknessBox, 2);
-        SetNumberFormat(DockOpacityBox, 1);
-        SetNumberFormat(BorderOpacityBox, 1);
         SetNumberFormat(AutoHideDelayBox, 2);
         SetNumberFormat(PeekDelayBox, 2);
-        SetNumberFormat(ClearRefractionStrengthBox, 1);
-        SetNumberFormat(SpecularHighlightAngleBox, 0);
     }
 
     private static void SetNumberFormat(NumberBox box, int decimals)
@@ -142,32 +136,19 @@ public sealed partial class SettingsWindow : Window
     {
         populating = true;
 
-        DockAppearanceModeBox.SelectedIndex = (int)settings.DockAppearanceMode;
-        UpdateDockAppearanceDescription(settings.DockAppearanceMode);
+        if (!glassDirty) LoadGlassDraft(settings);
+        DockAppearanceModeBox.SelectedIndex = (int)glassDraft.Mode;
+        UpdateDockAppearanceDescription(glassDraft.Mode);
 
         DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
-        UtilitiesPlacementBox.SelectedIndex = (int)settings.UtilitiesPlacement;
-        UtilitiesLayoutBox.SelectedIndex = (int)settings.UtilitiesLayout;
-        UtilitiesLayoutBox.IsEnabled = settings.UtilitiesPlacement == UtilitiesPlacement.SplitDock;
-        UtilitiesFullscreenToggle.IsOn = settings.UtilitiesHideFullscreen;
-        UtilitiesSnapToggle.IsOn = settings.UtilitiesSnapEdges;
-        UtilitiesRememberToggle.IsOn = settings.UtilitiesRememberPosition;
-        UtilitiesShortcutToggle.IsOn = settings.UtilitiesShortcutEnabled;
-        UtilitiesShortcutBox.SelectedIndex = settings.UtilitiesShortcutKey == 0x55 ? 1 : 0;
         BottomMarginBox.Value = settings.BottomMargin;
         AutoHideDelayBox.Value = settings.AutoHideDelayMilliseconds / 1000d;
         PeekDelayBox.Value = settings.PeekDelayMilliseconds / 1000d;
         IconSizeBox.Value = settings.IconSize;
         MagnificationScaleBox.Value = settings.MagnificationScale;
         IconSpacingBox.Value = settings.IconSpacing;
-        GlassBlurAmountBox.Value = settings.GlassBlurAmount;
-        DockOpacityBox.Value = settings.DockOpacity * 100;
-        BorderThicknessBox.Value = settings.BorderThickness;
-        BorderOpacityBox.Value = settings.BorderOpacity * 100;
-        ClearRefractionStrengthBox.Value = settings.ClearRefractionStrength;
-        SpecularHighlightAngleBox.Value = settings.SpecularHighlightAngle;
-        CircularHighlightsToggle.IsOn = settings.CircularHighlightsEnabled;
-        ClearCircularHighlightsToggle.IsOn = settings.ClearCircularHighlightsEnabled;
+        CircularHighlightsToggle.IsOn = glassDraft.NativeHighlights;
+        ClearCircularHighlightsToggle.IsOn = glassDraft.ClearHighlights;
         DockSizeBox.SelectedIndex = settings.DockSize switch { .8 => 1, 1 => 2, _ => 0 };
         PinnedPlacementBox.SelectedIndex = (int)settings.PinnedPlacement;
         FloatingDockGapBox.Value = settings.FloatingDockGap;
@@ -452,20 +433,8 @@ public sealed partial class SettingsWindow : Window
 
     private void DockAppearanceChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (populating || !editingReady || saving || closed) return;
-        var mode = SelectedDockAppearance;
-        UpdateDockAppearanceDescription(mode);
-        populating = true;
-        if (mode.GlassStyle() is { } style)
-        {
-            var preset = DockMaterialStylePresets.Create(style);
-            GlassBlurAmountBox.Value = preset.BlurAmount;
-            DockOpacityBox.Value = preset.Opacity * 100;
-            BorderThicknessBox.Value = preset.BorderThickness;
-            BorderOpacityBox.Value = preset.BorderOpacity * 100;
-        }
-        populating = false;
-        ApplyClick(this, new RoutedEventArgs());
+        if (populating || refreshingGlass || !editingReady || saving || closed) return;
+        SelectBuiltInGlass(SelectedDockAppearance);
     }
 
     private void UpdateDockAppearanceDescription(DockAppearanceMode mode)
@@ -500,6 +469,7 @@ public sealed partial class SettingsWindow : Window
     {
         if (!navigation.ContainsKey(page)) return;
         selectedPage = page;
+        StickyGlassPreview.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         foreach (var definition in SettingsCatalog.Pages)
         {
             if (SettingsRoot.FindName(definition.Id + "Page") is FrameworkElement content)
@@ -578,6 +548,7 @@ public sealed partial class SettingsWindow : Window
     {
         if (!await ConfirmResetAsync("editable preferences")) return;
         var defaults = settingsSession.CreateDefaultEditableSettings();
+        glassDirty = false;
         Populate(defaults);
         ShowSettingsPage("Appearance");
         ApplyClick(this, new RoutedEventArgs());
@@ -588,6 +559,8 @@ public sealed partial class SettingsWindow : Window
         if (saving || closed || shutdown.IsRequested)
             return;
 
+        var applyVisuals = !savingNonVisual;
+        savingNonVisual = false;
         saving = true;
         ApplyButton.IsEnabled = false;
         SetStatus("Saving…", success: true);
@@ -615,46 +588,40 @@ public sealed partial class SettingsWindow : Window
                 ToMilliseconds(
                     PeekDelayBox.Value,
                     current.PeekDelayMilliseconds),
-                SelectedDockAppearance.GlassStyle() ?? current.GlassMaterialMode,
+                current.GlassMaterialMode,
                 IconSizeBox.Value,
                 MagnificationScaleBox.Value,
                 IconSpacingBox.Value,
-                GlassBlurAmountBox.Value,
-                DockOpacityBox.Value / 100,
-                BorderThicknessBox.Value,
-                BorderOpacityBox.Value / 100,
+                current.GlassBlurAmount,
+                current.DockOpacity,
+                current.BorderThickness,
+                current.BorderOpacity,
                 SelectedDisplayMode,
                 HoverWaveToggle.IsOn,
                 PinDockToggle.IsOn,
                 HoverToExpandOnlyToggle.IsOn) with
             {
-                DockAppearanceMode = SelectedDockAppearance,
-                UtilitiesPlacement = (UtilitiesPlacement)Math.Max(0, UtilitiesPlacementBox.SelectedIndex),
-                UtilitiesLayout = (UtilitiesLayout)Math.Max(0, UtilitiesLayoutBox.SelectedIndex),
-                // The floating top bar is always visible; persist the new behavior.
-                UtilitiesHideFullscreen = false,
-                UtilitiesSnapEdges = UtilitiesSnapToggle.IsOn,
-                UtilitiesRememberPosition = UtilitiesRememberToggle.IsOn,
-                UtilitiesShortcutEnabled = UtilitiesShortcutToggle.IsOn,
-                UtilitiesShortcutKey = UtilitiesShortcutBox.SelectedIndex == 1 ? 0x55 : 0x20,
+                DockAppearanceMode = current.DockAppearanceMode,
                 LaunchAtStartup = desiredStartup,
                 NotificationBadgesEnabled = NotificationBadgesToggle.IsOn,
-                ClearRefractionStrength = ClearRefractionStrengthBox.Value,
-                SpecularHighlightAngle = SpecularHighlightAngleBox.Value,
-                CircularHighlightsEnabled = CircularHighlightsToggle.IsOn,
-                ClearCircularHighlightsEnabled = ClearCircularHighlightsToggle.IsOn,
+                ClearRefractionStrength = current.ClearRefractionStrength,
+                SpecularHighlightAngle = current.SpecularHighlightAngle,
+                CircularHighlightsEnabled = current.CircularHighlightsEnabled,
+                ClearCircularHighlightsEnabled = current.ClearCircularHighlightsEnabled,
                 DockSize = DockSizeBox.SelectedIndex switch { 1 => .8, 2 => 1, _ => .70 },
                 PinnedPlacement = (GlassDock.Core.Desktop.PinnedDockPlacement)Math.Max(0, PinnedPlacementBox.SelectedIndex),
                 FloatingDockGap = FloatingDockGapBox.Value
             };
 
+            if (applyVisuals) edited = ApplyGlassDraft(edited);
             await settingsStore.SaveAsync(edited, shutdown.CancellationToken);
             if (closed || shutdown.IsRequested)
                 return;
 
+            if (applyVisuals) glassDirty = false;
             settingsSession.Replace(edited);
             Populate(settingsSession.Current);
-            SetStatus("Saved. Changes are active now.", success: true);
+            SetStatus(applyVisuals ? "Saved. Changes are active now." : "Saved. Glass preview changes still need Apply.", success: true);
         }
         catch (OperationCanceledException) when (shutdown.IsRequested)
         {
@@ -755,9 +722,12 @@ public sealed partial class SettingsWindow : Window
             ClearRefractionStrength = GlassDockSettings.DefaultClearRefractionStrength,
             SpecularHighlightAngle = GlassDockSettings.DefaultSpecularHighlightAngle,
             CircularHighlightsEnabled = GlassDockSettings.DefaultCircularHighlightsEnabled,
-            ClearCircularHighlightsEnabled = true
+            ClearCircularHighlightsEnabled = true,
+            GlassVisuals = null,
+            SelectedCustomGlassPreset = null
         });
 
+        glassDirty = false;
         await SaveRecoverySettingsAsync(edited, "Appearance reset to defaults.");
     }
 

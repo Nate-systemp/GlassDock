@@ -39,7 +39,16 @@
         <StackPanel x:Name="NavigationItems" Grid.Row="2" Spacing="4" />
       </Grid>
     </Border>
-    <ScrollViewer x:Name="PageScroll" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <Grid Grid.Row="1" Grid.Column="1">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+          <Border x:Name="StickyGlassPreview" Padding="14" Margin="28,12,28,0" CornerRadius="18" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1">
+            <StackPanel Spacing="6">
+              <TextBlock Text="Live Dock Preview" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="Sample background. Changes stay in preview until Apply." Foreground="{StaticResource SecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
+              <Grid x:Name="PreviewHost" Height="140" />
+            </StackPanel>
+          </Border>
+    <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <Grid x:Name="PageHost" Padding="28,24,28,24" MaxWidth="1000" HorizontalAlignment="Stretch">
         <StackPanel x:Name="GeneralPage" Spacing="24" Visibility="Collapsed">
           <StackPanel Spacing="5">
@@ -69,13 +78,7 @@
             <TextBlock Text="Appearance" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Customize how Doky looks and feels on your desktop." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
-          <Border Padding="18" CornerRadius="18" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1">
-            <StackPanel Spacing="6">
-              <TextBlock Text="Live Dock Preview" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
-              <TextBlock Text="Your appearance and icon layout, in real time." Foreground="{StaticResource SecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
-              <Grid x:Name="PreviewHost" Height="132" />
-            </StackPanel>
-          </Border>
+
           <Grid x:Name="AppearanceTiles" ColumnSpacing="8" />
           <ComboBox x:Name="DockAppearanceModeBox" Visibility="Collapsed" SelectionChanged="DockAppearanceChanged">
             <ComboBoxItem Content="Dark" />
@@ -86,70 +89,10 @@
           </ComboBox>
           <TextBlock x:Name="DockAppearanceDescription" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           <TextBlock x:Name="ClearMaterialNote" Text="Settings uses Frosted glass for readability while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
-          <StackPanel x:Name="ClearOpticsControls" Spacing="10" Visibility="Collapsed">
-            <TextBlock Text="Liquid Glass" FontSize="17" FontWeight="SemiBold" />
-            <ToggleSwitch x:Name="ClearCircularHighlightsToggle" Header="Circular highlights" OnContent="On" OffContent="Off" AutomationProperties.Name="Clear dock circular highlights" />
-            <TextBlock Text="Adjust distortion along the Clear dock’s edges. 0 removes the bend; 12 is the default. Changes apply when you release the slider." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-            <Grid x:Name="ClearRefractionStrengthBoxRow" ColumnSpacing="12">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions>
-              <TextBlock Text="Edge refraction" VerticalAlignment="Center" />
-              <NumberBox x:Name="ClearRefractionStrengthBox" Grid.Column="1" Minimum="0" Maximum="20" SmallChange="0.5" LargeChange="2" AutomationProperties.Name="Clear dock edge refraction strength" />
-            </Grid>
-          </StackPanel>
-          <StackPanel Spacing="10">
-            <TextBlock Text="Rim highlights" FontSize="17" FontWeight="SemiBold" />
-            <ToggleSwitch x:Name="CircularHighlightsToggle" Header="Circular highlights" OnContent="On" OffContent="Off" AutomationProperties.Name="Circular highlights in all dock appearances" />
-            <TextBlock Text="Position the two opposing highlights in every dock appearance. 45° is top-left / bottom-right; 135° is top-right / bottom-left." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-            <Grid x:Name="SpecularHighlightAngleBoxRow" ColumnSpacing="12">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions>
-              <TextBlock Text="Highlight position (°)" VerticalAlignment="Center" />
-              <NumberBox x:Name="SpecularHighlightAngleBox" Grid.Column="1" Minimum="0" Maximum="360" SmallChange="5" LargeChange="45" AutomationProperties.Name="Dock specular highlight position in degrees, all appearances" />
-            </Grid>
-          </StackPanel>
-          <StackPanel x:Name="GlassControls">
-            <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
-              <StackPanel Spacing="18">
-                <StackPanel Spacing="3">
-                  <TextBlock Text="Glass tuning" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="Blur and opacity follow the dock’s shared material. Edge controls apply to supported utility surfaces." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-                <Grid ColumnSpacing="24" x:Name="GlassBlurAmountBoxRow">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="180" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Blur" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                  <NumberBox x:Name="GlassBlurAmountBox" Grid.Column="1" Header="Amount" Minimum="0" Maximum="60" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Shared glass blur amount" />
-                </Grid>
-                <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-                <Grid ColumnSpacing="24" x:Name="DockOpacityBoxRow">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="180" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Opacity" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                  <NumberBox x:Name="DockOpacityBox" Grid.Column="1" Header="Percent" Minimum="35" Maximum="100" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Shared glass opacity percentage" />
-                </Grid>
-                <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-                <Grid ColumnSpacing="24" x:Name="BorderThicknessBoxRow">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="180" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Border thickness" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                  <NumberBox x:Name="BorderThicknessBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="2" SmallChange="0.1" LargeChange="0.5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Shared glass border thickness" />
-                </Grid>
-                <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-                <Grid ColumnSpacing="24" x:Name="BorderOpacityBoxRow">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="180" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Text="Border opacity" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                  <NumberBox x:Name="BorderOpacityBox" Grid.Column="1" Header="Percent" Minimum="0" Maximum="100" SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Shared glass border opacity percentage" />
-                </Grid>
-              </StackPanel>
-            </Border>
+          <StackPanel x:Name="GlassControls" Spacing="14" />
+          <StackPanel Orientation="Horizontal" Spacing="20">
+            <ToggleSwitch x:Name="CircularHighlightsToggle" Header="Native rim highlights" OnContent="On" OffContent="Off" />
+            <ToggleSwitch x:Name="ClearCircularHighlightsToggle" Header="Clear rim highlights" OnContent="On" OffContent="Off" />
           </StackPanel>
         </StackPanel>
         <StackPanel x:Name="DockPage" Spacing="24" Visibility="Collapsed">
@@ -449,29 +392,6 @@
           <TextBlock Text="Settings file" FontWeight="SemiBold" TextWrapping="Wrap" />
           <TextBlock x:Name="SettingsPathText" TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
         </StackPanel>
-        <StackPanel x:Name="UtilitiesPage" Spacing="20" Visibility="Collapsed">
-          <TextBlock Text="Utilities" FontSize="32" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" />
-          <ComboBox x:Name="UtilitiesPlacementBox" Header="Utilities placement" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Inside Dock" />
-            <ComboBoxItem Content="Separate Floating Button" />
-            <ComboBoxItem Content="Keyboard Shortcut Only" />
-            <ComboBoxItem Content="Split Dock" />
-          </ComboBox>
-          <TextBlock Text="Separate Floating Button stays in the reserved top strip. Split Dock keeps Utilities at the far right beside the dock. Hold empty pill padding to change layout, or restore Hidden Utilities here." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
-          <ComboBox x:Name="UtilitiesLayoutBox" Header="Split Utilities layout" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Expanded — All controls" /><ComboBoxItem Content="Compact — Clock only" /><ComboBoxItem Content="Hidden" />
-          </ComboBox>
-          <ToggleSwitch x:Name="UtilitiesFullscreenToggle" Header="Hide during fullscreen (not used by floating top bar)" Visibility="Collapsed" />
-          <ToggleSwitch x:Name="UtilitiesSnapToggle" Header="Snap to screen edges" />
-          <ToggleSwitch x:Name="UtilitiesRememberToggle" Header="Remember position" />
-          <ToggleSwitch x:Name="UtilitiesShortcutToggle" Header="Enable Utilities shortcut" />
-          <ComboBox x:Name="UtilitiesShortcutBox" Header="Keyboard shortcut">
-            <ComboBoxItem Content="Ctrl + Alt + Space" />
-            <ComboBoxItem Content="Ctrl + Alt + U" />
-          </ComboBox>
-          <TextBlock Text="If the shortcut is already in use, Doky reports the conflict and leaves that shortcut with its current owner." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
-          <Button Content="Reset floating position" Click="ResetUtilitiesPositionClick" />
-        </StackPanel>
         <StackPanel x:Name="AboutPage" Spacing="24" Visibility="Collapsed">
           <StackPanel Spacing="5">
             <TextBlock Text="About" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -500,6 +420,7 @@
         </StackPanel>
       </Grid>
     </ScrollViewer>
+    </Grid>
     <Border Grid.Row="2" Grid.Column="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="24,10">
       <Grid ColumnSpacing="12">
         <Grid.ColumnDefinitions>
@@ -507,7 +428,7 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <TextBlock x:Name="StatusText" Foreground="{StaticResource SecondaryBrush}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-        <Button x:Name="ApplyButton" Grid.Column="1" Content="Save changes" Click="ApplyClick" Padding="16,8" />
+        <Button x:Name="ApplyButton" Grid.Column="1" Content="Apply changes" Click="ApplyClick" Padding="16,8" />
       </Grid>
     </Border>
   </Grid>

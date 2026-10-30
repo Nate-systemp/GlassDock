@@ -41,7 +41,7 @@ Inactive backups were identified and retained (not compiled):
 - src/GlassDock.App/Desktop/SettingsWindow.xaml.cs.pre-wave-toggle.bak
 
 GlassCompositionBrush is the laboratory/in-app adapter, not a second registered
-desktop renderer. GlassMaterialMode remains the utility/internal material enum;
+desktop renderer. GlassMaterialMode remains the internal material enum;
 DockAppearanceMode owns the main dock, including solid Light/Dark modes.
 
 The live startup log exposed E_INVALIDARG: unsupported source brush type in
@@ -53,7 +53,7 @@ the stage and exception rather than silently reporting only to Debug output.
 
 Removed the Advanced Material selector, description, selected-value property and
 change handler. Appearance alone selects the main-dock preset. Legacy
-GlassMaterialMode remains loadable for existing utility settings; solid-mode edits
+GlassMaterialMode remains loadable for existing material settings; solid-mode edits
 preserve it. Unknown Material JSON is safely ignored by the existing store.
 No backend properties or user files were deleted/reset.
 

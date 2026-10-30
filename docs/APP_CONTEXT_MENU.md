@@ -2,7 +2,7 @@
 
 `WindowPreviewCoordinator` still owns command routing through the existing application view model/service. App buttons raise `ContextRequested` (mouse or keyboard); the empty-dock menu is unchanged. `DockAppMenuState` records capability flags and window identities, including PID/start time, so a closed or reused HWND invalidates an open menu.
 
-One lazily created `DockAppContextMenuWindow` is reused across icons. Its header uses the actual application icon. Action rows use `UtilityPopupTheme` and the same `UtilityPopupStyle` / `DesktopGlassBackdrop` material path as the dock's utilities. Native client configuration precedes backdrop attachment. Appearance changes update the retained brushes and material. There is no separate menu theme or pointer geometry.
+One lazily created `DockAppContextMenuWindow` is reused across icons. Its header uses the actual application icon. Action rows use `PopupTheme` and the same `PopupStyle` / `DesktopGlassBackdrop` material path as other dock popups. Native client configuration precedes backdrop attachment. Appearance changes update the retained brushes and material. There is no separate menu theme or pointer geometry.
 
 After the first live review, the surface was reduced to 240 DIP wide with 34 DIP action rows, a 26 DIP header icon and 13 DIP action labels. The transparent shadow gutter is separate from the panel dimensions.
 

@@ -34,7 +34,7 @@ public sealed class HomeDashboardWiringTests
         Assert.DoesNotContain("ScrollViewer", home + ui);
         Assert.DoesNotContain("root.Children.Add(surface)", home);
         Assert.Contains("SetSurfaceRegions", home);
-        Assert.Contains("UtilityPopupStyle.Apply", ui);
+        Assert.Contains("PopupStyle.Apply", ui);
         Assert.Contains("theme.Apply(paletteMode)", ui);
         Assert.Contains("var materialMode = selectedMode;", ui);
         Assert.DoesNotContain("selectedMode.GlassStyle() is null ? DockAppearanceMode.Frosted", ui);
@@ -43,21 +43,6 @@ public sealed class HomeDashboardWiringTests
         Assert.Contains("systemTheme.ColorValuesChanged -= OnSystemThemeChanged", home);
         Assert.Contains("HomeApplications.Select(apps, running: false)", ui);
         Assert.Contains("HomeApplications.Select(apps, running: true)", ui);
-        Assert.Contains("No recent items yet", ui);
-        Assert.Contains("Nothing playing", ui);
-    }
-
-    [Fact]
-    public void UnsupportedControlsAreHonestAndPowerRequiresConfirmation()
-    {
-        var ui = Read("src/GlassDock.App/Desktop/GlassHomeWindow.Controls.cs");
-        Assert.Contains("radios.ToggleAsync", ui);
-        Assert.Contains("brightness.IsEnabled = bright.Result.HasValue", ui);
-        Assert.Contains("systemControls.ReadMasterVolume()", ui);
-        Assert.Contains("Night light has no supported direct control", ui);
-        Assert.Contains("Focus control is managed by Windows", ui);
-        Assert.Contains("await dialog.ShowAsync() != ContentDialogResult.Primary", ui);
-        Assert.Contains("if (closed || !IsVisible || refreshingControls) return", ui);
     }
 
     [Fact]

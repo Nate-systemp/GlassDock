@@ -16,7 +16,7 @@ internal sealed class HomeDashboardCard
     public GlassSurface Surface { get; } = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
     public Grid Content { get; } = new() { Padding = new Thickness(18, 14, 18, 14), MinWidth = 0, MinHeight = 0 };
     private readonly Border solid;
-    public HomeDashboardCard(UtilityPopupTheme theme)
+    public HomeDashboardCard(PopupTheme theme)
     {
         solid = new() { Background = theme.ReadingSurface, CornerRadius = new(28), IsHitTestVisible = false };
         Host.Children.Add(Surface);
@@ -46,7 +46,7 @@ internal sealed class HomeAppStrip
     private int page, capacity = 6;
     public Grid Content { get; } = new() { RowSpacing = 12 };
 
-    public HomeAppStrip(string title, UtilityPopupTheme theme, Func<DockApplication, Task> activate, bool compact = false)
+    public HomeAppStrip(string title, PopupTheme theme, Func<DockApplication, Task> activate, bool compact = false)
     {
         Content.RowDefinitions.Add(new() { Height = new GridLength(26) });
         Content.RowDefinitions.Add(new());

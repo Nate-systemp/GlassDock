@@ -3,7 +3,7 @@ namespace GlassDock.Core.Desktop;
 /// <summary>
 /// A local, spring-smoothed icon hover: the focused icon and its two immediate
 /// neighbors scale in place. Unlike a macOS reflow, no button, running indicator,
-/// or utility changes its allocated position, and the glass wave is independent.
+/// changes its allocated position, and the glass wave is independent.
 /// </summary>
 public sealed class DockHoverMagnification<T> where T : class
 {

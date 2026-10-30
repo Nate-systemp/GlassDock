@@ -1,7 +1,7 @@
 # Doky grid stacks
 
 Stacks extend the existing shared application service, pin store, per-monitor snapshot filtering,
-badge coordinator, and utility glass renderer. They do not add another runtime, launcher, notification
+badge coordinator, and shared popup glass renderer. They do not add another runtime, launcher, notification
 provider, keyboard hook, or user profile. Normal dock geometry and appearance are unchanged.
 
 ## Interaction
@@ -12,14 +12,14 @@ provider, keyboard hook, or user profile. Normal dock geometry and appearance ar
   Existing target stacks remain stationary across their entire slot while a pinnable app approaches;
   the narrower central region still requires the intentional hold before merging.
 - Stacks hold at most nine apps and occupy one normal dock slot. Their preview shows the first
-  four apps; the whole tile uses the existing magnification transform. Closed stacks have no
+  four apps in an evenly spaced 2×2 grid; the whole tile uses the existing magnification transform. Closed stacks have no
   window preview. An activity dot indicates notifications without inventing aggregate counts.
 - Click to open a bounded grid; click again, outside, or press Escape to dismiss. The dock remains
   expanded while the popup is open. Grid apps use the existing launch/focus path and badge state.
 - Right-click a stack for Open, Rename, and Ungroup. Drag members to reorder inside the grid or
   back onto the dock to extract. One remaining member dissolves the stack automatically.
 - A single retained popup per dock surface uses the owning monitor, DPI, and work area.
-  Live appearance settings flow through UtilityPopupStyle and DesktopGlassBackdrop.
+  Live appearance settings flow through PopupStyle and DesktopGlassBackdrop.
   Opening lasts 160 ms, closing 110 ms, with smoothstep easing, 0.96–1 scale and a 4-DIP settle.
 
 ## Data and drag isolation

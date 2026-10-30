@@ -167,7 +167,7 @@ public sealed class DockHoverMagnificationTests
     }
 
     [Fact]
-    public void Utilities_never_magnify_and_do_not_shift_for_hover()
+    public void Pointer_outside_apps_does_not_magnify_or_shift_icons()
     {
         var row = Row(8);
         row[^1] = row[^1] with { Magnifiable = false, Width = 120 };
@@ -177,7 +177,7 @@ public sealed class DockHoverMagnificationTests
         Assert.Equal(1, frames[^1].Scale);
         AssertFixedPositions(row, frames);
         Assert.Equal(456, hover.ContentWidth);
-        hover.SetPointer(400, 20); // Hovering the utilities cannot magnify an app.
+        hover.SetPointer(400, 20); // Pointer outside the app row cannot magnify an app.
         frames = Settle(hover, row);
         Assert.All(frames, frame => Assert.Equal(1, frame.Scale));
         var remaining = row[..3];

@@ -140,7 +140,7 @@ public static class DockPerformanceDiagnostics
         if (!Enabled) return;
         var writes = System.Numerics.BitOperations.PopCount((uint)changes);
         Interlocked.Add(ref shaderWrites, writes);
-        Interlocked.Add(ref shaderWritesSkipped, 6 - writes);
+        Interlocked.Add(ref shaderWritesSkipped, System.Numerics.BitOperations.PopCount((uint)Materials.LiquidGlassShaderState.All) - writes);
     }
 
     public static void RecordSlowUiOperation(long elapsedStopwatchTicks)

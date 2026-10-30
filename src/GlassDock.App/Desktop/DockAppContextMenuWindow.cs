@@ -19,7 +19,7 @@ internal sealed record DockAppMenuEntry(string Text, string Glyph, Action? Invok
 /// <summary>One retained, interactive app menu using the dock's desktop glass and control palette.</summary>
 internal sealed class DockAppContextMenuWindow : Window
 {
-    private const double Gutter = UtilityPopupStyle.Gutter;
+    private const double Gutter = PopupStyle.Gutter;
     // The visual geometry is identical across Dark, Light, Frosted, Acrylic and Clear.
     // Only the surface material and palette change with the appearance setting.
     // Scale the complete existing menu uniformly rather than redesigning its
@@ -42,7 +42,7 @@ internal sealed class DockAppContextMenuWindow : Window
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, Margin = new(Gutter), IsHitTestVisible = false };
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
-    private readonly UtilityPopupTheme theme = new();
+    private readonly PopupTheme theme = new();
     // Silver / pearl-blue material sampled from the generated Jump List mockup.
     // The native Clear/Frosted/Acrylic optics remain beneath this translucent
     // overlay; no changes to desktop capture or screenshot exclusion are needed.
@@ -207,8 +207,8 @@ internal sealed class DockAppContextMenuWindow : Window
             menuAccent.Color = global::Windows.UI.Color.FromArgb(229, 31, 112, 243);
         }
         root.RequestedTheme = mode == DockAppearanceMode.Dark ? ElementTheme.Dark : ElementTheme.Light;
-        UtilityPopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: MenuCornerRadius);
-        glass.Apply(GlassDock.Core.Materials.UtilityMaterial.CreateForPopup(appearance, mode) with
+        PopupStyle.Apply(glass, backdrop, appearance, mode, cornerRadius: MenuCornerRadius);
+        glass.Apply(GlassDock.Core.Materials.PopupMaterial.CreateForPopup(appearance, mode) with
         { CornerRadius = MenuCornerRadius, ShadowOpacity = 0.28, ShadowBlur = 20, ShadowOffset = 5, BorderOpacity = 0, EdgeHighlight = 0 });
     }
 

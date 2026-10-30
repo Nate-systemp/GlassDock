@@ -91,7 +91,7 @@ internal sealed class AdaptiveAppIcon : Grid
     {
         artwork.Visibility = Visibility.Collapsed;
         tile.Visibility = Visibility.Collapsed;
-        var count = Math.Min(3, apps.Count);
+        var count = Math.Min(4, apps.Count);
         if (stackPreview is null)
         {
             stackPreview = new Canvas { IsHitTestVisible = false };
@@ -105,8 +105,8 @@ internal sealed class AdaptiveAppIcon : Grid
             // sampler, so overlap agrees between XAML and the refracted artwork.
             for (var depth = count - 1; depth >= 0; depth--)
             {
-                var layer = new AdaptiveAppIcon(Width * StackLayerScale(depth),
-                    maximumHoverScale, false, artworkPadding * StackLayerScale(depth)) { isStackLayer = true };
+                var layer = new AdaptiveAppIcon(Width * .46,
+                    maximumHoverScale, false, .5) { isStackLayer = true };
                 layer.SetDockAppearance(stackAppearance);
                 layer.SetDockScale(dockScale);
                 stackPreview.Children.Add(layer);
@@ -121,8 +121,6 @@ internal sealed class AdaptiveAppIcon : Grid
             ((AdaptiveAppIcon)stackPreview.Children[count - 1 - depth]).SetIcon(next);
         }
     }
-
-    private static double StackLayerScale(int depth) => depth == 0 ? 1 : depth == 1 ? .85 : .72;
 
     private void UpdateStackCard()
     {
@@ -146,17 +144,16 @@ internal sealed class AdaptiveAppIcon : Grid
     private void LayoutStackLayers()
     {
         if (stackPreview is null) return;
-        // Rear centers move up/right by 3.75 DIP per layer at the default 28 DIP
-        // icon size. Only the artwork overhangs slightly; the dock slot is fixed.
-        var step = Math.Clamp(Width * (3.75 / 28), 2.5, 6);
+        // Four equal tiles stay within the fixed dock slot, with an 8% center gap.
+        var gap = Width * .08;
+        var size = (Width - gap) / 2;
         for (var index = 0; index < stackPreview.Children.Count; index++)
         {
             var depth = stackPreview.Children.Count - 1 - index;
             var layer = (AdaptiveAppIcon)stackPreview.Children[index];
-            var size = Width * StackLayerScale(depth);
             layer.Configure(size, maximumHoverScale);
-            Canvas.SetLeft(layer, (Width - size) / 2 + depth * step);
-            Canvas.SetTop(layer, (Height - size) / 2 - depth * step);
+            Canvas.SetLeft(layer, (depth % 2) * (size + gap));
+            Canvas.SetTop(layer, (depth / 2) * (size + gap));
         }
     }
 

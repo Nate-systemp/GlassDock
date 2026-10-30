@@ -22,7 +22,7 @@ The existing Settings window was visually inspected through the computer-use
 helper: text was readable and the backdrop blurred. Its accessibility tree was
 unavailable. This does not establish the selected dock mode, exact DPI, popup
 appearance, or five-mode acceptance. The helper did not expose the native dock
-or utilities. No new ghost-shadow/corner defect was visually reproduced.
+or popups. No new ghost-shadow/corner defect was visually reproduced.
 
 Regression tests exercise capture-source identity at scale factors 1, 1.25,
 1.5, 1.75 and 2, plus resolution, orientation and monitor changes. These are
@@ -31,7 +31,7 @@ behavioral geometry tests, not screenshots or hardware scaling verification.
 ## Manual acceptance matrix (pending)
 
 At 100/125/150/175/200 percent, inspect Dark, Light, Frosted, Acrylic and Clear:
-dock, app menu, previews, stack, Calendar, Hidden Tray, Quick Settings and Home.
+dock, app menu, previews, stack and Home.
 Check text/icon clarity, corners, intended soft shadows, popup work-area clamping,
 live mode changes on retained windows, refraction/specular/dispersion in Clear,
 rapid reversal and popup opening/closing. Settings intentionally uses Frosted

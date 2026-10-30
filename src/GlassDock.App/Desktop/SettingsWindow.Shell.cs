@@ -15,17 +15,9 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class SettingsWindow
 {
-    internal void NavigateUtilities() => ShowSettingsPage("Utilities");
     private readonly DesktopGlassBackdrop settingsBackdrop = new();
     private readonly GlassSurface settingsGlass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
-    private readonly GlassSurface previewGlass = new() { IsHitTestVisible = false };
-    private readonly Border previewSolid = new() { CornerRadius = new(28), IsHitTestVisible = false,
-        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Height = 68 };
-    private readonly LinearGradientBrush previewRimBrush = new();
-    private readonly Border previewRim = new() { CornerRadius = new(28), BorderThickness = new(.7), IsHitTestVisible = false,
-        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Height = 68 };
-    private readonly StackPanel previewIcons = new() { Orientation = Orientation.Horizontal, Spacing = 8,
-        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+    private GlassVisualPreview? glassPreview;
     private readonly Dictionary<string, Button> navigation = [];
     private readonly Dictionary<DockAppearanceMode, Button> appearanceButtons = [];
     private InteractiveGlassWindowHost? settingsHost;
@@ -57,9 +49,7 @@ public sealed partial class SettingsWindow
             UpdateSettingsBounds();
             if (editingReady) return;
             populating = true;
-            foreach (var box in new[] { GlassBlurAmountBox, DockOpacityBox, BorderThicknessBox,
-                BorderOpacityBox, IconSizeBox, MagnificationScaleBox, IconSpacingBox,
-                ClearRefractionStrengthBox, SpecularHighlightAngleBox }) AddSettingSlider(box);
+            foreach (var box in new[] { IconSizeBox, MagnificationScaleBox, IconSpacingBox }) AddSettingSlider(box);
             populating = false;
             editingReady = true;
         };
@@ -77,27 +67,22 @@ public sealed partial class SettingsWindow
         }
         BuildAppearanceTiles();
         BuildDockPreview();
+        BuildGlassEditor();
         shellReady = true;
         settingsSession.Changed += SettingsSessionChanged;
         ApplySettingsAppearance();
         ShowSettingsPage(selectedPage);
         // User edits reuse the existing transactional save path and normalization.
         foreach (var box in new[] { IconSizeBox, MagnificationScaleBox, IconSpacingBox, BottomMarginBox,
-            GlassBlurAmountBox, DockOpacityBox, BorderThicknessBox, BorderOpacityBox, AutoHideDelayBox, PeekDelayBox,
-            ClearRefractionStrengthBox, SpecularHighlightAngleBox })
+            AutoHideDelayBox, PeekDelayBox })
             box.ValueChanged += (_, _) => SaveEditedControl();
         DockDisplayModeBox.SelectionChanged += (_, _) => SaveEditedControl();
         DockSizeBox.SelectionChanged += (_, _) => SaveEditedControl();
         PinnedPlacementBox.SelectionChanged += (_, _) => SaveEditedControl();
         FloatingDockGapBox.ValueChanged += (_, _) => SaveEditedControl();
-        UtilitiesPlacementBox.SelectionChanged += (_, _) => SaveEditedControl();
-        UtilitiesLayoutBox.SelectionChanged += (_, _) => SaveEditedControl();
-        UtilitiesShortcutBox.SelectionChanged += (_, _) => SaveEditedControl();
-        foreach (var toggle in new[] { UtilitiesFullscreenToggle, UtilitiesSnapToggle, UtilitiesRememberToggle, UtilitiesShortcutToggle })
-            toggle.Toggled += (_, _) => SaveEditedControl();
         HoverWaveToggle.Toggled += (_, _) => SaveEditedControl();
-        CircularHighlightsToggle.Toggled += (_, _) => SaveEditedControl();
-        ClearCircularHighlightsToggle.Toggled += (_, _) => SaveEditedControl();
+        CircularHighlightsToggle.Toggled += (_, _) => GlassEdited();
+        ClearCircularHighlightsToggle.Toggled += (_, _) => GlassEdited();
         HoverToExpandOnlyToggle.Toggled += (_, _) => SaveEditedControl();
         LaunchAtStartupToggle.Toggled += (_, _) => SaveEditedControl();
         Closed += (_, _) =>
@@ -106,6 +91,7 @@ public sealed partial class SettingsWindow
             settingsBackdrop.RenderingModeChanged -= SettingsRenderingChanged;
             SystemBackdrop = null;
             settingsHost?.Dispose();
+            glassPreview?.Dispose();
         };
     }
 
@@ -120,6 +106,7 @@ public sealed partial class SettingsWindow
             editQueued = false;
             if (closed || saving || populating) return;
             if (sliderEditing) { UpdateDockPreview(); return; }
+            savingNonVisual = true;
             ApplyClick(this, new RoutedEventArgs());
         });
     }
@@ -185,15 +172,10 @@ public sealed partial class SettingsWindow
         // Frosted preset so sharp desktop text cannot compete with its controls.
         var (shellMode, shellAppearance) = SettingsShellAppearance.Resolve(mode, settingsSession.Appearance);
         if (mode == DockAppearanceMode.Clear) Brush("ShellBrush").Color = Color.FromArgb(145,19,27,39);
-        UtilityPopupStyle.Apply(settingsGlass, settingsBackdrop, shellAppearance, shellMode);
-        settingsGlass.Apply(UtilityMaterial.CreateForPopup(shellAppearance, shellMode) with
+        PopupStyle.Apply(settingsGlass, settingsBackdrop, shellAppearance, shellMode);
+        settingsGlass.Apply(PopupMaterial.CreateForPopup(shellAppearance, shellMode) with
             { ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0, CornerRadius = 0 });
-        GlassControls.Visibility = glass && mode != DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
-        ClearMaterialNote.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
-        ClearOpticsControls.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
-        CircularHighlightsToggle.Visibility = mode == DockAppearanceMode.Clear ? Visibility.Collapsed : Visibility.Visible;
-        // Clear's GPU edge refraction does not consume the shared blur/opacity values.
-        GlassBlurAmountBox.IsEnabled = DockOpacityBox.IsEnabled = mode != DockAppearanceMode.Clear;
+        ClearMaterialNote.Visibility = glassDraft.Mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (value, button) in appearanceButtons)
         {
             button.BorderBrush = value == mode ? new SolidColorBrush(Color.FromArgb(255,99,174,255)) : Brush("DividerBrush");
@@ -241,71 +223,23 @@ public sealed partial class SettingsWindow
             var button = new Button { Content = content, Padding = new(7,10,7,10), CornerRadius = new(12),
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brush("CardBrush") };
             AutomationProperties.SetName(button, mode == DockAppearanceMode.Clear ? "Clear — Liquid Glass" : mode.ToString());
-            button.Click += (_, _) => DockAppearanceModeBox.SelectedIndex = (int)mode;
+            button.Click += (_, _) => SelectBuiltInGlass(mode);
             Grid.SetColumn(button, (int)mode); AppearanceTiles.Children.Add(button); appearanceButtons[mode] = button;
         }
     }
 
     private void BuildDockPreview()
     {
-        // Retained, noninteractive in-app material preview. No HWND, AppBar or desktop capture.
-        var scene = new Border { CornerRadius = new(12), Margin = new(0,10,0,10), Background = new LinearGradientBrush
-        { StartPoint = new(0,0), EndPoint = new(1,1), GradientStops = {
-            new() { Color = Color.FromArgb(255,38,65,100), Offset = 0 }, new() { Color = Color.FromArgb(255,111,136,151), Offset = .5 },
-            new() { Color = Color.FromArgb(255,60,49,82), Offset = 1 } } } };
-        PreviewHost.Children.Add(scene);
-        previewGlass.Height = 68; previewGlass.HorizontalAlignment = HorizontalAlignment.Center;
-        previewGlass.VerticalAlignment = VerticalAlignment.Center; PreviewHost.Children.Add(previewGlass);
-        PreviewHost.Children.Add(previewSolid);
-        for (var i = 0; i <= 16; i++)
-        {
-            var t = i / 16d;
-            var alpha = .7 * (Math.Exp(-Math.Pow((t-.10)/.13,2)) + .65*Math.Exp(-Math.Pow((t-.90)/.13,2)));
-            previewRimBrush.GradientStops.Add(new() { Offset = t, Color = Color.FromArgb((byte)(alpha*255),255,255,255) });
-        }
-        previewRim.BorderBrush = previewRimBrush; PreviewHost.Children.Add(previewRim);
-        foreach (var app in previewApplications.Take(6))
-        {
-            var icon = new AdaptiveAppIcon(settingsSession.Current.IconSize, 1, false);
-            if (app.Stack is not null) icon.SetStack(app.StackApps); else icon.SetIcon(app.Icon);
-            AutomationProperties.SetName(icon, app.Name);
-            ToolTipService.SetToolTip(icon, app.Name);
-            previewIcons.Children.Add(icon);
-        }
-        if (previewIcons.Children.Count == 0)
-            foreach (var glyph in new[] { "\uE80F", "\uE8B7", "\uE756", "\uE714", "\uE713", "\uE787" })
-                previewIcons.Children.Add(new FontIcon { Glyph = glyph, Foreground = Brush("PrimaryBrush") });
-        PreviewHost.Children.Add(previewIcons);
-        AutomationProperties.SetName(PreviewHost, "Representative dock preview; controls are not interactive");
+        glassPreview = new GlassVisualPreview(previewApplications);
+        PreviewHost.Height = 140;
+        PreviewHost.Children.Add(glassPreview);
     }
 
     private void UpdateDockPreview()
     {
-        var mode = settingsSession.Current.DockAppearanceMode;
-        var appearance = settingsSession.Appearance with
-        {
-            IconSize = double.IsFinite(IconSizeBox.Value) ? IconSizeBox.Value : settingsSession.Current.IconSize,
-            IconSpacing = double.IsFinite(IconSpacingBox.Value) ? IconSpacingBox.Value : settingsSession.Current.IconSpacing,
-            GlassBlurAmount = double.IsFinite(GlassBlurAmountBox.Value) ? GlassBlurAmountBox.Value : settingsSession.Current.GlassBlurAmount,
-            DockOpacity = double.IsFinite(DockOpacityBox.Value) ? DockOpacityBox.Value / 100 : settingsSession.Current.DockOpacity
-        };
-        if (mode.GlassStyle() is { } style)
-            previewGlass.Apply(appearance.ApplyTo(DockMaterialStylePresets.Create(style), true) with { ShadowOpacity = 0 });
-        previewGlass.Visibility = mode.GlassStyle() is null ? Visibility.Collapsed : Visibility.Visible;
-        previewSolid.Visibility = mode.GlassStyle() is null ? Visibility.Visible : Visibility.Collapsed;
-        previewSolid.Background = new SolidColorBrush(DockControlPalette.SolidSurface(mode));
-        previewIcons.Spacing = 12 + appearance.IconSpacing;
-        foreach (var child in previewIcons.Children)
-        {
-            if (child is AdaptiveAppIcon icon) { icon.Configure(appearance.IconSize, 1); icon.SetDockAppearance(mode); }
-            else if (child is FontIcon glyph) glyph.FontSize = appearance.IconSize;
-        }
-        previewGlass.Width = Math.Min(Math.Max(240, PreviewHost.ActualWidth - 20), previewIcons.Children.Count * (appearance.IconSize + previewIcons.Spacing) + 40);
-        previewSolid.Width = previewGlass.Width;
-        previewRim.Width = previewGlass.Width;
-        var highlight = DockSpecularLighting.Gradient(previewGlass.Width, 68, SpecularHighlightAngleBox.Value);
-        previewRimBrush.StartPoint = new(highlight.Start.X / previewGlass.Width, highlight.Start.Y / 68);
-        previewRimBrush.EndPoint = new(highlight.End.X / previewGlass.Width, highlight.End.Y / 68);
+        glassPreview?.FocusComponent(glassTarget);
+        glassPreview?.Update(glassDraft, glassDraft.Mode == DockAppearanceMode.Clear
+            ? ClearCircularHighlightsToggle.IsOn : CircularHighlightsToggle.IsOn);
     }
 
     private void SearchSettingsChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -314,8 +248,6 @@ public sealed partial class SettingsWindow
             sender.ItemsSource = SettingsCatalog.Search(sender.Text);
     }
 
-    private async void ResetUtilitiesPositionClick(object sender, RoutedEventArgs e) =>
-        await SaveRecoverySettingsAsync(settingsSession.Current with { UtilitiesX = null, UtilitiesY = null }, "Floating position reset.");
     private void SearchSettingChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
     { if (args.SelectedItem is SettingsSearchEntry entry) NavigateToSetting(entry); }
     private void SearchSettingSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
@@ -330,8 +262,6 @@ public sealed partial class SettingsWindow
         DispatcherQueue.TryEnqueue(() =>
         {
             if (closed || SettingsRoot.FindName(entry.Control) is not FrameworkElement target) return;
-            if (entry.Control == "GlassControls" && GlassControls.Visibility == Visibility.Collapsed)
-                target = AppearanceTiles;
             target.StartBringIntoView();
             if (target is Control control) control.Focus(FocusState.Keyboard);
         });

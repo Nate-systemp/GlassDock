@@ -17,7 +17,7 @@ internal sealed class DokySharedRuntime : IDisposable
 
     public DokySharedRuntime()
     {
-        Badges = new BadgeCoordinator([WindowsToastBadges]);
+        Badges = new BadgeCoordinator(new[] { WindowsToastBadges });
     }
 
     public void StartApplications()

@@ -24,7 +24,7 @@ public sealed class HomeDashboardTests
         {
             var layout = HomeDashboardLayout.Create(availableWidth, availableHeight, spacing);
             Assert.True(layout.Width <= availableWidth && layout.Height <= availableHeight);
-            Assert.Equal(7, layout.Cards.Count);
+            Assert.Equal(3, layout.Cards.Count);
             foreach (var card in layout.Cards)
             {
                 Assert.True(card.X >= 0 && card.Y >= 0 && card.Width > 0 && card.Height > 0);
@@ -76,7 +76,7 @@ public sealed class HomeDashboardTests
         var material = new GlassMaterial { BlurAmount = 24, Opacity = .7, Tint = 0x183050 };
         foreach (var mode in new[] { DockAppearanceMode.Frosted, DockAppearanceMode.Acrylic, DockAppearanceMode.Clear })
         {
-            var card = UtilityMaterial.ForDashboardCard(material, mode);
+            var card = PopupMaterial.ForDashboardCard(material, mode);
             Assert.Equal(material.BlurAmount, card.BlurAmount);
             Assert.Equal(material.Opacity, card.Opacity);
             Assert.Equal(material.Tint, card.Tint);
@@ -84,11 +84,11 @@ public sealed class HomeDashboardTests
             Assert.True(card.ShadowBlur < material.ShadowBlur);
             Assert.True(card.ShadowOffset < material.ShadowOffset);
         }
-        Assert.Same(material, UtilityMaterial.ForDashboardCard(material, DockAppearanceMode.Light));
-        Assert.Same(material, UtilityMaterial.ForDashboardCard(material, DockAppearanceMode.Dark));
-        Assert.True(UtilityMaterial.DashboardContrast(DockAppearanceMode.Frosted, .7) >
-            UtilityMaterial.DashboardContrast(DockAppearanceMode.Clear, .7));
-        Assert.True(UtilityMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .8) >
-            UtilityMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .4));
+        Assert.Same(material, PopupMaterial.ForDashboardCard(material, DockAppearanceMode.Light));
+        Assert.Same(material, PopupMaterial.ForDashboardCard(material, DockAppearanceMode.Dark));
+        Assert.True(PopupMaterial.DashboardContrast(DockAppearanceMode.Frosted, .7) >
+            PopupMaterial.DashboardContrast(DockAppearanceMode.Clear, .7));
+        Assert.True(PopupMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .8) >
+            PopupMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .4));
     }
 }

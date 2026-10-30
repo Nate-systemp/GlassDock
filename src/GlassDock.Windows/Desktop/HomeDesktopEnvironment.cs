@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using GlassDock.Core.Desktop;
 using GlassDock.Core.Settings;
@@ -33,26 +32,4 @@ public static class HomeDesktopEnvironment
             Math.Max(1, bottom - info.Work.Top - inset * 2), scale);
     }
 
-    public static bool OpenSettings(string uri)
-    {
-        try { using var process = Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); return true; }
-        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
-    }
-    public static bool Lock() => LockWorkStation();
-    public static Task<bool> SleepAsync() => Task.Run(() => SetSuspendState(false, false, false));
-    public static bool Shutdown(bool restart)
-    {
-        try
-        {
-            // No force flag: Windows can still protect unsaved work.
-            using var process = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), restart ? "/r /t 0" : "/s /t 0")
-                { UseShellExecute = false, CreateNoWindow = true });
-            return true;
-        }
-        catch (System.ComponentModel.Win32Exception) { return false; }
-    }
-    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool LockWorkStation();
-    [DllImport("powrprof.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool SetSuspendState([MarshalAs(UnmanagedType.U1)] bool hibernate,
-        [MarshalAs(UnmanagedType.U1)] bool force, [MarshalAs(UnmanagedType.U1)] bool disableWake);
 }

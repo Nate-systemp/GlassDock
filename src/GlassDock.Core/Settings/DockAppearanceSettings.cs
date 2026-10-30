@@ -14,7 +14,8 @@ public readonly record struct DockAppearanceSettings(
 {
     public double ClearRefractionStrength { get; init; } = 12;
     public double SpecularHighlightAngle { get; init; } = 45;
-    public LiquidGlassMaterial LiquidOptics => new LiquidGlassMaterial
+    public LiquidGlassMaterial? VisualMaterial { get; init; }
+    public LiquidGlassMaterial LiquidOptics => VisualMaterial ?? new LiquidGlassMaterial
     {
         RefractionStrength = (float)ClearRefractionStrength,
         SpecularAngleDegrees = (float)SpecularHighlightAngle
@@ -58,7 +59,11 @@ public readonly record struct DockAppearanceSettings(
 
     public GlassMaterial ApplyTo(GlassMaterial material, bool expanded) => material with
     {
-        BlurAmount = GlassBlurAmount,
-        Opacity = expanded ? DockOpacity : material.Opacity
+        BlurAmount = VisualMaterial?.BlurAmount ?? GlassBlurAmount,
+        Opacity = expanded ? VisualMaterial?.MaterialBlend ?? DockOpacity : material.Opacity,
+        Saturation = VisualMaterial?.Saturation ?? material.Saturation,
+        Brightness = VisualMaterial?.Brightness ?? material.Brightness,
+        Contrast = VisualMaterial?.Contrast ?? material.Contrast,
+        BlurQuality = (int)(VisualMaterial?.BlurQuality ?? material.BlurQuality)
     };
 }
