@@ -24,10 +24,10 @@ internal sealed class DockAppContextMenuWindow : Window
     // Only the surface material and palette change with the appearance setting.
     // Scale the complete existing menu uniformly rather than redesigning its
     // layout, colors, hover treatment, or native glass/screenshot pipeline.
-    private const double MenuSizeScale = 0.85;
+    internal const double MenuSizeScale = 0.85;
     private static double MenuSize(double value) => value * MenuSizeScale;
     private const double MenuCornerRadius = 11;
-    private const double MenuWidth = 258 * MenuSizeScale;
+    internal const double MenuWidth = 258 * MenuSizeScale;
     private const double MenuRowHeight = 36 * MenuSizeScale;
     private const double MenuRowRadius = 5 * MenuSizeScale;
     private readonly nint dock;

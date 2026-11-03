@@ -53,8 +53,12 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private Vector4 lensBounds;
     private float lensOpacity;
     private bool lensMerge, clearActive;
+    private IReadOnlyList<UtilityGlassSurface> utilities = Array.Empty<UtilityGlassSurface>();
+    private bool UtilitiesActive => utilities.Any(u => u.Active);
+    public void SetUtilities(IReadOnlyList<UtilityGlassSurface> value) { utilities = value; QueueDraw(); }
     private DockAppearanceMode appearanceMode;
     private GlassMaterial dockMaterial = new();
+    public GlassMaterial BackdropMaterial => dockMaterial;
     private static readonly LiquidGlassMaterial LensMaterial = new LiquidGlassMaterial
     { RefractionStrength = 11, EdgeThickness = 17, DiffusionAmount = .35f, ChromaticDispersion = .85f, SpecularIntensity = .20f }.Normalize();
     public string Status { get; private set; } = "Liquid inactive";
@@ -102,7 +106,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     {
         paintDock = null;
         ReleaseLens();
-        if (!clearActive) { enabled = false; Stop(); }
+        if (!clearActive && !UtilitiesActive) { enabled = false; Stop(); }
     }
 
     private void ReleaseLens()
@@ -133,11 +137,11 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         {
             // Screenshot uses the last clean presented frame; no new captures
             // or shader draws while the HWND is temporarily screenshot-visible.
-            if (!active) EndScreenshotMode();
+            if (!active && !UtilitiesActive) EndScreenshotMode();
             else return;
         }
         dock = dockBounds; wave = waveShape; scale = dpiScale;
-        if (!active && paintDock is null && !clearActive && !enabled && !failed && capture is null)
+        if (!active && paintDock is null && !UtilitiesActive && !clearActive && !enabled && !failed && capture is null)
             return;
         clearActive = active;
         if (Math.Abs(Output.Opacity - opacity) > 0.0001)
@@ -148,7 +152,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 Output.Visibility = Visibility.Collapsed;
             setNativeSuppressed(false);
         }
-        if (!active && paintDock is null)
+        if (!active && paintDock is null && !UtilitiesActive)
         {
             enabled = false; failed = false;
             Stop();
@@ -210,9 +214,9 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     // rather than re-rendering a frame that might include this window recursively.
     public bool BeginScreenshotMode()
     {
-        if (disposed || !clearActive || !enabled || capture is null || bitmap is null ||
-            Output.Visibility != Visibility.Visible) return false;
         if (screenshotFrozen) return true;
+        if (disposed || !enabled || capture is null || bitmap is null ||
+            !(clearActive && Output.Visibility == Visibility.Visible || utilities.Any(u => u.Active && u.HasFrame))) return false;
         // Detach retained references to pooled WGC surfaces before stopping the pool.
         shader!.Source1 = null;
         if (popupCrop is not null) popupCrop.Source = null;
@@ -348,6 +352,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 setNativeSuppressed(true);
             }
             if (paintDock is not null) DrawLens(geometry);
+            foreach (var utility in utilities)
+                utility.Draw(device!, bitmap, origin, new(placement.MonitorWidth, placement.MonitorHeight), scale);
             shader.Source1 = null;
             SetStatus(clearActive ? "Liquid active · GPU desktop refraction"
                 : "Liquid drag lens active · GPU dock refraction");
@@ -473,6 +479,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
+        foreach (var utility in utilities) utility.Dispose();
         screenshotFrozen = false;
         ReleaseLens();
         Output.Visibility = Visibility.Collapsed;

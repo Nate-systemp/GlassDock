@@ -4,6 +4,18 @@ namespace GlassDock.Core.Materials;
 
 public static class PopupMaterial
 {
+    public static LiquidGlassMaterial FrostedUtilityOptics(LiquidGlassMaterial dockOptics)
+    {
+        var frosted = GlassVisualProfile.BuiltIn(DockAppearanceMode.Frosted).DockMaterial;
+        return (dockOptics with
+        {
+            BlurAmount = Math.Max(dockOptics.BlurAmount, frosted.BlurAmount),
+            MaterialBlend = frosted.MaterialBlend, SurfaceOpacity = frosted.SurfaceOpacity,
+            Saturation = frosted.Saturation, Brightness = frosted.Brightness,
+            SpecularIntensity = Math.Min(dockOptics.SpecularIntensity, frosted.SpecularIntensity)
+        }).Normalize();
+    }
+
     // Clear popup readability pass; foreground controls/thumbnails are never inputs.
     public const float LiquidBackdropBlur = 2.5f;
     public const float LiquidBackdropExposure = 0f;

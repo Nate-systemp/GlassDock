@@ -478,6 +478,7 @@ public sealed partial class SettingsWindow : Window
         }
         PageScroll.ChangeView(null, 0, null, true);
         if (page == "Apps") RefreshMissingPins();
+        if (page == "Utilities") RefreshUtilitiesPage();
         if (page == "System")
             HelperStatusText.Text = "The helper is managed by the active dock session. Settings does not have a live helper connection status; use recovery actions below if elevated apps do not respond.";
     }

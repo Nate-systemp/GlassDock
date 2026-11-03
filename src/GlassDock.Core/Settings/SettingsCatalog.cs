@@ -15,6 +15,7 @@ public static class SettingsCatalog
         new SettingsPageEntry("Appearance", "Appearance", "\uE790"),
         new SettingsPageEntry("Dock", "Dock", "\uE737"),
         new SettingsPageEntry("Apps", "Apps & Stacks", "\uE8F1"),
+        new SettingsPageEntry("Utilities", "Add Utilities", "\uE713"),
         new SettingsPageEntry("Behavior", "Behavior", "\uE713"),
         new SettingsPageEntry("Displays", "Displays", "\uE7F4"),
         new SettingsPageEntry("System", "System", "\uE80A"),
@@ -24,6 +25,7 @@ public static class SettingsCatalog
 
     public static IReadOnlyList<SettingsSearchEntry> Options { get; } = Array.AsReadOnly(new[]
     {
+        new SettingsSearchEntry("Utilities", "Add Utilities", "UtilitiesGrid", "wifi wi-fi bluetooth battery independent circles"),
         new SettingsSearchEntry("General", "Start with Windows", "LaunchAtStartupToggle", "startup login launch"),
         new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted acrylic clear liquid glass theme"),
         new SettingsSearchEntry("Appearance", "Blur and opacity", "GlassControls", "diffusion tint transparency material"),

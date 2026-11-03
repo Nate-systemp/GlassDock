@@ -230,17 +230,21 @@ public sealed partial class DesktopOverlayWindow : Window
     internal WindowsKeyboardService KeyboardService => keyboard;
     // Snipping Tool's full-screen selection overlay must not be mistaken for a game.
     private bool snippingPending;
+    internal Action? ScreenshotRequested { get; init; }
     internal bool BeginSnippingCapture()
     {
         snippingPending = true;
         // Freeze the separate app menu first. The main dock is exposed only
         // after popup capture can no longer sample the newly-visible dock.
         previews.BeginSnippingCapture();
-        return liquidGlass.BeginScreenshotMode();
+        var frozen = liquidGlass.BeginScreenshotMode();
+        if (frozen || (Application.Current as App)?.BasicRendering == true) wifiWindow?.BeginSnippingCapture();
+        return frozen;
     }
     internal void EndSnippingCapture()
     {
         // Re-exclude the main dock before the app menu resumes GPU sampling.
+        wifiWindow?.EndSnippingCapture();
         liquidGlass.EndScreenshotMode();
         previews.EndSnippingCapture();
         snippingPending = false;
@@ -294,7 +298,8 @@ public sealed partial class DesktopOverlayWindow : Window
         Action<DesktopOverlayWindow>? unexpectedClosed = null,
         Action? showSettingsOverride = null,
         Action? restoreTaskbarOverride = null,
-        Action? resumeTaskbarOverride = null)
+        Action? resumeTaskbarOverride = null,
+        WifiUtilityService? sharedWifi = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -450,6 +455,7 @@ public sealed partial class DesktopOverlayWindow : Window
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator, hoverArtworkForeground);
         animation.HoverPresentationChanged += (_, _) => UpdateDockWaveOutline();
+        InitializeUtilities(sharedWifi);
 
         ApplyAppearance(settingsSession.Appearance);
         animation.PlacementChanged += (_, _) =>
@@ -779,7 +785,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var hostWidth = root.ActualWidth > 0
             ? root.ActualWidth
             : windowManager.CurrentHostWidthDips;
-        var maximumWidth = Math.Max(120d, hostWidth - 32d);
+        var maximumWidth = Math.Max(120d, hostWidth - 32d - 2 * UtilitySpace);
 
         return Math.Min(maximumWidth, applicationWidth);
     }
@@ -2065,6 +2071,8 @@ public sealed partial class DesktopOverlayWindow : Window
     }
     private void Moved(object sender, PointerRoutedEventArgs e)
     {
+        if (utilityButtons.Values.Any(button => button.IsDragging))
+        { collapseDelay?.Cancel(); HideDockWave(); return; }
         if (dragLensHoverDeferred && dragLensButton is null && reorderButton is null)
         {
             var pointer = e.GetCurrentPoint(root).Position;
@@ -2087,6 +2095,16 @@ public sealed partial class DesktopOverlayWindow : Window
             return;
 
         var hoverPointer = e.GetCurrentPoint(icons).Position;
+
+        var rootPointer = e.GetCurrentPoint(root).Position;
+        if (utilityButtons.Values.Any(button =>
+            new global::Windows.Foundation.Rect(button.Glass.Bounds.X, button.Glass.Bounds.Y,
+                button.Glass.Bounds.Z, button.Glass.Bounds.W).Contains(rootPointer)))
+        {
+            animation.ResetMagnification();
+            HideDockWave();
+            return;
+        }
 
         animation.UpdateMagnification(hoverPointer.X, hoverPointer.Y);
         // Restore the original pointer-following glass crest. The magnification
@@ -2317,6 +2335,13 @@ public sealed partial class DesktopOverlayWindow : Window
             rebuilt: !outlineSame,
             diagStart != 0 ? System.Diagnostics.Stopwatch.GetTimestamp() - diagStart : 0);
 
+        PositionUtilities();
+        foreach (var button in utilityButtons.Values)
+        {
+            var bounds = button.Glass.Bounds;
+            if (button.IsHitTestVisible && utilityArea.Visibility == Visibility.Visible)
+                reusableIconBounds.Add((bounds.X - 2, bounds.Y - 2, bounds.X + bounds.Z + 2, bounds.Y + bounds.W + 2));
+        }
         windowManager.SetInteractionPolygon(cachedWaveOutline, reusableIconBounds);
     }
     private double ClampDockWaveCenter(
@@ -2875,6 +2900,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private void UpdateLiquidGlass()
     {
         if (liquidGlass is null || !root.IsLoaded) return;
+        PositionUtilities();
         var scale = (float)(root.XamlRoot?.RasterizationScale ?? 1);
         var strength = HoverWaveEnabled ? dockWaveCurrentStrength : 0;
         var amplitude = DockWaveRise * strength * strength * (3 - 2 * strength);
@@ -2962,6 +2988,7 @@ public sealed partial class DesktopOverlayWindow : Window
         }
 
         foreach (var (id, button) in applicationButtons) ApplyButtonVisual(id, button);
+        SynchronizeUtilities();
 
         if (state.State is DockState.Expanded)
         {
@@ -3363,6 +3390,7 @@ public sealed partial class DesktopOverlayWindow : Window
         // while the taskbar recovery helper is still independently protecting exit.
         if (closeMainWindow) AppWindow.Hide();
         AbortDragLens();
+        DisposeUtilities();
         liquidGlass.Dispose();
         root.ContextFlyout?.Hide();
 

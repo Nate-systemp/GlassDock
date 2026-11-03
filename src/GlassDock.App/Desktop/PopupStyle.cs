@@ -8,6 +8,8 @@ namespace GlassDock.App.Desktop;
 internal static class PopupStyle
 {
     public const double Gutter = 16;
+    public const double CompactMenuWidth = DockAppContextMenuWindow.MenuWidth;
+    public const double CompactFontSize = 13 * DockAppContextMenuWindow.MenuSizeScale;
 
     public static void Apply(GlassSurface glass, DesktopGlassBackdrop backdrop,
         DockAppearanceSettings appearance, DockAppearanceMode mode = DockAppearanceMode.Dark,

@@ -88,12 +88,23 @@
             <ComboBoxItem Content="Clear" />
           </ComboBox>
           <TextBlock x:Name="DockAppearanceDescription" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-          <TextBlock x:Name="ClearMaterialNote" Text="Settings uses Frosted glass for readability while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
+          <TextBlock x:Name="ClearMaterialNote" Text="Settings uses its own Light/Dark theme while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
           <StackPanel x:Name="GlassControls" Spacing="14" />
           <StackPanel Orientation="Horizontal" Spacing="20">
             <ToggleSwitch x:Name="CircularHighlightsToggle" Header="Native rim highlights" OnContent="On" OffContent="Off" />
             <ToggleSwitch x:Name="ClearCircularHighlightsToggle" Header="Clear rim highlights" OnContent="On" OffContent="Off" />
           </StackPanel>
+        </StackPanel>
+        <StackPanel x:Name="UtilitiesPage" Spacing="20" Visibility="Collapsed">
+          <TextBlock Text="Add Utilities" FontSize="28" FontWeight="SemiBold" />
+          <TextBlock Text="Choose independent circles beside your dock. Nothing is added until you select it." TextWrapping="Wrap" />
+          <ComboBox x:Name="UtilityThemeBox" Header="Settings and utility appearance" SelectionChanged="UtilityThemeChanged">
+            <ComboBoxItem Content="Dark" /><ComboBoxItem Content="Light" />
+          </ComboBox>
+          <Grid x:Name="UtilitiesGrid">
+            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+          </Grid>
         </StackPanel>
         <StackPanel x:Name="DockPage" Spacing="24" Visibility="Collapsed">
           <StackPanel Spacing="5">

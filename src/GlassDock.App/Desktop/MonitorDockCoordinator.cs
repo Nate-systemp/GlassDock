@@ -113,9 +113,11 @@ internal sealed class MonitorDockCoordinator : IDisposable
             UnexpectedWindowClosed,
             showSettingsOverride,
             restoreTaskbarOverride,
-            resumeTaskbarOverride)
+            resumeTaskbarOverride,
+            runtime.Wifi)
         {
-            ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome()
+            ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome(),
+            ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
         };
 
     private void SnippingRequested(object? sender, EventArgs e)

@@ -156,7 +156,7 @@ public sealed partial class SettingsWindow
     private void ApplySettingsAppearance()
     {
         if (!shellReady || closed) return;
-        var mode = settingsSession.Current.DockAppearanceMode;
+        var mode = settingsSession.Current.UtilityTheme == UtilityTheme.Light ? DockAppearanceMode.Light : DockAppearanceMode.Dark;
         var light = mode == DockAppearanceMode.Light;
         var glass = mode.GlassStyle() is not null;
         SettingsRoot.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
@@ -168,8 +168,7 @@ public sealed partial class SettingsWindow
         Brush("CardBrush").Color = light ? Color.FromArgb(115,255,255,255) : Color.FromArgb(65,53,68,89);
         Brush("DividerBrush").Color = DockControlPalette.Surface(mode, light ? (byte)38 : (byte)32);
         Brush("SelectionBrush").Color = light ? Color.FromArgb(65,85,126,180) : Color.FromArgb(95,52,100,161);
-        // Clear remains the user's dock choice. Reading Settings uses the existing
-        // Frosted preset so sharp desktop text cannot compete with its controls.
+        // Settings follows its independent Light/Dark theme; the dock keeps its material.
         var (shellMode, shellAppearance) = SettingsShellAppearance.Resolve(mode, settingsSession.Appearance);
         if (mode == DockAppearanceMode.Clear) Brush("ShellBrush").Color = Color.FromArgb(145,19,27,39);
         PopupStyle.Apply(settingsGlass, settingsBackdrop, shellAppearance, shellMode);
@@ -178,9 +177,9 @@ public sealed partial class SettingsWindow
         ClearMaterialNote.Visibility = glassDraft.Mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (value, button) in appearanceButtons)
         {
-            button.BorderBrush = value == mode ? new SolidColorBrush(Color.FromArgb(255,99,174,255)) : Brush("DividerBrush");
-            button.BorderThickness = new(value == mode ? 2 : 1);
-            AutomationProperties.SetItemStatus(button, value == mode ? "Selected" : "Not selected");
+            button.BorderBrush = value == glassDraft.Mode ? new SolidColorBrush(Color.FromArgb(255,99,174,255)) : Brush("DividerBrush");
+            button.BorderThickness = new(value == glassDraft.Mode ? 2 : 1);
+            AutomationProperties.SetItemStatus(button, value == glassDraft.Mode ? "Selected" : "Not selected");
         }
         foreach (var (id, button) in navigation) SetNavigationState(button, id == selectedPage);
         var title = AppWindow.TitleBar;

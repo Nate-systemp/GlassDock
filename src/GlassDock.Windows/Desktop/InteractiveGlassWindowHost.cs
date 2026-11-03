@@ -34,10 +34,36 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     // Explicit user-invoked menus need actual foreground ownership: Window.Activate
     // alone may only show a tool window opened from a non-activating dock.
     public bool ActivateForUserInput() => !disposed && SetForegroundWindow(hwnd);
+    public bool HasForegroundOrOwner(nint owner) => !disposed && (GetForegroundWindow() == hwnd || GetForegroundWindow() == owner);
+    public bool IsScreenshotForeground()
+    {
+        if (disposed) return false;
+        GetWindowThreadProcessId(GetForegroundWindow(), out var processId);
+        if (processId == 0) return false;
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById((int)processId);
+            return process.ProcessName.Equals("SnippingTool", StringComparison.OrdinalIgnoreCase)
+                || process.ProcessName.Equals("ScreenClippingHost", StringComparison.OrdinalIgnoreCase)
+                || process.ProcessName.Equals("ScreenSketch", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception) { return false; }
+    }
+    public bool SetCaptureExclusion(bool excluded) => !disposed && SetWindowDisplayAffinity(hwnd, excluded ? 0x11u : 0u);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowDisplayAffinity(nint window, uint affinity);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
     private bool disposed;
 
     public InteractiveGlassWindowHost(nint hwnd)

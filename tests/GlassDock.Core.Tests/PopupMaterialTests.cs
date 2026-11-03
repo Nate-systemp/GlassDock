@@ -6,6 +6,21 @@ namespace GlassDock.Core.Tests;
 
 public sealed class PopupMaterialTests
 {
+    [Fact]
+    public void Frosted_utility_pills_diffuse_the_surface_without_changing_dock_optics()
+    {
+        var optics = new LiquidGlassMaterial { BlurAmount = 3, ChromaticDispersion = .9f, RefractionStrength = 17, SpecularAngleDegrees = 135 };
+        var result = PopupMaterial.FrostedUtilityOptics(optics);
+        var frosted = GlassVisualProfile.BuiltIn(DockAppearanceMode.Frosted).DockMaterial;
+        Assert.Equal(frosted.BlurAmount, result.BlurAmount);
+        Assert.Equal(frosted.MaterialBlend, result.MaterialBlend);
+        Assert.Equal(optics.RefractionStrength, result.RefractionStrength);
+        Assert.Equal(optics.ChromaticDispersion, result.ChromaticDispersion);
+        Assert.Equal(optics.SpecularAngleDegrees, result.SpecularAngleDegrees);
+        Assert.Equal(3, optics.BlurAmount);
+        Assert.Equal(40, PopupMaterial.FrostedUtilityOptics(optics with { BlurAmount = 40 }).BlurAmount);
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(12, 45)]

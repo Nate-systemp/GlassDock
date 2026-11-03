@@ -62,6 +62,8 @@ public sealed record GlassDockSettings
     public GlassVisualProfile? GlassVisuals { get; init; }
     public CustomGlassPreset[] CustomGlassPresets { get; init; } = [];
     public Guid? SelectedCustomGlassPreset { get; init; }
+    public UtilityKind[] SelectedUtilities { get; init; } = [];
+    public UtilityTheme UtilityTheme { get; init; } = UtilityTheme.Dark;
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
     public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
     public bool SuppressWindowsTaskbar { get; init; } = true;
@@ -103,10 +105,14 @@ public sealed record GlassDockSettings
 
         var presets = (settings.CustomGlassPresets ?? []).Where(p => p is not null && p.Id != Guid.Empty)
             .DistinctBy(p => p.Id).Take(64).Select(p => p.Normalize()).ToArray();
+        var utilities = UtilityDefinition.Normalize(settings.SelectedUtilities);
 
         return settings with
         {
             SchemaVersion = CurrentSchemaVersion,
+            SelectedUtilities = utilities.Length == 0 ? Array.Empty<UtilityKind>() :
+                settings.SelectedUtilities is not null && utilities.SequenceEqual(settings.SelectedUtilities) ? settings.SelectedUtilities : utilities,
+            UtilityTheme = Enum.IsDefined(settings.UtilityTheme) ? settings.UtilityTheme : UtilityTheme.Dark,
             GlassVisuals = settings.GlassVisuals?.Normalize(),
             CustomGlassPresets = presets.Length == 0 ? Array.Empty<CustomGlassPreset>() :
                 settings.CustomGlassPresets is not null && presets.SequenceEqual(settings.CustomGlassPresets)
