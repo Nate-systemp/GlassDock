@@ -112,6 +112,56 @@ public static class WifiNetworkControl
         return "Connection was not confirmed. Refresh or open Wi-Fi settings for details.";
     }
 
+    public static Task<string> DisconnectAsync(WifiNetwork network, CancellationToken cancellation) => Task.Run(async () =>
+    {
+        using var session = new Session();
+        var adapter = network.Adapter;
+        cancellation.ThrowIfCancellationRequested();
+        var current = ReadConnection(session.Handle, ref adapter);
+        if (IsDisconnected(network, current)) return "Disconnected.";
+        if (current.State is not (1 or 2) || current.Ssid.Length == 0) return "Wi-Fi connection is changing. Try again.";
+        // WlanDisconnect targets an adapter: never disconnect a different network that replaced the selected one.
+        Check(WlanDisconnect(session.Handle, ref adapter, 0));
+        for (var i = 0; i < 20; i++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            current = ReadConnection(session.Handle, ref adapter);
+            if (IsDisconnected(network, current)) return "Disconnected.";
+            await Task.Delay(500, cancellation).ConfigureAwait(false);
+        }
+        return "Disconnection was not confirmed. Try again or open Wi-Fi settings.";
+    }, cancellation);
+
+    internal static bool DisconnectConfirmed(WifiNetwork expected, uint state, ReadOnlySpan<byte> ssid) =>
+        state == 4 || (state is 1 or 2) && !ssid.IsEmpty && !ssid.SequenceEqual(expected.Ssid);
+
+    private static bool IsDisconnected(WifiNetwork expected, ConnectionAttributes current) =>
+        DisconnectConfirmed(expected, current.State, current.Ssid.Bytes.AsSpan(0, (int)current.Ssid.Length));
+
+    private static ConnectionAttributes ReadConnection(nint handle, ref Guid adapter)
+    {
+        var result = WlanQueryInterface(handle, ref adapter, 7, 0, out var size, out var data, out _); // current connection
+        if (result == 5023) // ERROR_INVALID_STATE: query the state rather than assume a disconnect completed.
+        {
+            Check(WlanQueryInterface(handle, ref adapter, 6, 0, out size, out data, out _)); // interface state
+            try
+            {
+                if (data == 0 || size < sizeof(uint)) throw new InvalidDataException("Windows returned an incomplete Wi-Fi state.");
+                return new() { State = unchecked((uint)Marshal.ReadInt32(data)) };
+            }
+            finally { WlanFreeMemory(data); }
+        }
+        Check(result);
+        try
+        {
+            if (data == 0 || size < Marshal.SizeOf<ConnectionAttributes>()) throw new InvalidDataException("Windows returned an incomplete Wi-Fi connection.");
+            var current = Marshal.PtrToStructure<ConnectionAttributes>(data);
+            if (current.Ssid.Length > 32) throw new InvalidDataException("Windows returned an invalid Wi-Fi SSID.");
+            return current;
+        }
+        finally { WlanFreeMemory(data); }
+    }
+
     public static string ErrorMessage(Exception error) => error is Win32Exception { NativeErrorCode: 5 }
         ? "Windows denied Wi-Fi access. Check location permission in Windows Settings."
         : "Wi-Fi is unavailable or the operation failed. Check the radio and use Refresh or Settings.";
@@ -185,6 +235,13 @@ public static class WifiNetworkControl
         public nint Ssid, BssidList;
         public uint BssType, Flags;
     }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ConnectionAttributes
+    {
+        public uint State, Mode;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string Profile;
+        public Ssid Ssid;
+    }
     [DllImport("wlanapi.dll")] private static extern uint WlanOpenHandle(uint version, nint reserved, out uint negotiated, out nint handle);
     [DllImport("wlanapi.dll")] private static extern uint WlanCloseHandle(nint handle, nint reserved);
     [DllImport("wlanapi.dll")] private static extern uint WlanEnumInterfaces(nint handle, nint reserved, out nint list);
@@ -193,6 +250,9 @@ public static class WifiNetworkControl
     [DllImport("wlanapi.dll")] private static extern uint WlanRegisterNotification(nint handle, uint source,
         [MarshalAs(UnmanagedType.Bool)] bool ignoreDuplicate, NotificationCallback? callback, nint context, nint reserved, out uint previous);
     [DllImport("wlanapi.dll")] private static extern uint WlanConnect(nint handle, ref Guid adapter, ref Connection parameters, nint reserved);
+    [DllImport("wlanapi.dll")] private static extern uint WlanDisconnect(nint handle, ref Guid adapter, nint reserved);
+    [DllImport("wlanapi.dll")] private static extern uint WlanQueryInterface(nint handle, ref Guid adapter, uint opcode,
+        nint reserved, out uint size, out nint data, out uint valueType);
     [DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] private static extern uint WlanSetProfile(nint handle,
         ref Guid adapter, uint flags, string xml, string? security, [MarshalAs(UnmanagedType.Bool)] bool overwrite, nint reserved, out uint reason);
     [DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] private static extern uint WlanGetProfile(nint handle,

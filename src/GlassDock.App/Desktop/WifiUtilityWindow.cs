@@ -21,7 +21,7 @@ internal sealed class WifiUtilityWindow : Window
     private readonly Grid root = new();
     private readonly DesktopGlassBackdrop transparentBackdrop = new() { UseSolidSurface = true };
     private readonly WifiNetworkPanel panel;
-    private readonly ScrollViewer scroll;
+    private readonly ContentControl panelHost;
     private readonly InteractiveGlassWindowHost host;
     private readonly bool animations = new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
     private readonly bool captureExcluded;
@@ -34,6 +34,7 @@ internal sealed class WifiUtilityWindow : Window
     public Action? ScreenshotRequested { get; init; }
     private int animationRevision;
     public IEnumerable<UtilityGlassSurface> GlassSurfaces => panel.GlassSurfaces;
+    public int GlassTargetsRevision => panel.GlassTargetsRevision;
     public bool IsOpen { get; private set; }
     public bool IsDetailsOpen => IsOpen && !closing && !disposed;
     public event EventHandler? DetailsVisibilityChanged;
@@ -49,9 +50,8 @@ internal sealed class WifiUtilityWindow : Window
         presenter.IsAlwaysOnTop = true; presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         var light = theme == UtilityTheme.Light;
         panel = new(wifi, theme);
-        scroll = new ScrollViewer { Content = panel, Margin = new(Gutter), HorizontalScrollMode = ScrollMode.Disabled,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        root.Children.Add(scroll);
+        panelHost = new ContentControl { Content = panel, Margin = new(Gutter), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        root.Children.Add(panelHost);
         root.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
         Content = root;
         host = new(WinRT.Interop.WindowNative.GetWindowHandle(this)) { UseDockLayeredTransparency = true };
@@ -121,10 +121,11 @@ internal sealed class WifiUtilityWindow : Window
         anchor = source;
         if (!IsOpen || disposed) return;
         var (area, scale, dockBounds) = WindowPreviewPlacement.GetArea(dock); dpi = scale;
+        panel.SetAvailableHeight(Math.Max(1, area.Height / dpi - 16 - Gutter * 2));
         panel.Measure(new(panel.Width, double.PositiveInfinity));
         var height = Math.Min(panel.DesiredSize.Height + Gutter * 2, area.Height / dpi - 16);
         var width = Math.Min(panel.Width + Gutter * 2, area.Width / dpi);
-        scroll.MaxHeight = Math.Max(1, height - Gutter * 2);
+        panelHost.MaxHeight = Math.Max(1, height - Gutter * 2);
         var rectangle = WindowPreviewLayout.Position(area, dockBounds, dpi, source.X + source.Z / 2, source.Y - 6,
             width, Math.Max(1, height));
         if (WindowPreviewLayout.NeedsNativeMove(positioned, rectangle))

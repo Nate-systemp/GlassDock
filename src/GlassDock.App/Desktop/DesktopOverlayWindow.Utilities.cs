@@ -183,7 +183,13 @@ public sealed partial class DesktopOverlayWindow
         window.DetailsVisibilityChanged += (_, _) => _ = button.SetDetailsOpenAsync(
             window.IsDetailsOpen || ReferenceEquals(wifiSettingsOnly, button));
         window.ApplyAppearance(settingsSession.Current.DockAppearanceMode, liquidGlass.BackdropMaterial, liquidGlass.Material, (float)DockScale, settingsSession.Current.ClearCircularHighlightsEnabled);
-        window.GlassChanged += (_, _) => { UpdateUtilitySurfaces(); UpdateLiquidGlass(); };
+        var targetsRevision = -1;
+        window.GlassChanged += (_, _) =>
+        {
+            if (targetsRevision != window.GlassTargetsRevision)
+            { targetsRevision = window.GlassTargetsRevision; UpdateUtilitySurfaces(); }
+            UpdateLiquidGlass();
+        };
         window.Hidden += (_, _) =>
         {
             if (ReferenceEquals(wifiWindow, window)) wifiWindow = null;

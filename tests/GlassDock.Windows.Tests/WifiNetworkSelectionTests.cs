@@ -10,13 +10,15 @@ public sealed class WifiNetworkSelectionTests
         { Authentication = 7, Cipher = 4 };
 
     [Fact]
-    public void List_is_deduplicated_connected_first_and_limited_to_three_real_ssids()
+    public void Discovery_retains_all_real_ssids_for_scroll_and_orders_connected_first()
     {
         var state = new WifiNetworkSelection();
         state.Update(new[] { Network(1, 10, true), Network(2, 70), Network(2, 80), Network(3, 90), Network(4, 60),
             Network(5, 100) with { Ssid = [] } });
-        Assert.Equal(new[] { "Network 1", "Network 3", "Network 2" }, state.Networks.Select(n => n.Name));
+        Assert.Equal(new[] { "Network 1", "Network 3", "Network 2", "Network 4" }, state.Networks.Select(n => n.Name));
         Assert.Equal(80u, state.Networks[2].Signal);
+        state.Select(state.Networks[3].Key);
+        Assert.Equal("Network 4", state.Selected!.Name);
     }
 
     [Fact]
@@ -30,5 +32,23 @@ public sealed class WifiNetworkSelectionTests
         Assert.True(state.Selected!.Connected);
         Assert.True(state.Update(new[] { first })); Assert.Null(state.Selected);
         state.Select(first.Key); state.Clear(); Assert.Null(state.Selected); Assert.Empty(state.Networks);
+    }
+
+    [Fact]
+    public void Connection_form_retains_original_networks_until_back_or_actual_disappearance()
+    {
+        var state = new WifiNetworkSelection();
+        var original = new[] { Network(1, 90), Network(2, 80), Network(3, 70) };
+        state.Update(original); state.Select(original[2].Key);
+        var refreshed = new[] { Network(4, 100), original[2] with { Signal = 20, Connected = true }, original[1], original[0] };
+        Assert.False(state.Update(refreshed));
+        Assert.Equal(original.Select(n => n.Key), state.Networks.Take(3).Select(n => n.Key));
+        Assert.Equal(4, state.Networks.Count);
+        Assert.True(state.Selected!.Connected);
+        state.Select(null); state.Update(refreshed);
+        Assert.Equal(new[] { "Network 3", "Network 4", "Network 1", "Network 2" }, state.Networks.Select(n => n.Name));
+        state.Select(original[2].Key);
+        Assert.True(state.Update(new[] { original[0], original[1] }));
+        Assert.Null(state.Selected);
     }
 }
