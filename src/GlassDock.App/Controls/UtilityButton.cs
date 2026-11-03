@@ -1,4 +1,5 @@
 using GlassDock.App.Rendering;
+using System.Numerics;
 using GlassDock.Core.Materials;
 using GlassDock.Core.Desktop;
 using GlassDock.Core.Settings;
@@ -13,18 +14,30 @@ namespace GlassDock.App.Controls;
 
 internal sealed class UtilityButton : Button, IDisposable
 {
-    public UtilityGlassSurface Glass { get; } = new();
+    public UtilityGlassSurface Glass { get; }
     private readonly Border tint = new() { IsHitTestVisible = false };
     private readonly UtilityIcon icon = new();
     private readonly UtilityIcon settingsIcon = new() { Opacity = 0 };
     private readonly Grid symbols = new();
+    private readonly Grid iconSlot = new() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScaleTransform scale = new();
     private readonly ScaleTransform morphScale = new();
     private readonly Grid face = new();
+    private readonly Grid captionArea = new() { IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center };
+    private readonly Grid captionHost = new();
+    private readonly StackPanel caption = new();
+    private readonly TextBlock captionTitle = new() { Text = "Wi-Fi", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly TextBlock captionNetwork = new() { Opacity = .65, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly WifiNetworkContentEffect captionEffect;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer hold;
     private readonly bool animations = new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
     private Storyboard? motion;
     private Storyboard? morph;
+    private Storyboard? expansion;
+    private double diameter, maximumWidth, captionWidth, expansionTarget;
+    public bool IsExpanded { get; private set; }
     private int morphRevision;
     private bool detailsOpen, disposed;
     private string message = "";
@@ -37,28 +50,48 @@ internal sealed class UtilityButton : Button, IDisposable
     public event EventHandler? DetailsRequested;
     public event EventHandler? PrimaryRequested;
     public event Action<UtilityButton, double>? Dragged;
+    public event EventHandler? ExpansionChanged;
+    public event EventHandler? GeometryChanged;
+    public Vector4 CircleBounds => new(Glass.Bounds.X, Glass.Bounds.Y, (float)diameter, (float)diameter);
     public UtilityDefinition Definition { get; }
     private bool active, available = true, hover, pressed;
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
     {
         Definition = definition;
+        Glass = new() { Circular = definition.Kind != UtilityKind.Wifi };
+        caption.Children.Add(captionTitle); caption.Children.Add(captionNetwork); captionHost.Children.Add(caption);
+        captionEffect = new(captionHost, caption, Vector2.Zero, 0);
+        captionArea.Children.Add(captionHost); captionArea.Children.Add(captionEffect.Element);
         symbols.Children.Add(icon);
         if (definition.Kind == UtilityKind.Wifi) symbols.Children.Add(settingsIcon);
-        face.Children.Add(Glass.Element); face.Children.Add(tint); face.Children.Add(symbols);
+        face.Children.Add(Glass.Element); face.Children.Add(tint);
+        if (definition.Kind == UtilityKind.Wifi)
+        {
+            iconSlot.Children.Add(symbols); face.Children.Add(iconSlot); face.Children.Add(captionArea);
+        }
+        else face.Children.Add(symbols);
         Content = face; Padding = new(0); MinWidth = MinHeight = 0; BorderThickness = new(0);
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         symbols.RenderTransform = scale; symbols.RenderTransformOrigin = new(.5, .5);
         symbols.HorizontalAlignment = HorizontalAlignment.Center; symbols.VerticalAlignment = VerticalAlignment.Center;
         face.RenderTransform = morphScale; face.RenderTransformOrigin = new(.5, .5);
         icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
         UseLayoutRounding = true;
+        SizeChanged += (_, _) => { UpdateExpansionContent(); GeometryChanged?.Invoke(this, EventArgs.Empty); };
+        captionArea.LayoutUpdated += (_, _) => { if (!disposed) UpdateCaptionEffect(); };
         IsHoldingEnabled = false; // The bounded hold timer owns touch and mouse holds alike.
         hold = DispatcherQueue.CreateTimer(); hold.Interval = TimeSpan.FromMilliseconds(550); hold.IsRepeating = false;
         hold.Tick += (_, _) =>
         {
             if (!gesture.Hold()) return;
-            pressed = false; Render(); DetailsRequested?.Invoke(this, EventArgs.Empty);
+            pressed = false; Render();
+            if (Definition.Kind == UtilityKind.Wifi)
+            {
+                IsExpanded = !IsExpanded; UpdateExpansionTarget(); ExpansionChanged?.Invoke(this, EventArgs.Empty);
+            }
+            else DetailsRequested?.Invoke(this, EventArgs.Empty);
         };
         HorizontalAlignment = HorizontalAlignment.Left; VerticalAlignment = VerticalAlignment.Top;
         foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed" })
@@ -83,7 +116,13 @@ internal sealed class UtilityButton : Button, IDisposable
             if (!IsDragging && Math.Abs(point.Y - pointerStart.Y) > 5 && Math.Abs(point.X - pointerStart.X) <= 5)
             { hold.Stop(); gesture.Cancel(); return; }
             if (!IsDragging && Math.Abs(point.X - pointerStart.X) > 5)
-            { gesture.BeginDrag(); hold.Stop(); CapturePointer(e.Pointer); }
+            {
+                if (Definition.Kind == UtilityKind.Wifi)
+                {
+                    hold.Stop(); gesture.Cancel(); pressed = false; Render(); e.Handled = true; return;
+                }
+                gesture.BeginDrag(); hold.Stop(); CapturePointer(e.Pointer);
+            }
             if (IsDragging) { Dragged?.Invoke(this, point.X - pointerLast.X); e.Handled = true; }
             pointerLast = point;
         }), true);
@@ -120,15 +159,84 @@ internal sealed class UtilityButton : Button, IDisposable
         AutomationProperties.SetName(this, definition.Name);
     }
 
-    public void Configure(double diameter, double iconSize, UtilityTheme theme, DockAppearanceMode dockMode)
+    public void Configure(double diameter, double iconSize, UtilityTheme theme, DockAppearanceMode dockMode, double availableWidth)
     {
-        if (Width == diameter && icon.Width == iconSize && this.theme == theme && this.dockMode == dockMode) return;
+        var changed = this.diameter != diameter || icon.Width != iconSize || this.theme != theme || this.dockMode != dockMode;
+        var nextMaximum = Math.Max(diameter, availableWidth);
+        var limitChanged = maximumWidth != nextMaximum;
+        if (!changed && !limitChanged) return;
+        this.diameter = diameter; maximumWidth = nextMaximum;
         this.dockMode = dockMode;
-        this.theme = theme; Width = Height = face.Width = face.Height = diameter;
+        this.theme = theme; Height = face.Height = diameter;
+        if (!double.IsFinite(Width)) Width = diameter;
+        face.Width = double.NaN;
         CornerRadius = tint.CornerRadius = new(diameter / 2);
+        Glass.CornerRadius = (float)(diameter / 2);
         symbols.Width = symbols.Height = icon.Width = icon.Height = settingsIcon.Width = settingsIcon.Height = iconSize;
+        if (Definition.Kind == UtilityKind.Wifi)
+        {
+            iconSlot.Width = iconSlot.Height = diameter;
+            captionTitle.FontSize = diameter * .22; captionNetwork.FontSize = diameter * .17;
+            captionTitle.MaxWidth = captionNetwork.MaxWidth = diameter * 2;
+            caption.Spacing = diameter * .025;
+            MeasureCaption();
+        }
+        else Width = diameter;
         RequestedTheme = theme == UtilityTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
         Render();
+        UpdateExpansionTarget(changed: changed);
+    }
+
+    public void SetConnectionText(string text)
+    {
+        if (captionNetwork.Text == text) return;
+        captionNetwork.Text = text; MeasureCaption(); UpdateExpansionTarget();
+    }
+
+    private void MeasureCaption()
+    {
+        captionTitle.Measure(new(diameter * 2, diameter)); captionNetwork.Measure(new(diameter * 2, diameter));
+        captionWidth = Math.Max(captionTitle.DesiredSize.Width, captionNetwork.DesiredSize.Width);
+    }
+
+    private void UpdateExpansionTarget(bool changed = false)
+    {
+        if (Definition.Kind != UtilityKind.Wifi || diameter <= 0) return;
+        var target = IsExpanded ? Math.Min(maximumWidth, diameter + diameter * .3 + captionWidth) : diameter;
+        if (!changed && Math.Abs(target - expansionTarget) < .01) return;
+        expansionTarget = target;
+        var from = Math.Clamp(Width, diameter, maximumWidth); expansion?.Stop(); Width = target;
+        if (animations && !changed && Math.Abs(from - target) > .01)
+        {
+            var story = new Storyboard(); expansion = story;
+            var animation = new DoubleAnimation { From = from, To = target, Duration = new(TimeSpan.FromMilliseconds(220)),
+                EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
+            Storyboard.SetTarget(animation, this); Storyboard.SetTargetProperty(animation, "Width"); story.Children.Add(animation);
+            story.Completed += (_, _) => { if (ReferenceEquals(expansion, story)) { story.Stop(); Width = target; UpdateExpansionContent(); } };
+            story.Begin();
+        }
+        UpdateExpansionContent();
+    }
+
+    private void UpdateExpansionContent()
+    {
+        if (disposed || Definition.Kind != UtilityKind.Wifi || diameter <= 0) return;
+        captionArea.Margin = new(diameter * 0.28, 0, diameter * .42, 0);
+        captionArea.Width = Math.Max(0, Width - diameter * 1.3);
+        face.RenderTransformOrigin = new(diameter / (2 * Math.Max(diameter, Width)), .5);
+        UpdateCaptionEffect();
+    }
+
+    private void UpdateCaptionEffect()
+    {
+        if (diameter <= 0) return;
+        var wanted = Math.Min(captionWidth, Math.Max(0, maximumWidth - diameter * 1.3));
+        var room = Math.Max(0, Width - diameter * 1.3);
+        var readable = captionTitle.DesiredSize.Width;
+        var progress = readable <= 0 || wanted + .01 < readable ? 0 : Math.Clamp((room / readable - .65) / .35, 0, 1);
+        if (progress > .9999) progress = 1;
+        captionArea.Visibility = progress > 0 ? Visibility.Visible : Visibility.Collapsed;
+        captionEffect.Update(progress, captionArea.ActualWidth, captionArea.ActualHeight);
     }
 
     public void SetState(bool on, bool available, string message)
@@ -176,18 +284,17 @@ internal sealed class UtilityButton : Button, IDisposable
         morph.Begin();
     }
 
-    private uint IconColor()
-    {
-        var iconTheme = dockMode.GlassStyle() is null
-            ? dockMode == DockAppearanceMode.Light ? UtilityTheme.Light : UtilityTheme.Dark : theme;
-        return UtilityColors.Icon(iconTheme, active, !available);
-    }
+    private UtilityTheme IconTheme => dockMode.GlassStyle() is null
+        ? dockMode == DockAppearanceMode.Light ? UtilityTheme.Light : UtilityTheme.Dark : theme;
+    private uint IconColor() => UtilityColors.Icon(IconTheme, active, !available);
 
     private void Render()
     {
         AutomationProperties.SetName(this, detailsOpen ? "Wi-Fi Settings" : Definition.Name);
         AutomationProperties.SetHelpText(this, detailsOpen ? "Open Windows Wi-Fi Settings. Right-click shows networks."
             : message + ". Left-click toggles Wi-Fi; right-click shows networks.");
+        if (Definition.Kind == UtilityKind.Wifi)
+            AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to expand or collapse.");
         ToolTipService.SetToolTip(this, detailsOpen ? "Wi-Fi Settings" : message);
         var color = active ? Definition.Accent : UtilityColors.Surface(theme);
         var surfaceColor = global::Windows.UI.Color.FromArgb(
@@ -203,7 +310,7 @@ internal sealed class UtilityButton : Button, IDisposable
                 (byte)(basis.B + (surfaceColor.B - basis.B) * blend));
         }
         tint.Background = new SolidColorBrush(surfaceColor);
-        var targetScale = pressed ? .96 : hover ? 1.03 : 1;
+        var targetScale = Definition.Kind == UtilityKind.Wifi ? 1 : pressed ? .96 : hover ? 1.03 : 1;
         if (scaleTarget != targetScale)
         {
             scaleTarget = targetScale;
@@ -223,9 +330,12 @@ internal sealed class UtilityButton : Button, IDisposable
             }
         }
         _ = icon.SetAsync(Definition.Icon, active, IconColor());
+        var textColor = UtilityColors.Icon(IconTheme, false, !available);
+        captionTitle.Foreground = captionNetwork.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
+            (byte)(textColor >> 16), (byte)(textColor >> 8), (byte)textColor));
         if (Definition.Kind == UtilityKind.Wifi) _ = settingsIcon.SetAsync("gear-six", active, IconColor());
     }
-    public void Dispose() { disposed = true; IsMorphing = false; morphRevision++; hold.Stop(); motion?.Stop(); morph?.Stop(); Glass.Dispose(); }
+    public void Dispose() { disposed = true; IsMorphing = false; morphRevision++; hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop(); captionEffect.Dispose(); Glass.Dispose(); }
 
     protected override void OnKeyDown(KeyRoutedEventArgs e)
     {

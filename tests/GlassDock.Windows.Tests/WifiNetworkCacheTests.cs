@@ -30,9 +30,11 @@ public sealed class WifiNetworkCacheTests
     {
         var completion = new TaskCompletionSource<IReadOnlyList<WifiNetwork>>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var wifi = new WifiUtilityService((_, _) => completion.Task);
+        var notifications = 0; wifi.NetworksChanged += (_, _) => notifications++;
         var scan = wifi.ReadNetworksAsync(true); wifi.InvalidateNetworks(); completion.SetResult(snapshot);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scan);
         Assert.Empty(wifi.CachedNetworks); Assert.False(wifi.HasNetworkSnapshot);
+        Assert.Equal(0, notifications);
     }
 
     [Fact]
@@ -45,5 +47,21 @@ public sealed class WifiNetworkCacheTests
         await Assert.ThrowsAsync<IOException>(() => wifi.ReadNetworksAsync(true));
         Assert.Same(snapshot, wifi.CachedNetworks);
         Assert.Same(snapshot, await wifi.ReadNetworksAsync(true)); Assert.Equal(2, scans);
+    }
+
+    [Fact]
+    public async Task Publishing_network_snapshot_notifies_caption_observers_after_cache_is_updated()
+    {
+        using var wifi = new WifiUtilityService((_, _) => Task.FromResult(snapshot));
+        var networksChanged = 0; var radioChanged = 0;
+        wifi.Changed += (_, _) => radioChanged++;
+        wifi.NetworksChanged += (_, _) =>
+        {
+            networksChanged++;
+            Assert.Same(snapshot, wifi.CachedNetworks);
+            Assert.True(wifi.HasNetworkSnapshot);
+        };
+        await wifi.ReadNetworksAsync(false);
+        Assert.Equal(1, networksChanged); Assert.Equal(0, radioChanged);
     }
 }

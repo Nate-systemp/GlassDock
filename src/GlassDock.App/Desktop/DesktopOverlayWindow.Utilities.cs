@@ -1,4 +1,5 @@
 using GlassDock.App.Controls;
+using GlassDock.App.Rendering;
 using GlassDock.Core.Desktop;
 using GlassDock.Core.Materials;
 using GlassDock.Core.Settings;
@@ -26,6 +27,7 @@ public sealed partial class DesktopOverlayWindow
     {
         ownsWifi = shared is null; utilityWifi = shared ?? new();
         utilityWifi.Changed += WifiStateChanged;
+        utilityWifi.NetworksChanged += WifiStateChanged;
         root.Children.Add(utilityArea); Canvas.SetZIndex(utilityArea, 20);
         Activated += (_, e) =>
         {
@@ -76,6 +78,8 @@ public sealed partial class DesktopOverlayWindow
                     else if (!button.IsMorphing && !utilityWifi.State.Busy) await utilityWifi.ToggleAsync();
                 };
                 button.DetailsRequested += (_, _) => ShowWifiNetworks(button);
+                button.GeometryChanged += (_, _) => { if (!closing) UpdateBackdropBounds(); };
+                button.ExpansionChanged += async (_, _) => { if (button.IsExpanded) await RefreshUtilityConnectionAsync(); };
                 button.Dragged += (item, delta) =>
                 {
                     utilityOffsets[item.Definition.Kind] = utilityOffsets.GetValueOrDefault(item.Definition.Kind) + delta;
@@ -118,21 +122,23 @@ public sealed partial class DesktopOverlayWindow
         var buttons = utilityButtons.Values.ToArray();
         foreach (var button in utilityButtons.Values)
         {
+            if (button.Definition.Kind == UtilityKind.Wifi) utilityOffsets.Remove(UtilityKind.Wifi);
             var slot = UtilityPlacement.Beside(dock, gap, index);
             var maximumRight = index + 1 < buttons.Length
                 ? UtilityPlacement.Beside(dock, gap, index + 1).X + utilityOffsets.GetValueOrDefault(buttons[index + 1].Definition.Kind) - gap
                 : root.ActualWidth - 16;
             var rect = UtilityPlacement.WithinRow(slot, slot.X + utilityOffsets.GetValueOrDefault(button.Definition.Kind), minimumLeft, maximumRight);
             utilityOffsets[button.Definition.Kind] = rect.X - slot.X;
-            minimumLeft = rect.X + rect.Width + gap; index++;
+            index++;
             if (button.Definition.Kind == UtilityKind.Wifi)
             {
                 var diameter = rect.Height * .96;
                 rect = new(rect.X + (rect.Width - diameter) / 2, rect.Y + (rect.Height - diameter) / 2, diameter, diameter);
             }
-            button.Configure(rect.Height, Appearance.IconSize, settingsSession.Current.UtilityTheme, mode);
+            button.Configure(rect.Height, Appearance.IconSize, settingsSession.Current.UtilityTheme, mode, maximumRight - rect.X);
             Canvas.SetLeft(button, rect.X); Canvas.SetTop(button, rect.Y);
-            button.Glass.Bounds = new((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
+            button.Glass.Bounds = new((float)rect.X, (float)rect.Y, (float)button.Width, (float)rect.Height);
+            minimumLeft = rect.X + button.Width + gap;
             button.Glass.Configure(mode, liquidGlass.BackdropMaterial, liquidGlass.Material, mode == DockAppearanceMode.Clear
                 ? settingsSession.Current.ClearCircularHighlightsEnabled : settingsSession.Current.CircularHighlightsEnabled, (float)DockScale);
             button.Glass.Active = visible && mode.GlassStyle() is not null && surface.Opacity > .01 && (Application.Current as App)?.BasicRendering != true;
@@ -142,7 +148,7 @@ public sealed partial class DesktopOverlayWindow
         {
             window.ApplyAppearance(mode, liquidGlass.BackdropMaterial, liquidGlass.Material, (float)DockScale, settingsSession.Current.ClearCircularHighlightsEnabled);
             if (!visible) window.Hide(immediate: true);
-            else if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) window.Reposition(source.Glass.Bounds);
+            else if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) window.Reposition(source.CircleBounds);
         }
     }
 
@@ -152,9 +158,29 @@ public sealed partial class DesktopOverlayWindow
         if (!utilityWifi.State.On && wifiWindow is { IsDetailsOpen: true } &&
             utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) ShowWifiSettingsOnly(source);
         else if (utilityWifi.State.On) DismissWifiSettingsOnly();
+        var connection = utilityWifi.State.On
+            ? utilityWifi.CachedNetworks.FirstOrDefault(n => n.Connected)?.Name ?? (utilityWifi.HasNetworkSnapshot ? "Not Connected" : "")
+            : utilityWifi.State.Available ? "Wi-Fi Off" : "";
         foreach (var button in utilityButtons.Values)
+        {
             button.SetState(utilityWifi.State.On, utilityWifi.State.Available, utilityWifi.State.Message);
+            if (button.Definition.Kind == UtilityKind.Wifi) button.SetConnectionText(connection);
+        }
     });
+
+    private async Task RefreshUtilityConnectionAsync()
+    {
+        var wifi = utilityWifi;
+        if (closing || wifi is null) return;
+        try
+        {
+            await wifi.RefreshAsync();
+            if (!closing && wifi.State.On) await wifi.ReadNetworksAsync(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { StartupDiagnostics.Write("Wi-Fi capsule state refresh failed", error); }
+    }
 
     private void UpdateUtilitySurfaces()
     {
@@ -174,7 +200,7 @@ public sealed partial class DesktopOverlayWindow
             return;
         }
         DismissWifiSettingsOnly();
-        if (wifiWindow is { IsOpen: true } existing) { existing.Show(button.Glass.Bounds); return; }
+        if (wifiWindow is { IsOpen: true } existing) { existing.Show(button.CircleBounds); return; }
         var window = new WifiUtilityWindow(WinRT.Interop.WindowNative.GetWindowHandle(this), utilityWifi, settingsSession.Current.UtilityTheme)
         {
             ScreenshotRequested = () => ScreenshotRequested?.Invoke()
@@ -197,7 +223,7 @@ public sealed partial class DesktopOverlayWindow
         };
         // Hold the dock before showing/activating the popup, including its first layout pass.
         previews.BeginContextMenu(window);
-        try { window.Show(button.Glass.Bounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }
+        try { window.Show(button.CircleBounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }
         catch { window.Hide(immediate: true); previews.EndContextMenu(window); throw; }
     }
 
@@ -224,7 +250,11 @@ public sealed partial class DesktopOverlayWindow
     {
         DismissWifiSettingsOnly();
         wifiWindow?.Hide(immediate: true);
-        if (utilityWifi is not null) { utilityWifi.Changed -= WifiStateChanged; if (ownsWifi) utilityWifi.Dispose(); }
+        if (utilityWifi is not null)
+        {
+            utilityWifi.Changed -= WifiStateChanged; utilityWifi.NetworksChanged -= WifiStateChanged;
+            if (ownsWifi) utilityWifi.Dispose();
+        }
         liquidGlass.SetUtilities(Array.Empty<Rendering.UtilityGlassSurface>());
         foreach (var button in utilityButtons.Values) button.Dispose();
         utilityButtons.Clear();

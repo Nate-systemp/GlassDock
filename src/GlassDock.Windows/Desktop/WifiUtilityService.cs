@@ -19,6 +19,7 @@ public sealed class WifiUtilityService : IDisposable
     private bool disposed;
     public WifiRadioState State { get; private set; } = new(false, false, false, "Checking Wi-Fi…");
     public event EventHandler? Changed;
+    public event EventHandler? NetworksChanged;
     public WifiUtilityService() : this(WifiNetworkControl.ReadAsync) { }
     internal WifiUtilityService(Func<bool, CancellationToken, Task<IReadOnlyList<WifiNetwork>>> readNetworks) => this.readNetworks = readNetworks;
 
@@ -42,6 +43,7 @@ public sealed class WifiUtilityService : IDisposable
             if (disposed || epoch != networkEpoch) throw new OperationCanceledException("Wi-Fi state changed.", lifetime.Token);
             cachedNetworks = available; HasNetworkSnapshot = true;
         }
+        if (!disposed) NetworksChanged?.Invoke(this, EventArgs.Empty);
         return available;
     }
     internal void InvalidateNetworks()

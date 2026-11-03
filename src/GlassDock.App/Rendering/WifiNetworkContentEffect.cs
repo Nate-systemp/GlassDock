@@ -9,7 +9,8 @@ using Microsoft.UI.Xaml.Media;
 namespace GlassDock.App.Rendering;
 
 /// <summary>Redirects only the network header; glass and its highlights remain outside this effect.</summary>
-internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement content) : IDisposable
+internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement content,
+    Vector2? contentOffset = null, float cornerRadius = 18) : IDisposable
 {
     public Canvas Element { get; } = new() { IsHitTestVisible = false };
     private readonly RectangleGeometry hidden = new() { Rect = new(0, 0, 0, 0) };
@@ -42,7 +43,8 @@ internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement
                 Source = new CompositionEffectSourceParameter("Content")
             }, new[] { "Blur.BlurAmount" });
             brush = factory.CreateBrush(); brush.SetSourceParameter("Content", source);
-            image = compositor.CreateSpriteVisual(); image.Brush = brush; image.Offset = new(10, 5, 0);
+            image = compositor.CreateSpriteVisual(); image.Brush = brush;
+            image.Offset = new(contentOffset ?? new Vector2(10, 5), 0);
             shape = compositor.CreateRoundedRectangleGeometry();
             clip = compositor.CreateGeometricClip(shape);
             output = compositor.CreateContainerVisual(); output.Clip = clip; output.Children.InsertAtTop(image);
@@ -51,7 +53,7 @@ internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement
         surface.SourceSize = new((float)content.ActualWidth, (float)content.ActualHeight);
         image!.Size = surface.SourceSize;
         output!.Size = shape!.Size = new((float)width, (float)height);
-        shape.CornerRadius = new((float)Math.Min(18, height / 2));
+        shape.CornerRadius = new((float)Math.Min(cornerRadius, height / 2));
         brush!.Properties.InsertScalar("Blur.BlurAmount", (float)((1 - progress) * 4));
         output.Opacity = (float)(progress * progress); output.IsVisible = true;
         // Hide through an ancestor clip: the visual surface still captures the live header subtree.
