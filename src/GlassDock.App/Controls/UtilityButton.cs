@@ -221,8 +221,8 @@ internal sealed class UtilityButton : Button, IDisposable
     private void UpdateExpansionContent()
     {
         if (disposed || Definition.Kind != UtilityKind.Wifi || diameter <= 0) return;
-        captionArea.Margin = new(diameter * 0.28, 0, diameter * .42, 0);
-        captionArea.Width = Math.Max(0, Width - diameter * 1.3);
+        captionArea.Margin = new(diameter * 1.00, 0, diameter * .30, 0);
+        captionArea.Width = Math.Max(0, Width - diameter * 1.30);
         face.RenderTransformOrigin = new(diameter / (2 * Math.Max(diameter, Width)), .5);
         UpdateCaptionEffect();
     }
