@@ -5,6 +5,16 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class WifiNetworkSelectionTests
 {
+    [Fact]
+    public void Saved_network_does_not_require_password_entry()
+    {
+        var network = Network(1, 80);
+        Assert.True(network.RequiresPassword);
+        Assert.False((network with { Profile = "Windows-saved-profile" }).RequiresPassword);
+        Assert.False((network with { Connected = true }).RequiresPassword);
+        Assert.False((network with { Secured = false }).RequiresPassword);
+    }
+
     private static WifiNetwork Network(byte id, uint signal, bool connected = false) =>
         new(Guid.Empty, "Network " + id, "", new[] { id }, 1, signal, connected, true, true)
         { Authentication = 7, Cipher = 4 };

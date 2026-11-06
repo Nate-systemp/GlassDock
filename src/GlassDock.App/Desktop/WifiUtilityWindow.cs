@@ -109,7 +109,7 @@ internal sealed class WifiUtilityWindow : Window
     public void Show(Vector4 source)
     {
         if (disposed) return;
-        if (IsOpen && !closing) { Activate(); host.ActivateForUserInput(); _ = panel.RefreshAsync(); return; }
+        if (IsOpen && !closing) { Reposition(source); Activate(); host.ActivateForUserInput(); _ = panel.RefreshAsync(); return; }
         IsOpen = true; closing = false; root.IsHitTestVisible = true;
         Reposition(source); Activate(); host.ActivateForUserInput();
         DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);

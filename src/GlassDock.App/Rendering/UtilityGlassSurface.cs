@@ -34,9 +34,14 @@ internal sealed class UtilityGlassSurface : IDisposable
     public FrameworkElement Element => target.Element;
     public Vector4 Bounds { get; set; }
     public bool Active { get; set; }
+    public bool UseDockMaterial { get; set; }
     public UtilityGlassSurface() => drawRim = (drawing, shape) =>
+    {
+        // Frosted/Acrylic dock material already owns its texture; omit the utility's extra Clear-style sheen.
+        if (UseDockMaterial && mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) return;
         rim.Draw(drawing, shape, new(0, 0, diameter / dpi, height / dpi), dpi,
             highlights ? material : material with { SpecularIntensity = 0 }, dockSurface: true, strokeScale: layoutScale);
+    };
 
     public void Configure(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, bool highlights, float layoutScale)
     {

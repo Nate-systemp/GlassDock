@@ -13,6 +13,16 @@ internal sealed class WifiNetworkListPanel : Panel
     private int visibleSlots = WifiScrollGeometry.VisibleSlots;
     private double viewportHeight = double.PositiveInfinity;
     private FrameworkElement? transitionRow;
+    private FrameworkElement? connectionRow;
+    internal const double ConnectionRowHeight = 64;
+    private double connectionRowHeight = ConnectionRowHeight;
+    public void SetConnectionRow(FrameworkElement? row, double height = ConnectionRowHeight)
+    {
+        if (connectionRow == row && connectionRowHeight == height) return;
+        connectionRow = row; connectionRowHeight = height;
+        LayoutRevision++;
+        InvalidateMeasure();
+    }
     private double transitionFromHeight, transitionToHeight;
     public int LayoutRevision { get; private set; }
 
@@ -57,7 +67,7 @@ internal sealed class WifiNetworkListPanel : Panel
         {
             if (child.Visibility == Visibility.Collapsed) continue;
             var progress = Progress(child, count, total);
-            var height = WifiScrollGeometry.Height * progress;
+            var height = (!scrolling && child == connectionRow ? connectionRowHeight : WifiScrollGeometry.Height) * progress;
             if (child.Height != height) { child.Height = height; LayoutRevision++; }
             child.Measure(new(availableSize.Width, height));
             total += height + WifiScrollGeometry.Gap * progress; count++;
@@ -75,7 +85,7 @@ internal sealed class WifiNetworkListPanel : Panel
         {
             if (child.Visibility == Visibility.Collapsed) { child.Arrange(new(0, 0, 0, 0)); continue; }
             var progress = Progress(child, count, y - (scrolling ? offset : 0));
-            var height = WifiScrollGeometry.Height * progress;
+            var height = (!scrolling && child == connectionRow ? connectionRowHeight : WifiScrollGeometry.Height) * progress;
             var width = double.IsNaN(child.Width) ? finalSize.Width : Math.Min(finalSize.Width, child.Width);
             child.Arrange(new((finalSize.Width - width) / 2, y, width, height));
             y += height + WifiScrollGeometry.Gap * progress; count++;

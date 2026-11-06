@@ -8,6 +8,18 @@ namespace GlassDock.Core.Tests;
 
 public sealed class UtilityTests
 {
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("Home", "Home")]
+    [InlineData("12345678901234", "12345678901234")]
+    [InlineData("123456789012345", "12345678901234...")]
+    [InlineData("1234567890123\U0001F600x", "1234567890123\U0001F600...")]
+    [InlineData("1234567890123e\u0301x", "1234567890123e\u0301...")]
+    public void Wifi_caption_limits_display_to_14_complete_characters(string ssid, string expected)
+    {
+        Assert.Equal(expected, WifiNetworkCaption.Truncate(ssid));
+    }
+
     [Fact]
     public void Utilities_are_opt_in_deduplicated_and_do_not_change_dock_material()
     {

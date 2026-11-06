@@ -14,6 +14,9 @@ namespace GlassDock.App.Controls;
 
 internal sealed class UtilityButton : Button, IDisposable
 {
+    private const double MinimumExpandedWidth = 130;
+    private const double MaximumExpandedWidth = 180;
+    private const double CaptionRightPadding = 16;
     public UtilityGlassSurface Glass { get; }
     private readonly Border tint = new() { IsHitTestVisible = false };
     private readonly UtilityIcon icon = new();
@@ -36,7 +39,8 @@ internal sealed class UtilityButton : Button, IDisposable
     private Storyboard? motion;
     private Storyboard? morph;
     private Storyboard? expansion;
-    private double diameter, maximumWidth, captionWidth, expansionTarget;
+    private double diameter, maximumWidth, expansionTarget;
+    private double captionTitleWidth, captionWidth;
     public bool IsExpanded { get; private set; }
     private int morphRevision;
     private bool detailsOpen, disposed;
@@ -52,7 +56,6 @@ internal sealed class UtilityButton : Button, IDisposable
     public event Action<UtilityButton, double>? Dragged;
     public event EventHandler? ExpansionChanged;
     public event EventHandler? GeometryChanged;
-    public Vector4 CircleBounds => new(Glass.Bounds.X, Glass.Bounds.Y, (float)diameter, (float)diameter);
     public UtilityDefinition Definition { get; }
     private bool active, available = true, hover, pressed;
     private UtilityTheme theme;
@@ -162,7 +165,8 @@ internal sealed class UtilityButton : Button, IDisposable
     public void Configure(double diameter, double iconSize, UtilityTheme theme, DockAppearanceMode dockMode, double availableWidth)
     {
         var changed = this.diameter != diameter || icon.Width != iconSize || this.theme != theme || this.dockMode != dockMode;
-        var nextMaximum = Math.Max(diameter, availableWidth);
+        var nextMaximum = Math.Max(diameter, Definition.Kind == UtilityKind.Wifi
+            ? Math.Min(MaximumExpandedWidth, availableWidth) : availableWidth);
         var limitChanged = maximumWidth != nextMaximum;
         if (!changed && !limitChanged) return;
         this.diameter = diameter; maximumWidth = nextMaximum;
@@ -177,7 +181,7 @@ internal sealed class UtilityButton : Button, IDisposable
         {
             iconSlot.Width = iconSlot.Height = diameter;
             captionTitle.FontSize = diameter * .22; captionNetwork.FontSize = diameter * .17;
-            captionTitle.MaxWidth = captionNetwork.MaxWidth = diameter * 2;
+            captionTitle.MaxWidth = captionNetwork.MaxWidth = Math.Max(0, MaximumExpandedWidth - diameter - CaptionRightPadding);
             caption.Spacing = diameter * .025;
             MeasureCaption();
         }
@@ -189,20 +193,29 @@ internal sealed class UtilityButton : Button, IDisposable
 
     public void SetConnectionText(string text)
     {
-        if (captionNetwork.Text == text) return;
-        captionNetwork.Text = text; MeasureCaption(); UpdateExpansionTarget();
+        var display = WifiNetworkCaption.Truncate(text);
+        AutomationProperties.SetName(captionNetwork, text);
+        if (captionNetwork.Text == display) return;
+        captionNetwork.Text = display;
+        MeasureCaption();
+        UpdateExpansionTarget();
     }
 
     private void MeasureCaption()
     {
-        captionTitle.Measure(new(diameter * 2, diameter)); captionNetwork.Measure(new(diameter * 2, diameter));
-        captionWidth = Math.Max(captionTitle.DesiredSize.Width, captionNetwork.DesiredSize.Width);
+        var available = new global::Windows.Foundation.Size(Math.Max(0, MaximumExpandedWidth - diameter - CaptionRightPadding), diameter);
+        captionTitle.Measure(available);
+        captionNetwork.Measure(available);
+        // Collapsed layout can zero DesiredSize, so retain the independently measured reveal threshold.
+        captionTitleWidth = captionTitle.DesiredSize.Width;
+        captionWidth = Math.Max(captionTitleWidth, captionNetwork.DesiredSize.Width);
     }
 
     private void UpdateExpansionTarget(bool changed = false)
     {
         if (Definition.Kind != UtilityKind.Wifi || diameter <= 0) return;
-        var target = IsExpanded ? Math.Min(maximumWidth, diameter + diameter * .3 + captionWidth) : diameter;
+        var preferred = Math.Clamp(diameter + captionWidth + CaptionRightPadding, MinimumExpandedWidth, MaximumExpandedWidth);
+        var target = IsExpanded ? Math.Min(maximumWidth, preferred) : diameter;
         if (!changed && Math.Abs(target - expansionTarget) < .01) return;
         expansionTarget = target;
         var from = Math.Clamp(Width, diameter, maximumWidth); expansion?.Stop(); Width = target;
@@ -221,8 +234,8 @@ internal sealed class UtilityButton : Button, IDisposable
     private void UpdateExpansionContent()
     {
         if (disposed || Definition.Kind != UtilityKind.Wifi || diameter <= 0) return;
-        captionArea.Margin = new(diameter * 1.00, 0, diameter * .30, 0);
-        captionArea.Width = Math.Max(0, Width - diameter * 1.30);
+        captionArea.Margin = new(diameter, 0, CaptionRightPadding, 0);
+        captionArea.Width = Math.Max(0, Width - diameter - CaptionRightPadding);
         face.RenderTransformOrigin = new(diameter / (2 * Math.Max(diameter, Width)), .5);
         UpdateCaptionEffect();
     }
@@ -230,9 +243,9 @@ internal sealed class UtilityButton : Button, IDisposable
     private void UpdateCaptionEffect()
     {
         if (diameter <= 0) return;
-        var wanted = Math.Min(captionWidth, Math.Max(0, maximumWidth - diameter * 1.3));
-        var room = Math.Max(0, Width - diameter * 1.3);
-        var readable = captionTitle.DesiredSize.Width;
+        var wanted = Math.Max(0, maximumWidth - diameter - CaptionRightPadding);
+        var room = Math.Max(0, Width - diameter - CaptionRightPadding);
+        var readable = captionTitleWidth;
         var progress = readable <= 0 || wanted + .01 < readable ? 0 : Math.Clamp((room / readable - .65) / .35, 0, 1);
         if (progress > .9999) progress = 1;
         captionArea.Visibility = progress > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -286,10 +299,15 @@ internal sealed class UtilityButton : Button, IDisposable
 
     private UtilityTheme IconTheme => dockMode.GlassStyle() is null
         ? dockMode == DockAppearanceMode.Light ? UtilityTheme.Light : UtilityTheme.Dark : theme;
-    private uint IconColor() => UtilityColors.Icon(IconTheme, active, !available);
+    private uint IconColor()
+    {
+        if (Definition.Kind == UtilityKind.Wifi) return active ? Definition.Accent : 0xFFFFFFFF;
+        return UtilityColors.Icon(IconTheme, active, !available);
+    }
 
     private void Render()
     {
+        Glass.UseDockMaterial = Definition.Kind == UtilityKind.Wifi && !active;
         AutomationProperties.SetName(this, detailsOpen ? "Wi-Fi Settings" : Definition.Name);
         AutomationProperties.SetHelpText(this, detailsOpen ? "Open Windows Wi-Fi Settings. Right-click shows networks."
             : message + ". Left-click toggles Wi-Fi; right-click shows networks.");
@@ -308,6 +326,15 @@ internal sealed class UtilityButton : Button, IDisposable
                 (byte)(basis.R + (surfaceColor.R - basis.R) * blend),
                 (byte)(basis.G + (surfaceColor.G - basis.G) * blend),
                 (byte)(basis.B + (surfaceColor.B - basis.B) * blend));
+        }
+        if (Definition.Kind == UtilityKind.Wifi)
+        {
+            if (active)
+                surfaceColor = global::Windows.UI.Color.FromArgb((byte)(pressed ? 220 : hover ? 245 : 235), 255, 255, 255);
+            else if (dockMode.GlassStyle() is null)
+                surfaceColor = Desktop.DockControlPalette.SolidSurface(dockMode);
+            else
+                surfaceColor = Desktop.DockControlPalette.Surface(dockMode, (byte)(pressed ? 30 : hover ? 20 : 0));
         }
         tint.Background = new SolidColorBrush(surfaceColor);
         var targetScale = Definition.Kind == UtilityKind.Wifi ? 1 : pressed ? .96 : hover ? 1.03 : 1;
@@ -330,7 +357,8 @@ internal sealed class UtilityButton : Button, IDisposable
             }
         }
         _ = icon.SetAsync(Definition.Icon, active, IconColor());
-        var textColor = UtilityColors.Icon(IconTheme, false, !available);
+        var captionTheme = Definition.Kind == UtilityKind.Wifi && active ? UtilityTheme.Light : IconTheme;
+        var textColor = UtilityColors.Icon(captionTheme, false, !available);
         captionTitle.Foreground = captionNetwork.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
             (byte)(textColor >> 16), (byte)(textColor >> 8), (byte)textColor));
         if (Definition.Kind == UtilityKind.Wifi) _ = settingsIcon.SetAsync("gear-six", active, IconColor());

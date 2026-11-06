@@ -16,7 +16,10 @@ namespace GlassDock.App.Controls;
 
 internal sealed class WifiNetworkPanel : StackPanel, IDisposable
 {
-    private const double SelectionHeight = 3 * WifiScrollGeometry.Height + 2 * WifiScrollGeometry.Gap;
+    private bool CompactConnectionInput => selection.Selected is { } network && !NeedsPassword(network) &&
+        (network.Connected || !string.IsNullOrEmpty(network.Profile));
+    private double ConnectionInputHeight => CompactConnectionInput ? WifiScrollGeometry.Height : WifiNetworkListPanel.ConnectionRowHeight;
+    private double SelectionHeight => 2 * WifiScrollGeometry.Height + ConnectionInputHeight + 2 * WifiScrollGeometry.Gap;
     private readonly WifiUtilityService wifi;
     private readonly UtilityTheme theme;
     private readonly WifiNetworkSelection selection = new();
@@ -30,10 +33,14 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
     private readonly Button refresh = new() { Content = new FontIcon { Glyph = "\uE72C", FontSize = 12 }, Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new(0), BorderThickness = new(0), CornerRadius = new(12) };
     private readonly PasswordBox password = new() { PlaceholderText = "Password", FontSize = PopupStyle.CompactFontSize,
         PasswordRevealMode = PasswordRevealMode.Hidden, MinWidth = 0, MinHeight = 0, Height = 24, Margin = new(2, 1, 4, 1),
-        Padding = new(8, 2, 8, 2), CornerRadius = new(12), BorderThickness = new(0),
+        Padding = new(7, 1, 7, 1), CornerRadius = new(12), BorderThickness = new(1),
         HorizontalContentAlignment = HorizontalAlignment.Left, VerticalContentAlignment = VerticalAlignment.Center };
     private readonly ToggleButton reveal = new() { MinWidth = 0, MinHeight = 0, Width = 24, Height = 24,
         Padding = new(3), CornerRadius = new(12), BorderThickness = new(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+    private readonly CheckBox autoConnect = new() { Content = "Auto-connect", IsChecked = true,
+        FontSize = PopupStyle.CompactFontSize, MinWidth = 0, MinHeight = 0, Height = 22, CornerRadius = new(8),
+        Padding = new(6, 0, 0, 0), Margin = new(4, 0, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
+    private string? passwordRetryKey;
     private readonly TextBlock credentialHint = new() { FontSize = PopupStyle.CompactFontSize, VerticalAlignment = VerticalAlignment.Center,
         HorizontalAlignment = HorizontalAlignment.Stretch, TextAlignment = TextAlignment.Left };
     private readonly List<NetworkRow> rows = [];
@@ -96,6 +103,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
         this.wifi = wifi; this.theme = theme; Width = PopupStyle.CompactMenuWidth + PopupStyle.Gutter * 2; Padding = new(0); Spacing = 6;
         radioOn = wifi.State.On;
         RequestedTheme = theme == UtilityTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
+        ConfigureAutoConnect();
         AutomationProperties.SetName(refresh, "Refresh available Wi-Fi networks");
         ToolTipService.SetToolTip(refresh, "Refresh networks");
         refresh.Click += async (_, _) => await RefreshAsync();
@@ -121,6 +129,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             password.Resources[key] = inputFill;
         password.Resources["TextControlThemeMinHeight"] = 0d;
         password.Resources["TextControlThemeMinWidth"] = 0d;
+        ConfigurePasswordFocus();
         password.Loaded += AlignPasswordContent;
         password.KeyDown += async (_, e) =>
         {
@@ -134,6 +143,63 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
         selection.Update(wifi.CachedNetworks); SynchronizeRows(); SetStatus(""); wifi.Changed += RadioChanged;
     }
 
+    private void ConfigurePasswordFocus()
+    {
+        var accent = UtilityDefinition.All.First(d => d.Kind == UtilityKind.Wifi).Accent;
+        var outline = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
+            (byte)(accent >> 16), (byte)(accent >> 8), (byte)accent)) { Opacity = 0 };
+        password.BorderBrush = outline;
+        foreach (var key in new[] { "TextControlBorderBrush", "TextControlBorderBrushPointerOver", "TextControlBorderBrushFocused" })
+            password.Resources[key] = outline;
+        password.Resources["TextControlBorderBrushDisabled"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        password.Resources["TextControlBorderThemeThickness"] = new Thickness(1);
+        password.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
+        Storyboard? focusTransition = null;
+        void UpdateOutline()
+        {
+            var from = outline.Opacity;
+            focusTransition?.Stop();
+            var animation = new DoubleAnimation { From = from, To = password.FocusState == FocusState.Unfocused ? 0 : .75,
+                Duration = new(TimeSpan.FromMilliseconds(animations ? 140 : 0)), EnableDependentAnimation = true };
+            Storyboard.SetTarget(animation, outline); Storyboard.SetTargetProperty(animation, "Opacity");
+            focusTransition = new(); focusTransition.Children.Add(animation); focusTransition.Begin();
+        }
+        password.GotFocus += (_, _) => UpdateOutline();
+        password.LostFocus += (_, _) => UpdateOutline();
+    }
+
+    private void ConfigureAutoConnect()
+    {
+        var accent = UtilityDefinition.All.First(d => d.Kind == UtilityKind.Wifi).Accent;
+        var transparent = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        autoConnect.Background = transparent;
+        autoConnect.Loaded += (_, _) =>
+        {
+            autoConnect.ApplyTemplate();
+            if (VisualTreeHelper.GetChildrenCount(autoConnect) == 0 ||
+                VisualTreeHelper.GetChild(autoConnect, 0) is not FrameworkElement root) return;
+            // CheckBoxSize is a static native-template resource; resize only its glyph slot.
+            if (root.FindName("NormalRectangle") is FrameworkElement circle && circle.Parent is FrameworkElement slot)
+                circle.Width = circle.Height = slot.Width = slot.Height = 16;
+            if (root.FindName("CheckGlyph") is FrameworkElement glyph)
+                glyph.Width = glyph.Height = 16;
+        };
+        // Keep the native animated checkmark, focus visuals, and CheckBox automation peer.
+        foreach (var (suffix, alpha) in new[] { ("", (byte)255), ("PointerOver", (byte)235), ("Pressed", (byte)210) })
+        {
+            var blue = new SolidColorBrush(global::Windows.UI.Color.FromArgb(alpha, (byte)(accent >> 16), (byte)(accent >> 8), (byte)accent));
+            autoConnect.Resources["CheckBoxCheckBackgroundFillChecked" + suffix] = blue;
+            autoConnect.Resources["CheckBoxCheckBackgroundStrokeChecked" + suffix] = blue;
+            autoConnect.Resources["CheckBoxCheckGlyphForegroundChecked" + suffix] = new SolidColorBrush(Microsoft.UI.Colors.White);
+            autoConnect.Resources["CheckBoxCheckBackgroundFillUnchecked" + suffix] = new SolidColorBrush(
+                global::Windows.UI.Color.FromArgb((byte)(suffix == "Pressed" ? 180 : suffix == "PointerOver" ? 240 : 220), 255, 255, 255));
+            autoConnect.Resources["CheckBoxCheckBackgroundStrokeUnchecked" + suffix] = new SolidColorBrush(
+                global::Windows.UI.Color.FromArgb(theme == UtilityTheme.Light ? (byte)80 : (byte)120, 120, 120, 128));
+            autoConnect.Resources["CheckBoxBackgroundUnchecked" + suffix] = transparent;
+            autoConnect.Resources["CheckBoxBackgroundChecked" + suffix] = transparent;
+        }
+    }
+
     private void RadioChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
     {
         if (disposed || wifi.State.Busy) return;
@@ -144,7 +210,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             return;
         }
         radioOn = false; revision++; operation.Cancel(); pendingNetworkKey = null; refreshing = false;
-        password.IsEnabled = reveal.IsEnabled = bodyHost.IsEnabled = refresh.IsEnabled = true;
+        password.IsEnabled = reveal.IsEnabled = autoConnect.IsEnabled = bodyHost.IsEnabled = refresh.IsEnabled = true;
         CancelTransition(); RestoreList(); selection.Clear(); ClearCredentials(); SynchronizeRows(); SetStatus(wifi.State.Message);
     });
 
@@ -399,6 +465,13 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             }
             foreach (var row in rows)
                 if (row.Network is { } old) row.Network = selection.Networks.FirstOrDefault(n => n.Key == old.Key);
+            if (selection.Selected is { Connected: false } connectionTarget)
+            {
+                var automatic = await WifiNetworkControl.ReadAutoConnectAsync(connectionTarget, operation.Token);
+                if (disposed || current != viewRevision) return;
+                autoConnect.IsChecked = automatic;
+            }
+            if (disposed || current != viewRevision) return;
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -423,6 +496,8 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             row.Part.Host.Visibility = row == selected || remaining.Contains(row) ? Visibility.Visible : Visibility.Collapsed;
         }
         body.Children.Remove(selected.Part.Host); body.Children.Insert(0, selected.Part.Host);
+        body.SetConnectionRow(selection.Selected is { } network && NeedsPassword(network)
+            ? selected.Part.Host : remaining[0].Part.Host, ConnectionInputHeight);
         UpdateListViewport(fromHeight); listScroll.ChangeView(null, 0, null, true);
         selected.Offset.Y = y;
         var tracks = remaining.Select(r => ((DependencyObject)r.Header, "Opacity", r.Header.Opacity, 0d)).ToList();
@@ -432,14 +507,18 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
         selected.Offset.Y = 0;
         passwordRow = remaining[0];
         foreach (var row in remaining) row.Part.Host.Visibility = Visibility.Visible;
-        var input = new Grid { ColumnSpacing = 4, Height = 26 };
+        var input = new Grid { ColumnSpacing = 4 };
+        input.RowDefinitions.Add(new() { Height = new(26) });
+        input.RowDefinitions.Add(new() { Height = GridLength.Auto });
         input.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         input.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         input.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         input.Children.Add(password); Grid.SetColumn(reveal, 1); input.Children.Add(reveal);
-        input.Children.Add(credentialHint); UpdateConnectionInput();
+        input.Children.Add(credentialHint);
+        Grid.SetRow(autoConnect, 1); Grid.SetColumnSpan(autoConnect, 3); input.Children.Add(autoConnect);
         passwordRow.Header.Children.Remove(passwordRow.Action); Grid.SetColumn(passwordRow.Action, 2); input.Children.Add(passwordRow.Action);
         passwordRow.Part.Fallback.Child = input;
+        UpdateConnectionInput();
         var backContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var arrow = new UtilityIcon { Width = 14, Height = 14 };
         _ = arrow.SetAsync("arrow-left", false, UtilityColors.Icon(theme, false));
@@ -451,14 +530,14 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             back.Resources[resourceKey] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         AutomationProperties.SetName(back, "Back to networks");
         back.Click += async (_, _) => await BackAsync(); remaining[1].Part.Fallback.Child = back;
-        input.Opacity = back.Opacity = 0;
+        var formControls = new FrameworkElement[] { password, reveal, passwordRow.Action, autoConnect, back };
+        foreach (var control in formControls) control.Opacity = 0;
         foreach (var row in rows) UpdateRow(row);
         body.UpdateLayout(); GlassChanged?.Invoke(this, EventArgs.Empty);
-        if (!await AnimateAsync(new[] { ((DependencyObject)input, "Opacity", 0d, 1d), ((DependencyObject)back, "Opacity", 0d, 1d) }, 120)
+        if (!await AnimateAsync(formControls.Select(control => ((DependencyObject)control, "Opacity", 0d, 1d)), 120)
             || disposed || current != viewRevision) return;
         transitioning = false; bodyHost.IsHitTestVisible = true; SynchronizeRows();
         if (selection.Selected is { } currentNetwork && NeedsPassword(currentNetwork)) password.Focus(FocusState.Programmatic);
-        else if (selection.Selected is { Connected: false, CanConnect: true }) await ExecuteNetworkActionAsync();
     }
 
     private async Task BackAsync()
@@ -498,9 +577,14 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
 
     private void RestoreList()
     {
+        body.SetConnectionRow(null);
         if (passwordRow is not null)
         {
-            if (passwordRow.Part.Fallback.Child is Grid input) input.Children.Clear();
+            if (passwordRow.Action.Parent is Grid actionHost) actionHost.Children.Remove(passwordRow.Action);
+            if (password.Parent is Grid input) input.Children.Clear();
+            if (passwordRow.Part.Fallback.Child == autoConnect) passwordRow.Part.Fallback.Child = null;
+            password.Opacity = reveal.Opacity = autoConnect.Opacity = passwordRow.Action.Opacity = 1;
+            Grid.SetRow(passwordRow.Action, 0);
             Grid.SetColumn(passwordRow.Action, 3); passwordRow.Header.Children.Add(passwordRow.Action); passwordRow = null;
         }
         foreach (var row in rows)
@@ -509,6 +593,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
             row.Part.Fallback.Child = row.SourceHost; row.SourceHost.Opacity = 1;
             row.Part.Fallback.Padding = new(10, 5, 10, 5);
             row.SourceHost.Margin = new(0); row.Part.Host.Width = double.NaN;
+            Grid.SetColumnSpan(row.SourceHost, 1);
             body.Children.Remove(row.Part.Host); body.Children.Add(row.Part.Host);
             row.Part.Host.Visibility = row.Network is null ? Visibility.Collapsed : Visibility.Visible;
             Canvas.SetZIndex(row.Part.Host, 0);
@@ -574,7 +659,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
     {
         pendingNetworkKey = value ? selection.SelectedKey : null;
         disconnecting = value && disconnect;
-        password.IsEnabled = reveal.IsEnabled = refresh.IsEnabled = !value;
+        password.IsEnabled = reveal.IsEnabled = autoConnect.IsEnabled = refresh.IsEnabled = !value;
         foreach (var row in rows)
         {
             UpdateRow(row);
@@ -591,10 +676,12 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
         try
         {
             var result = disconnect ? await WifiNetworkControl.DisconnectAsync(network, token)
-                : await WifiNetworkControl.ConnectAsync(network, password.Password, true, token);
+                : await WifiNetworkControl.ConnectAsync(network, password.Password, autoConnect.IsChecked == true, token);
             if (disposed || current != revision) return;
             if (disconnect && result != "Disconnected.") { SetStatus(result); return; }
-            ClearCredentials(); var available = await wifi.ReadNetworksAsync(false, token);
+            ClearCredentials();
+            if (!disconnect && result != "Connected." && network.Secured) passwordRetryKey = network.Key;
+            var available = await wifi.ReadNetworksAsync(false, token);
             if (disposed || current != revision) return;
             ApplyNetworks(available, completed: true);
             var connected = selection.Networks.Any(n => n.Key == network.Key && n.Connected);
@@ -615,21 +702,60 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
         }
     }
 
-    private void ClearCredentials() { password.Password = ""; reveal.IsChecked = false; }
+    private void ClearCredentials() { password.Password = ""; reveal.IsChecked = false; passwordRetryKey = null; }
     private void SetStatus(string text)
     {
         status.Text = text; status.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         recovery.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private static bool NeedsPassword(WifiNetwork network) => network.Secured && !network.Connected;
+    private bool NeedsPassword(WifiNetwork network) => !network.Connected &&
+        (network.RequiresPassword || network.Secured && passwordRetryKey == network.Key);
     private void UpdateConnectionInput()
     {
         if (passwordRow is null || selection.Selected is not { } network) return;
         var required = NeedsPassword(network);
+        var compact = CompactConnectionInput;
+        var selected = rows.First(r => r.Network?.Key == detailsKey);
+        var input = (Grid)password.Parent;
+        var actionHost = required ? input : selected.Header;
+        if (passwordRow.Action.Parent != actionHost)
+        {
+            if (passwordRow.Action.Parent is Grid previousHost) previousHost.Children.Remove(passwordRow.Action);
+            actionHost.Children.Add(passwordRow.Action);
+        }
+        Grid.SetColumn(passwordRow.Action, required ? 2 : 3);
+        Grid.SetRow(passwordRow.Action, required ? 1 : 0);
+        if (required && selected.Part.Fallback.Child != input)
+        {
+            input.Children.Remove(autoConnect);
+            selected.Part.Fallback.Child = null;
+            passwordRow.Part.Fallback.Child = null;
+            Grid.SetRow(selected.SourceHost, 0); Grid.SetColumnSpan(selected.SourceHost, 3);
+            input.Children.Add(selected.SourceHost);
+            selected.Part.Fallback.Child = input;
+            passwordRow.Part.Fallback.Child = autoConnect;
+        }
+        else if (!required && selected.Part.Fallback.Child == input)
+        {
+            input.Children.Remove(selected.SourceHost);
+            selected.Part.Fallback.Child = selected.SourceHost;
+            passwordRow.Part.Fallback.Child = null;
+            passwordRow.Part.Fallback.Child = input;
+            input.Children.Add(autoConnect);
+        }
+        input.RowSpacing = required ? 2 : 0;
+        Grid.SetRow(password, required ? 1 : 0);
+        Grid.SetRow(reveal, required ? 1 : 0);
         password.Visibility = reveal.Visibility = required ? Visibility.Visible : Visibility.Collapsed;
-        credentialHint.Visibility = required ? Visibility.Collapsed : Visibility.Visible;
-        credentialHint.Text = network.Connected ? "Connected" : "No password required";
+        autoConnect.Visibility = Visibility.Visible;
+        Grid.SetRow(autoConnect, required || compact ? 0 : 1);
+        Grid.SetColumnSpan(autoConnect, 3);
+        autoConnect.Margin = new(0);
+        credentialHint.Visibility = required || compact ? Visibility.Collapsed : Visibility.Visible;
+        credentialHint.Text = network.Connected ? "Connected" : string.IsNullOrEmpty(network.Profile) ? "No password required" : "Saved network";
+        body.SetConnectionRow(required ? selected.Part.Host : passwordRow.Part.Host, ConnectionInputHeight);
+        if (!transitioning) UpdateListViewport();
         if (!required) ClearCredentials();
     }
     private void UpdateRow(NetworkRow row)

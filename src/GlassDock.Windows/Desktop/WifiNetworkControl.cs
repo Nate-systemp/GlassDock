@@ -8,6 +8,7 @@ public sealed record WifiNetwork(Guid Adapter, string Name, string Profile, byte
     uint BssType, uint Signal, bool Connected, bool Secured, bool Connectable)
 {
     public bool CanConnect => Connectable && (!Secured || !string.IsNullOrEmpty(Profile));
+    public bool RequiresPassword => Secured && !Connected && string.IsNullOrEmpty(Profile);
     public uint Authentication { get; init; }
     public uint Cipher { get; init; }
     public string Key => Convert.ToHexString(Ssid) + ":" + Authentication + ":" + Cipher;
@@ -53,6 +54,23 @@ public static class WifiNetworkControl
                 .OrderByDescending(n => n.Connected).ThenByDescending(n => n.Signal).ToArray();
         }, cancellation);
 
+    public static Task<bool> ReadAutoConnectAsync(WifiNetwork network, CancellationToken cancellation) => Task.Run(() =>
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (string.IsNullOrEmpty(network.Profile)) return true;
+        using var session = new Session();
+        var adapter = network.Adapter;
+        uint flags = 0; // Do not request plaintext key material.
+        Check(WlanGetProfile(session.Handle, ref adapter, network.Profile, 0, out var profileXml, ref flags, out _));
+        try
+        {
+            var document = System.Xml.Linq.XDocument.Parse(Marshal.PtrToStringUni(profileXml)!);
+            var root = document.Root!;
+            return root.Element(root.Name.Namespace + "connectionMode")?.Value == "auto";
+        }
+        finally { WlanFreeMemory(profileXml); }
+    }, cancellation);
+
     public static async Task<string> ConnectAsync(WifiNetwork network, string password, bool autoConnect, CancellationToken cancellation)
     {
         if (!network.Connectable) return "Windows reports that this network cannot be connected.";
@@ -73,8 +91,8 @@ public static class WifiNetworkControl
                 Marshal.StructureToPtr(ssid, memory, false);
                 var parameters = new Connection
                 {
-                    Mode = existing || autoConnect ? 0u : 1u, // saved profile / temporary profile
-                    Profile = existing ? network.Profile : autoConnect ? "Doky-" + Convert.ToHexString(network.Ssid) : xml,
+                    Mode = 0, // Windows owns saved credentials for both automatic and manual profiles.
+                    Profile = existing ? network.Profile : "Doky-" + Convert.ToHexString(network.Ssid),
                     Ssid = 0,
                     BssType = network.BssType
                 };
@@ -92,7 +110,7 @@ public static class WifiNetworkControl
                     }
                     finally { WlanFreeMemory(profileXml); }
                 }
-                if (!existing && autoConnect)
+                if (!existing)
                 {
                     Check(WlanSetProfile(session.Handle, ref adapter, 2, xml!, null, true, 0, out var reason));
                     if (reason != 0) throw new Win32Exception("Windows rejected this Wi-Fi profile.");

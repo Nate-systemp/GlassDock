@@ -2021,7 +2021,8 @@ public sealed partial class DesktopOverlayWindow : Window
             StackPopupOpen ||
             state.State != DockState.Expanded)
             return;
-        if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out var y))
+        if (pointerInsideDock && windowManager.TryGetPointerPosition(out var x, out var y) &&
+            !IsPointerOverUtility(x, y))
         {
             var pointer = root.TransformToVisual(icons).TransformPoint(new(x, y));
             animation.UpdateMagnification(pointer.X, pointer.Y);
@@ -2097,9 +2098,7 @@ public sealed partial class DesktopOverlayWindow : Window
         var hoverPointer = e.GetCurrentPoint(icons).Position;
 
         var rootPointer = e.GetCurrentPoint(root).Position;
-        if (utilityButtons.Values.Any(button =>
-            new global::Windows.Foundation.Rect(button.Glass.Bounds.X, button.Glass.Bounds.Y,
-                button.Glass.Bounds.Z, button.Glass.Bounds.W).Contains(rootPointer)))
+        if (IsPointerOverUtility(rootPointer.X, rootPointer.Y))
         {
             animation.ResetMagnification();
             HideDockWave();

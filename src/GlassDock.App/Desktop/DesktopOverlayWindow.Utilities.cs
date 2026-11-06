@@ -23,6 +23,12 @@ public sealed partial class DesktopOverlayWindow
     private UtilityButton? wifiSettingsOnly;
     private double UtilitySpace => settingsSession.Current.SelectedUtilities.Length * (ExpandedDockHeight + 12 * DockScale);
 
+    private bool IsPointerOverUtility(double x, double y) =>
+        utilityArea.Visibility == Visibility.Visible && utilityButtons.Values.Any(button =>
+            button.IsHitTestVisible && new global::Windows.Foundation.Rect(
+                button.Glass.Bounds.X - 2, button.Glass.Bounds.Y - 2,
+                button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y)));
+
     private void InitializeUtilities(WifiUtilityService? shared)
     {
         ownsWifi = shared is null; utilityWifi = shared ?? new();
@@ -148,7 +154,7 @@ public sealed partial class DesktopOverlayWindow
         {
             window.ApplyAppearance(mode, liquidGlass.BackdropMaterial, liquidGlass.Material, (float)DockScale, settingsSession.Current.ClearCircularHighlightsEnabled);
             if (!visible) window.Hide(immediate: true);
-            else if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) window.Reposition(source.CircleBounds);
+            else if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) window.Reposition(source.Glass.Bounds);
         }
     }
 
@@ -166,6 +172,7 @@ public sealed partial class DesktopOverlayWindow
             button.SetState(utilityWifi.State.On, utilityWifi.State.Available, utilityWifi.State.Message);
             if (button.Definition.Kind == UtilityKind.Wifi) button.SetConnectionText(connection);
         }
+        UpdateUtilitySurfaces();
     });
 
     private async Task RefreshUtilityConnectionAsync()
@@ -200,7 +207,7 @@ public sealed partial class DesktopOverlayWindow
             return;
         }
         DismissWifiSettingsOnly();
-        if (wifiWindow is { IsOpen: true } existing) { existing.Show(button.CircleBounds); return; }
+        if (wifiWindow is { IsOpen: true } existing) { existing.Show(button.Glass.Bounds); return; }
         var window = new WifiUtilityWindow(WinRT.Interop.WindowNative.GetWindowHandle(this), utilityWifi, settingsSession.Current.UtilityTheme)
         {
             ScreenshotRequested = () => ScreenshotRequested?.Invoke()
@@ -223,7 +230,7 @@ public sealed partial class DesktopOverlayWindow
         };
         // Hold the dock before showing/activating the popup, including its first layout pass.
         previews.BeginContextMenu(window);
-        try { window.Show(button.CircleBounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }
+        try { window.Show(button.Glass.Bounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }
         catch { window.Hide(immediate: true); previews.EndContextMenu(window); throw; }
     }
 
