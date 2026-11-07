@@ -8,7 +8,7 @@ public sealed record UtilityDefinition(UtilityKind Kind, string Name, string Ico
     {
         new UtilityDefinition(UtilityKind.Wifi, "Wi-Fi", "wifi-high", 0xFF0A84FF, true),
         new UtilityDefinition(UtilityKind.Bluetooth, "Bluetooth", "bluetooth", 0xFF007AFF, true),
-        new UtilityDefinition(UtilityKind.AirplaneMode, "Airplane mode", "airplane", 0xFF0A84FF),
+        new UtilityDefinition(UtilityKind.AirplaneMode, "Airplane mode (experimental)", "airplane", 0xFFFF9F0A, true),
         new UtilityDefinition(UtilityKind.Volume, "Volume", "speaker-high", 0xFF0A84FF),
         new UtilityDefinition(UtilityKind.Brightness, "Brightness", "sun", 0xFFFFB340),
         new UtilityDefinition(UtilityKind.Battery, "Battery", "battery-full", 0xFF30D158),

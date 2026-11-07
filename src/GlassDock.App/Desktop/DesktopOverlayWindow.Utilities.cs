@@ -22,6 +22,8 @@ public sealed partial class DesktopOverlayWindow
     private bool ownsWifi;
     private WifiUtilityWindow? wifiWindow;
     private UtilityButton? wifiSettingsOnly;
+    private AirplaneModeUtilityService? utilityAirplaneMode;
+    private bool ownsAirplaneMode;
     private double UtilitySpace => settingsSession.Current.SelectedUtilities.Length * (ExpandedDockHeight + 12 * DockScale);
 
     private bool IsPointerOverUtility(double x, double y) =>
@@ -30,12 +32,16 @@ public sealed partial class DesktopOverlayWindow
                 button.Glass.Bounds.X - 2, button.Glass.Bounds.Y - 2,
                 button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y)));
 
-    private void InitializeUtilities(WifiUtilityService? shared, BluetoothUtilityService? sharedBluetooth)
+    private void InitializeUtilities(WifiUtilityService? shared, BluetoothUtilityService? sharedBluetooth,
+        AirplaneModeUtilityService? sharedAirplaneMode)
     {
         ownsWifi = shared is null; utilityWifi = shared ?? new();
         utilityWifi.Changed += WifiStateChanged;
         utilityWifi.NetworksChanged += WifiStateChanged;
         InitializeBluetooth(sharedBluetooth);
+        ownsAirplaneMode = sharedAirplaneMode is null;
+        utilityAirplaneMode = sharedAirplaneMode ?? new();
+        utilityAirplaneMode.Changed += AirplaneModeStateChanged;
         root.Children.Add(utilityArea); Canvas.SetZIndex(utilityArea, 20);
         Activated += (_, e) =>
         {
@@ -67,6 +73,7 @@ public sealed partial class DesktopOverlayWindow
     {
         if (utilityWifi is null) return;
         var selected = settingsSession.Current.SelectedUtilities;
+        utilityAirplaneMode?.SetMonitoring(selected.Contains(UtilityKind.AirplaneMode));
         foreach (var kind in utilityButtons.Keys.Where(k => !selected.Contains(k)).ToArray())
         {
             if (wifiSettingsOnly?.Definition.Kind == kind) DismissWifiSettingsOnly();
@@ -92,6 +99,12 @@ public sealed partial class DesktopOverlayWindow
                 utilityButtons.Add(definition.Kind, button); utilityArea.Children.Add(button);
                 button.PrimaryRequested += async (_, _) =>
                 {
+                    if (button.Definition.Kind == UtilityKind.AirplaneMode)
+                    {
+                        if (utilityAirplaneMode is { } airplane && !airplane.State.Busy)
+                            await RunUtilityToggleAsync(button, airplane.ToggleAsync, () => SetAirplaneModeState(button, airplane.State));
+                        return;
+                    }
                     if (button.Definition.Kind == UtilityKind.Bluetooth)
                     { await ToggleBluetoothAsync(button); return; }
                     if (button.Definition.Kind == UtilityKind.Wifi &&
@@ -109,7 +122,10 @@ public sealed partial class DesktopOverlayWindow
                         });
                 };
                 button.DetailsRequested += (_, _) =>
-                { if (button.Definition.Kind == UtilityKind.Bluetooth) ShowBluetoothDevices(button); else ShowWifiNetworks(button); };
+                {
+                    if (button.Definition.Kind == UtilityKind.Bluetooth) ShowBluetoothDevices(button);
+                    else if (button.Definition.Kind == UtilityKind.Wifi) ShowWifiNetworks(button);
+                };
                 button.GeometryChanged += (_, _) => { if (!closing) UpdateBackdropBounds(); };
                 button.ExpansionChanged += async (_, _) => { if (button.IsExpanded) await RefreshUtilityConnectionAsync(); };
                 button.Dragged += (item, delta) =>
@@ -118,17 +134,34 @@ public sealed partial class DesktopOverlayWindow
                     UpdateBackdropBounds(); UpdateDockWaveOutline();
                 };
                 button.PointerEntered += async (_, _) =>
-                { if (button.Definition.Kind == UtilityKind.Bluetooth) await utilityBluetooth!.RefreshAsync(); else await utilityWifi.RefreshAsync(); };
+                {
+                    if (button.Definition.Kind == UtilityKind.AirplaneMode) await utilityAirplaneMode!.RefreshAsync();
+                    else if (button.Definition.Kind == UtilityKind.Bluetooth) await utilityBluetooth!.RefreshAsync();
+                    else await utilityWifi.RefreshAsync();
+                };
                 FadeUtility(button, 1);
-                if (button.Definition.Kind == UtilityKind.Bluetooth) _ = utilityBluetooth!.RefreshAsync();
+                if (button.Definition.Kind == UtilityKind.AirplaneMode) _ = utilityAirplaneMode!.RefreshAsync();
+                else if (button.Definition.Kind == UtilityKind.Bluetooth) _ = utilityBluetooth!.RefreshAsync();
                 else _ = utilityWifi.RefreshAsync();
             }
         }
         UpdateUtilitySurfaces();
         WifiStateChanged(this, EventArgs.Empty);
         BluetoothStateChanged(this, EventArgs.Empty);
+        AirplaneModeStateChanged(this, EventArgs.Empty);
         PositionUtilities();
     }
+
+    private static void SetAirplaneModeState(UtilityButton button, AirplaneModeState state) =>
+        button.SetState(state.On == true, state.Available, state.Message);
+
+    private void AirplaneModeStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (closing || utilityAirplaneMode is null) return;
+        if (utilityButtons.TryGetValue(UtilityKind.AirplaneMode, out var button))
+            SetAirplaneModeState(button, utilityAirplaneMode.State);
+        UpdateUtilitySurfaces(); UpdateLiquidGlass();
+    });
 
     private async Task RunUtilityToggleAsync(UtilityButton button, Func<Func<Task>, Task> toggle, Action synchronizeActualState)
     {
@@ -346,6 +379,11 @@ public sealed partial class DesktopOverlayWindow
 
     private void DisposeUtilities()
     {
+        if (utilityAirplaneMode is not null)
+        {
+            utilityAirplaneMode.Changed -= AirplaneModeStateChanged;
+            if (ownsAirplaneMode) utilityAirplaneMode.Dispose();
+        }
         DisposeBluetooth();
         DismissWifiSettingsOnly();
         wifiWindow?.Hide(immediate: true);

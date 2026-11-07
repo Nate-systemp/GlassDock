@@ -89,7 +89,8 @@ internal sealed class UtilityButton : Button, IDisposable
         else CompositionTarget.Rendering -= PresentationChanged;
     }
     private void PresentationChanged(object? sender, object e) => GeometryChanged?.Invoke(this, EventArgs.Empty);
-    private bool RadioUtility => Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth;
+    private bool HasDetails => Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth;
+    private bool RadioUtility => HasDetails || Definition.Kind == UtilityKind.AirplaneMode;
     private bool active, available = true, hover, pressed;
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
@@ -102,7 +103,7 @@ internal sealed class UtilityButton : Button, IDisposable
         captionEffect = new(captionHost, caption, Vector2.Zero, 0);
         captionArea.Children.Add(captionHost); captionArea.Children.Add(captionEffect.Element);
         symbols.Children.Add(icon);
-        if (RadioUtility)
+        if (HasDetails)
         {
             settingsSymbols.Children.Add(settingsIcon); settingsSymbols.Children.Add(settingsBadge);
             symbols.Children.Add(settingsSymbols);
@@ -403,7 +404,7 @@ internal sealed class UtilityButton : Button, IDisposable
 
     public async Task SetDetailsOpenAsync(bool open)
     {
-        if (disposed || !RadioUtility || detailsOpen == open) return;
+        if (disposed || !HasDetails || detailsOpen == open) return;
         detailsOpen = open;
         IsMorphing = true;
         var revision = ++morphRevision;
@@ -452,7 +453,7 @@ internal sealed class UtilityButton : Button, IDisposable
         var items = Definition.Kind == UtilityKind.Bluetooth ? "paired devices" : "networks";
         AutomationProperties.SetName(this, detailsOpen ? Definition.Name + " Settings" : Definition.Name);
         AutomationProperties.SetHelpText(this, detailsOpen ? $"Open Windows {Definition.Name} Settings. Right-click shows {items}."
-            : message + $". Left-click toggles {Definition.Name}; right-click shows {items}.");
+            : message + $". Left-click toggles {Definition.Name}." + (HasDetails ? $" Right-click shows {items}." : ""));
         if (Definition.Kind == UtilityKind.Wifi)
             AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to expand or collapse.");
         if (Definition.Kind == UtilityKind.Bluetooth)
@@ -502,12 +503,13 @@ internal sealed class UtilityButton : Button, IDisposable
                 motion.Begin();
             }
         }
-        _ = icon.SetAsync(Definition.Icon, displayOn && !RadioUtility, IconColor());
+        _ = icon.SetAsync(Definition.Icon, Definition.Kind == UtilityKind.AirplaneMode || displayOn && !RadioUtility, IconColor(),
+            Definition.Kind == UtilityKind.AirplaneMode && animations ? TransitionDuration : null);
         var captionTheme = Definition.Kind == UtilityKind.Wifi && displayOn ? UtilityTheme.Light : IconTheme;
         var textColor = UtilityColors.Icon(captionTheme, false, !available);
         captionTitle.Foreground = captionNetwork.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
             (byte)(textColor >> 16), (byte)(textColor >> 8), (byte)textColor));
-        if (RadioUtility)
+        if (HasDetails)
         {
             settingsIcon.Width = settingsIcon.Height = symbols.Width * (displayOn ? .9 : 1);
             settingsIcon.HorizontalAlignment = displayOn ? HorizontalAlignment.Left : HorizontalAlignment.Center;

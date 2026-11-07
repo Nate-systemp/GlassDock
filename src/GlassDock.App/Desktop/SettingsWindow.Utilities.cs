@@ -18,7 +18,8 @@ public sealed partial class SettingsWindow
             var definition = UtilityDefinition.All[i];
             var added = current.SelectedUtilities.Contains(definition.Kind);
             var icon = new UtilityIcon { Width = 28, Height = 28 };
-            _ = icon.SetAsync(definition.Icon, added, UtilityColors.Icon(current.UtilityTheme, false, !definition.Available));
+            _ = icon.SetAsync(definition.Icon, definition.Kind == UtilityKind.AirplaneMode || added,
+                UtilityColors.Icon(current.UtilityTheme, false, !definition.Available));
             var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
             content.Children.Add(icon);
             content.Children.Add(new TextBlock { Text = definition.Name, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });

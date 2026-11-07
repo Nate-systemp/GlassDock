@@ -114,7 +114,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             showSettingsOverride,
             restoreTaskbarOverride,
             resumeTaskbarOverride,
-            runtime.Wifi, runtime.Bluetooth)
+            runtime.Wifi, runtime.Bluetooth, runtime.AirplaneMode)
         {
             ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome(),
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
