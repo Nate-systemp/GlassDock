@@ -233,21 +233,42 @@ public sealed partial class DesktopOverlayWindow : Window
     internal Action? ScreenshotRequested { get; init; }
     internal bool BeginSnippingCapture()
     {
+        if (closing || snippingPending) return false;
         snippingPending = true;
+        collapseDelay?.Cancel();
+        CancelPillHide();
+        if (!heldTransition && state.State is DockState.Expanding or DockState.Collapsing)
+        {
+            heldTransition = state.HoldTransition();
+            animation.FreezeCurrentTransitions();
+        }
         // Freeze the separate app menu first. The main dock is exposed only
         // after popup capture can no longer sample the newly-visible dock.
         previews.BeginSnippingCapture();
         var frozen = liquidGlass.BeginScreenshotMode();
-        if (frozen || (Application.Current as App)?.BasicRendering == true) wifiWindow?.BeginSnippingCapture();
+        if (frozen || (Application.Current as App)?.BasicRendering == true)
+        { wifiWindow?.BeginSnippingCapture(); bluetoothWindow?.BeginSnippingCapture(); }
         return frozen;
     }
     internal void EndSnippingCapture()
     {
         // Re-exclude the main dock before the app menu resumes GPU sampling.
         wifiWindow?.EndSnippingCapture();
+        bluetoothWindow?.EndSnippingCapture();
         liquidGlass.EndScreenshotMode();
         previews.EndSnippingCapture();
         snippingPending = false;
+        if (closing) return;
+        // A foreground/capture transition may have stopped the renderer before
+        // freezing began. Restore visibility and drawing without waiting for a click.
+        windowManager.RefreshFullscreenPolicy();
+        UpdateBackdropBounds();
+        if (heldTransition) { ResumeAfterHold(); return; }
+        if (!windowManager.IsPointerInsideInput())
+        {
+            if (state.State is DockState.Expanded or DockState.Expanding) ScheduleCollapse();
+            else if (state.State is DockState.Idle or DockState.Hovering) SchedulePillHide();
+        }
     }
     internal bool OwnsGlobalServices => ownsGlobalServices;
 
@@ -299,7 +320,7 @@ public sealed partial class DesktopOverlayWindow : Window
         Action? showSettingsOverride = null,
         Action? restoreTaskbarOverride = null,
         Action? resumeTaskbarOverride = null,
-        WifiUtilityService? sharedWifi = null)
+        WifiUtilityService? sharedWifi = null, BluetoothUtilityService? sharedBluetooth = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -455,7 +476,7 @@ public sealed partial class DesktopOverlayWindow : Window
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator, hoverArtworkForeground);
         animation.HoverPresentationChanged += (_, _) => UpdateDockWaveOutline();
-        InitializeUtilities(sharedWifi);
+        InitializeUtilities(sharedWifi, sharedBluetooth);
 
         ApplyAppearance(settingsSession.Appearance);
         animation.PlacementChanged += (_, _) =>
@@ -468,8 +489,10 @@ public sealed partial class DesktopOverlayWindow : Window
                 SchedulePillHide();
         };
         windowManager.PointerMovedOutsideInput += (_, _) => PointerDeparted();
+        windowManager.ScreenshotRequested += (_, _) => ScreenshotRequested?.Invoke();
         windowManager.PointerMovedInsideInput += (_, _) =>
         {
+            if (snippingPending) return;
             pointerInsideDock = true;
             collapseDelay?.Cancel();
             CancelPillHide();
@@ -1941,6 +1964,7 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private void Entered(object sender, PointerRoutedEventArgs e)
     {
+        if (snippingPending) return;
         // Moving geometry must not simulate a new physical hover.
         if (animation.IsPlacementAnimating || pinDockTransitionActive) return;
         if (!windowManager.IsPointerInsideInput()) return;
@@ -2039,7 +2063,7 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private void ResumeAfterHold()
     {
-        if (closing || previews.HoldsDock) return;
+        if (closing || snippingPending || previews.HoldsDock) return;
         pointerInsideDock = windowManager.IsPointerInsideInput();
         if (heldTransition)
         {
@@ -2058,6 +2082,7 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private void PointerDeparted()
     {
+        if (snippingPending) return;
         dragLensHoverDeferred = false;
         pointerInsideDock = false;
         if (previews.ContextMenuOpen ||
@@ -2072,6 +2097,7 @@ public sealed partial class DesktopOverlayWindow : Window
     }
     private void Moved(object sender, PointerRoutedEventArgs e)
     {
+        if (snippingPending) return;
         if (utilityButtons.Values.Any(button => button.IsDragging))
         { collapseDelay?.Cancel(); HideDockWave(); return; }
         if (dragLensHoverDeferred && dragLensButton is null && reorderButton is null)
@@ -2558,7 +2584,7 @@ public sealed partial class DesktopOverlayWindow : Window
     }
     private async Task CollapseDockAsync(bool resume = false)
     {
-        if (closing || shutdown.IsRequested || state.State is DockState.Hidden or DockState.Idle ||
+        if (closing || shutdown.IsRequested || snippingPending || state.State is DockState.Hidden or DockState.Idle ||
             (!resume && state.State == DockState.Collapsing)) return;
         if (DockPinLock || previews.HoldsDock || StackPopupOpen) return;
         if (keyboardDockNavigation) return;
@@ -2605,7 +2631,7 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private async void SchedulePillHide()
     {
-        if (DockPinLock || pillHideDelay is not null || closing || previews.HoldsDock ||
+        if (DockPinLock || pillHideDelay is not null || closing || snippingPending || previews.HoldsDock ||
             state.State is not (DockState.Idle or DockState.Hovering) ||
             surface.Margin.Bottom <= PeekRestBottom + 0.01) return;
         var delay = new CancellationTokenSource();
@@ -2613,7 +2639,7 @@ public sealed partial class DesktopOverlayWindow : Window
         try
         {
             await Task.Delay(settingsSession.DockBehavior.PeekDelay, delay.Token);
-            if (delay.IsCancellationRequested || closing || previews.HoldsDock ||
+            if (delay.IsCancellationRequested || closing || snippingPending || previews.HoldsDock ||
                 state.State is not (DockState.Idle or DockState.Hovering)) return;
             pointerInsideDock = windowManager.IsPointerInsideInput();
             if (pointerInsideDock) return;
@@ -2630,13 +2656,13 @@ public sealed partial class DesktopOverlayWindow : Window
     }
     private async void ScheduleCollapse()
     {
-        if (DockPinLock || collapseDelay is { IsCancellationRequested: false } || closing || previews.HoldsDock || keyboardDockNavigation) return;
+        if (DockPinLock || collapseDelay is { IsCancellationRequested: false } || closing || snippingPending || previews.HoldsDock || keyboardDockNavigation) return;
         var delay = new CancellationTokenSource();
         collapseDelay = delay;
         try
         {
             await Task.Delay(settingsSession.DockBehavior.AutoHideDelay, delay.Token);
-            if (delay.IsCancellationRequested || closing || keyboardDockNavigation || previews.HoldsDock || windowManager.IsPointerInsideInput()) return;
+            if (delay.IsCancellationRequested || closing || snippingPending || keyboardDockNavigation || previews.HoldsDock || windowManager.IsPointerInsideInput()) return;
             DockAnimationController.Trace($"Collapse delay elapsed state={state.State}");
             await CollapseDockAsync();
         }

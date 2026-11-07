@@ -43,7 +43,7 @@ public sealed class DockAppMenuWiringTests
         Assert.Contains("appMenu?.BeginSnippingCapture();", coordinator);
         Assert.Contains("appMenu?.EndSnippingCapture();", coordinator);
         Assert.True(dock.IndexOf("previews.BeginSnippingCapture();", StringComparison.Ordinal) <
-                    dock.IndexOf("return liquidGlass.BeginScreenshotMode();", StringComparison.Ordinal));
+                    dock.IndexOf("var frozen = liquidGlass.BeginScreenshotMode();", StringComparison.Ordinal));
         Assert.True(dock.IndexOf("liquidGlass.EndScreenshotMode();", StringComparison.Ordinal) <
                     dock.IndexOf("previews.EndSnippingCapture();", StringComparison.Ordinal));
         Assert.Contains("if (!snippingCaptureActive) CheckMenuSnapshot();", coordinator);

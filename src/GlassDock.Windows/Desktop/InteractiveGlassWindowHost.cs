@@ -35,10 +35,10 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     // alone may only show a tool window opened from a non-activating dock.
     public bool ActivateForUserInput() => !disposed && SetForegroundWindow(hwnd);
     public bool HasForegroundOrOwner(nint owner) => !disposed && (GetForegroundWindow() == hwnd || GetForegroundWindow() == owner);
-    public bool IsScreenshotForeground()
+    public bool IsScreenshotForeground() => !disposed && IsScreenshotWindow(GetForegroundWindow());
+    internal static bool IsScreenshotWindow(nint window)
     {
-        if (disposed) return false;
-        GetWindowThreadProcessId(GetForegroundWindow(), out var processId);
+        GetWindowThreadProcessId(window, out var processId);
         if (processId == 0) return false;
         try
         {

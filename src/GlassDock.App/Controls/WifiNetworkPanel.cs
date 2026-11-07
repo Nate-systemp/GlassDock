@@ -14,7 +14,7 @@ using Microsoft.UI.Xaml.Media.Animation;
 
 namespace GlassDock.App.Controls;
 
-internal sealed class WifiNetworkPanel : StackPanel, IDisposable
+internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
 {
     private bool CompactConnectionInput => selection.Selected is { } network && !NeedsPassword(network) &&
         (network.Connected || !string.IsNullOrEmpty(network.Profile));
@@ -51,6 +51,7 @@ internal sealed class WifiNetworkPanel : StackPanel, IDisposable
     private GlassMaterial backdrop = new();
     private float layoutScale = 1;
     private bool highlights = true;
+    public FrameworkElement View => this;
     public IReadOnlyList<UtilityGlassSurface> GlassSurfaces => glassSurfaces;
     public int GlassTargetsRevision { get; private set; }
     public event EventHandler? GlassChanged;

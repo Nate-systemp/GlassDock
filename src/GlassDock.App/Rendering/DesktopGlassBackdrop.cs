@@ -31,6 +31,64 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             (float)Math.Min(material.CornerRadius, Math.Min(lastWidth, lastHeight) / 2), (float)lastScale);
     private GlassDock.Core.Desktop.HomeCardRect[]? surfaceRegions;
     private double surfaceRegionScale = 1;
+    private (Vector4 Bounds, float Opacity)[] utilitySurfaces = [];
+    private readonly List<UtilityMask> utilityMasks = [];
+    private W.ContainerVisual? utilityMaskRoot;
+    internal bool SupportsUtilitySurfaces => utilityMaskRoot is not null && !UseSolidSurface &&
+        dockStyle is (GlassMaterialMode.Frosted or GlassMaterialMode.Acrylic);
+
+    internal void SetUtilitySurfaces(IEnumerable<(Vector4 Bounds, float Opacity)> surfaces)
+    {
+        var next = surfaces.ToArray();
+        if (utilitySurfaces.SequenceEqual(next)) return;
+        utilitySurfaces = next;
+        UpdateUtilityMasks();
+    }
+
+    private sealed class UtilityMask : IDisposable
+    {
+        internal required W.ShapeVisual Visual;
+        internal required W.CompositionPathGeometry Geometry;
+        internal required W.CompositionSpriteShape Shape;
+        internal CanvasGeometry? Path;
+        internal Vector4 Bounds;
+        internal double Scale;
+        public void Dispose() { Visual.Dispose(); Shape.Dispose(); Geometry.Dispose(); Path?.Dispose(); }
+    }
+
+    private void UpdateUtilityMasks()
+    {
+        if (utilityMaskRoot is null || compositor is null || canvasDevice is null || fill is null || !hasBounds) return;
+        // Radio toggles change coverage, not resource ownership. Retain masks
+        // until backdrop disconnection instead of closing live compositor objects.
+        for (var i = utilitySurfaces.Length; i < utilityMasks.Count; i++)
+            utilityMasks[i].Visual.Opacity = 0;
+        var sampling = UseInnerEdge || UseSolidSurface ? 2f : 1f;
+        var size = new Vector2((float)(lastWindowWidth * lastScale), (float)(lastWindowHeight * lastScale)) * sampling;
+        utilityMaskRoot.Size = size;
+        for (var i = 0; i < utilitySurfaces.Length; i++)
+        {
+            if (i == utilityMasks.Count)
+            {
+                var path = compositor.CreatePathGeometry();
+                var shape = compositor.CreateSpriteShape(path); shape.FillBrush = fill;
+                var visual = compositor.CreateShapeVisual(); visual.BorderMode = W.CompositionBorderMode.Soft;
+                visual.Shapes.Add(shape); utilityMaskRoot.Children.InsertAtTop(visual);
+                utilityMasks.Add(new() { Geometry = path, Shape = shape, Visual = visual });
+            }
+            var entry = utilitySurfaces[i]; var mask = utilityMasks[i];
+            if (mask.Path is null || mask.Bounds != entry.Bounds || mask.Scale != lastScale)
+            {
+                var rect = entry.Bounds * (float)lastScale;
+                var radius = Math.Min(rect.Z, rect.W) / 2;
+                var next = CanvasGeometry.CreateRoundedRectangle(canvasDevice, rect.X, rect.Y, rect.Z, rect.W, radius, radius);
+                mask.Geometry.Path = new W.CompositionPath(next);
+                mask.Path?.Dispose(); mask.Path = next; mask.Bounds = entry.Bounds; mask.Scale = lastScale;
+            }
+            mask.Visual.Size = size; mask.Shape.Scale = new(sampling);
+            mask.Visual.Opacity = Math.Clamp(entry.Opacity * (VisualMaterial?.SurfaceOpacity ?? 1), 0, 1);
+        }
+    }
 
     /// <summary>Optional disjoint cards share one desktop effect, without a full-window glass/shadow.</summary>
     public void SetSurfaceRegions(IEnumerable<GlassDock.Core.Desktop.HomeCardRect> regions, double contentScale = 1)
@@ -318,6 +376,9 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         // placement, rather than the pixels sampled in its own local space.
         maskCaptureRoot = compositor.CreateContainerVisual();
         maskCaptureRoot.Children.InsertAtTop(visual);
+        // OFF utilities share the actual dock effect, outside the dock's own transform.
+        utilityMaskRoot = compositor.CreateContainerVisual();
+        maskCaptureRoot.Children.InsertAtTop(utilityMaskRoot);
         maskSurface = compositor.CreateVisualSurface();
         maskSurface.SourceVisual = maskCaptureRoot;
         mask = compositor.CreateSurfaceBrush(maskSurface);
@@ -538,6 +599,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             }
         }
         UpdateMaskPath();
+        UpdateUtilityMasks();
     }
 
     private void UpdateClearBounds()
@@ -692,6 +754,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
         UpdateClearBounds();
         UpdateMaskPath();
+        UpdateUtilityMasks();
     }
 
     /// <summary>
@@ -983,6 +1046,9 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         output?.Dispose();
         mask?.Dispose();
         maskSurface?.Dispose();
+        foreach (var utility in utilityMasks) utility.Dispose();
+        utilityMasks.Clear();
+        utilityMaskRoot?.Dispose(); utilityMaskRoot = null;
         visual?.Dispose();
         maskCaptureRoot?.Dispose();
         maskCaptureRoot = null;

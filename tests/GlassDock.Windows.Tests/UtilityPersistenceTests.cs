@@ -14,10 +14,10 @@ public sealed class UtilityPersistenceTests
         try
         {
             var store = new GlassDockSettingsStore(path);
-            await store.SaveAsync(new() { SelectedUtilities = new[] { UtilityKind.Wifi }, UtilityTheme = UtilityTheme.Light,
+            await store.SaveAsync(new() { SelectedUtilities = new[] { UtilityKind.Bluetooth, UtilityKind.Wifi }, UtilityTheme = UtilityTheme.Light,
                 DockAppearanceMode = DockAppearanceMode.Clear, ClearRefractionStrength = 17, PinDock = true });
             var loaded = await new GlassDockSettingsStore(path).LoadAsync();
-            Assert.Equal(new[] { UtilityKind.Wifi }, loaded.SelectedUtilities);
+            Assert.Equal(new[] { UtilityKind.Bluetooth, UtilityKind.Wifi }, loaded.SelectedUtilities);
             Assert.Equal(UtilityTheme.Light, loaded.UtilityTheme);
             Assert.Equal(DockAppearanceMode.Clear, loaded.DockAppearanceMode);
             Assert.Equal(17, loaded.ClearRefractionStrength); Assert.True(loaded.PinDock);

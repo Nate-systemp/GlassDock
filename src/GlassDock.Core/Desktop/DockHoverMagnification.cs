@@ -133,9 +133,9 @@ public sealed class DockHoverMagnification<T> where T : class
             return false;
         }
 
-        // Critically damped spring, roughly 200ms to settle, with no bounce or
+        // Critically damped spring, roughly 300ms to settle, with no bounce or
         // animation restart when pointer movement retargets a different icon.
-        const double frequency = 36;
+        const double frequency = 24;
         var displacement = motion.Scale - target;
         var coefficient = motion.Velocity + frequency * displacement;
         var decay = Math.Exp(-frequency * seconds);

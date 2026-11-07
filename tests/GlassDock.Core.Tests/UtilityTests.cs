@@ -27,8 +27,8 @@ public sealed class UtilityTests
         foreach (var mode in Enum.GetValues<DockAppearanceMode>())
         {
             var settings = GlassDockSettings.Normalize(new() { DockAppearanceMode = mode,
-                SelectedUtilities = new[] { UtilityKind.Wifi, UtilityKind.Wifi, UtilityKind.Bluetooth, (UtilityKind)99 } });
-            Assert.Equal(new[] { UtilityKind.Wifi }, settings.SelectedUtilities);
+                SelectedUtilities = new[] { UtilityKind.Bluetooth, UtilityKind.Wifi, UtilityKind.Bluetooth, (UtilityKind)99 } });
+            Assert.Equal(new[] { UtilityKind.Bluetooth, UtilityKind.Wifi }, settings.SelectedUtilities);
             Assert.Equal(mode, settings.DockAppearanceMode);
             Assert.Equal(settings, GlassDockSettings.Normalize(settings));
         }

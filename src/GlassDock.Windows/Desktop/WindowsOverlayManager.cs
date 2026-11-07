@@ -40,6 +40,8 @@ public sealed class WindowsOverlayManager : IDisposable
     private bool? lastPointerInsideInput;
     private nint lastForegroundWindow;
     private bool lastForegroundEligible;
+    private bool lastForegroundScreenshot;
+    private nint screenshotOverlay;
     private nint currentMonitor;
     private nint fixedMonitor;
     private NativeMethods.Rect currentMonitorBounds;
@@ -49,6 +51,7 @@ public sealed class WindowsOverlayManager : IDisposable
     private bool relocating;
     public void InvalidateMonitorMetrics() => hasCurrentMonitorMetrics = false;
     public bool FullscreenSuppressed { get; private set; }
+    public event EventHandler? ScreenshotRequested;
 
     public void RefreshFullscreenPolicy()
     {
@@ -69,6 +72,7 @@ public sealed class WindowsOverlayManager : IDisposable
                 NativeMethods.GetClassName(foreground, name, name.Capacity);
                 eligible = owner != Environment.ProcessId &&
                     name.ToString() is not ("Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd");
+                lastForegroundScreenshot = InteractiveGlassWindowHost.IsScreenshotWindow(foreground);
                 lastForegroundWindow = foreground;
                 lastForegroundEligible = eligible;
             }
@@ -98,6 +102,16 @@ public sealed class WindowsOverlayManager : IDisposable
                 }
             }
         }
+        if (suppressed && lastForegroundScreenshot)
+        {
+            suppressed = false;
+            if (screenshotOverlay != foreground)
+            {
+                screenshotOverlay = foreground;
+                ScreenshotRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else screenshotOverlay = 0;
         if (FullscreenSuppressed == suppressed) return;
         FullscreenSuppressed = suppressed;
         // Only our HWND changes. Pinning and logical transition state remain intact.
@@ -230,7 +244,7 @@ public sealed class WindowsOverlayManager : IDisposable
    private void EnsureTopmost()
     {
         RefreshFullscreenPolicy();
-        if (FullscreenSuppressed) return;
+        if (FullscreenSuppressed || (NativeMethods.GetForegroundWindow() == lastForegroundWindow && lastForegroundScreenshot)) return;
         if (!NativeMethods.IsWindow(hwnd))
             return;
 

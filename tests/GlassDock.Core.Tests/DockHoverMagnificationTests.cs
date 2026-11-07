@@ -78,7 +78,7 @@ public sealed class DockHoverMagnificationTests
         var hover = new DockHoverMagnification<object>();
         hover.SetPointer(164, 20);
         var previous = 1d;
-        for (var t = 0; t <= 220; t += 10)
+        for (var t = 0; t <= 320; t += 10)
         {
             var frames = hover.Step(row, t, true);
             Assert.InRange(frames[3].Scale, previous, 1.5);

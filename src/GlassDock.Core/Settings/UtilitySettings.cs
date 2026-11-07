@@ -7,7 +7,7 @@ public sealed record UtilityDefinition(UtilityKind Kind, string Name, string Ico
     public static IReadOnlyList<UtilityDefinition> All { get; } = Array.AsReadOnly(new[]
     {
         new UtilityDefinition(UtilityKind.Wifi, "Wi-Fi", "wifi-high", 0xFF0A84FF, true),
-        new UtilityDefinition(UtilityKind.Bluetooth, "Bluetooth", "bluetooth", 0xFF007AFF),
+        new UtilityDefinition(UtilityKind.Bluetooth, "Bluetooth", "bluetooth", 0xFF007AFF, true),
         new UtilityDefinition(UtilityKind.AirplaneMode, "Airplane mode", "airplane", 0xFF0A84FF),
         new UtilityDefinition(UtilityKind.Volume, "Volume", "speaker-high", 0xFF0A84FF),
         new UtilityDefinition(UtilityKind.Brightness, "Brightness", "sun", 0xFFFFB340),

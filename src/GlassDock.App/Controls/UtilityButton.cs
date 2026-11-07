@@ -17,10 +17,14 @@ internal sealed class UtilityButton : Button, IDisposable
     private const double MinimumExpandedWidth = 130;
     private const double MaximumExpandedWidth = 180;
     private const double CaptionRightPadding = 16;
+    private static readonly TimeSpan TransitionDuration = TimeSpan.FromMilliseconds(180);
     public UtilityGlassSurface Glass { get; }
     private readonly Border tint = new() { IsHitTestVisible = false };
     private readonly UtilityIcon icon = new();
-    private readonly UtilityIcon settingsIcon = new() { Opacity = 0 };
+    private readonly UtilityIcon settingsIcon = new();
+    private readonly UtilityIcon settingsBadge = new() { HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Grid settingsSymbols = new() { Opacity = 0, IsHitTestVisible = false };
     private readonly Grid symbols = new();
     private readonly Grid iconSlot = new() { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScaleTransform scale = new();
@@ -39,11 +43,21 @@ internal sealed class UtilityButton : Button, IDisposable
     private Storyboard? motion;
     private Storyboard? morph;
     private Storyboard? expansion;
+    private Storyboard? toggleMotion;
+    private TaskCompletionSource? toggleAnimationCompletion;
+    private Task toggleLead = Task.CompletedTask;
+    private Task? toggleCompletion;
+    private bool? toggleVisualState;
+    private bool nativeToggleUnderlay;
+    public bool IsToggling { get; private set; }
+    internal bool NeedsNativeToggleUnderlay => nativeToggleUnderlay && !Glass.UsesNativeDockBackdrop && !Glass.HasFrame;
+    private bool DisplayOn => toggleVisualState ?? active;
     private double diameter, maximumWidth, expansionTarget;
     private double captionTitleWidth, captionWidth;
     public bool IsExpanded { get; private set; }
     private int morphRevision;
     private bool detailsOpen, disposed;
+    private bool trackingPresentation;
     private string message = "";
     private double scaleTarget = 1;
     private global::Windows.Foundation.Point pointerStart, pointerLast;
@@ -57,17 +71,42 @@ internal sealed class UtilityButton : Button, IDisposable
     public event EventHandler? ExpansionChanged;
     public event EventHandler? GeometryChanged;
     public UtilityDefinition Definition { get; }
+    internal global::Windows.Foundation.Rect GlassPresentationBounds()
+    {
+        // Use the assigned slot, not an arrange pass that can lag a moving dock.
+        var bounds = Glass.Bounds;
+        var pivot = face.RenderTransformOrigin;
+        return new(bounds.X + bounds.Z * pivot.X * (1 - morphScale.ScaleX),
+            bounds.Y + bounds.W * pivot.Y * (1 - morphScale.ScaleY),
+            bounds.Z * morphScale.ScaleX, bounds.W * morphScale.ScaleY);
+    }
+
+    private void TrackPresentation(bool track)
+    {
+        if (trackingPresentation == track) return;
+        trackingPresentation = track;
+        if (track) CompositionTarget.Rendering += PresentationChanged;
+        else CompositionTarget.Rendering -= PresentationChanged;
+    }
+    private void PresentationChanged(object? sender, object e) => GeometryChanged?.Invoke(this, EventArgs.Empty);
+    private bool RadioUtility => Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth;
     private bool active, available = true, hover, pressed;
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
     {
         Definition = definition;
         Glass = new() { Circular = definition.Kind != UtilityKind.Wifi };
+        Glass.RenderingChanged += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        { if (!disposed) GeometryChanged?.Invoke(this, EventArgs.Empty); });
         caption.Children.Add(captionTitle); caption.Children.Add(captionNetwork); captionHost.Children.Add(caption);
         captionEffect = new(captionHost, caption, Vector2.Zero, 0);
         captionArea.Children.Add(captionHost); captionArea.Children.Add(captionEffect.Element);
         symbols.Children.Add(icon);
-        if (definition.Kind == UtilityKind.Wifi) symbols.Children.Add(settingsIcon);
+        if (RadioUtility)
+        {
+            settingsSymbols.Children.Add(settingsIcon); settingsSymbols.Children.Add(settingsBadge);
+            symbols.Children.Add(settingsSymbols);
+        }
         face.Children.Add(Glass.Element); face.Children.Add(tint);
         if (definition.Kind == UtilityKind.Wifi)
         {
@@ -82,8 +121,11 @@ internal sealed class UtilityButton : Button, IDisposable
         face.RenderTransform = morphScale; face.RenderTransformOrigin = new(.5, .5);
         icon.HorizontalAlignment = HorizontalAlignment.Center; icon.VerticalAlignment = VerticalAlignment.Center;
         UseLayoutRounding = true;
+        Loaded += (_, _) => GeometryChanged?.Invoke(this, EventArgs.Empty);
         SizeChanged += (_, _) => { UpdateExpansionContent(); GeometryChanged?.Invoke(this, EventArgs.Empty); };
-        captionArea.LayoutUpdated += (_, _) => { if (!disposed) UpdateCaptionEffect(); };
+        // Updating clips from LayoutUpdated can continuously invalidate the same layout pass.
+        captionArea.SizeChanged += (_, _) => UpdateCaptionEffect();
+        caption.SizeChanged += (_, _) => UpdateCaptionEffect();
         IsHoldingEnabled = false; // The bounded hold timer owns touch and mouse holds alike.
         hold = DispatcherQueue.CreateTimer(); hold.Interval = TimeSpan.FromMilliseconds(550); hold.IsRepeating = false;
         hold.Tick += (_, _) =>
@@ -100,12 +142,14 @@ internal sealed class UtilityButton : Button, IDisposable
         foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed" })
             Resources[key] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         if (animations)
-            tint.BackgroundTransition = new BrushTransition { Duration = TimeSpan.FromMilliseconds(180) };
+            tint.BackgroundTransition = new BrushTransition { Duration = TransitionDuration };
         PointerEntered += (_, _) => { hover = true; Render(); };
         PointerExited += (_, _) => { hover = pressed = false; Render(); };
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
             var properties = e.GetCurrentPoint(this).Properties;
+            if (IsToggling && properties.IsLeftButtonPressed)
+            { hold.Stop(); gesture.Cancel(); pressed = false; e.Handled = true; return; }
             gesture.Press(properties.IsLeftButtonPressed, properties.IsRightButtonPressed);
             pressed = gesture.PrimaryDown; hold.Stop();
             pointerStart = pointerLast = e.GetCurrentPoint(null).Position;
@@ -120,7 +164,7 @@ internal sealed class UtilityButton : Button, IDisposable
             { hold.Stop(); gesture.Cancel(); return; }
             if (!IsDragging && Math.Abs(point.X - pointerStart.X) > 5)
             {
-                if (Definition.Kind == UtilityKind.Wifi)
+                if (RadioUtility)
                 {
                     hold.Stop(); gesture.Cancel(); pressed = false; Render(); e.Handled = true; return;
                 }
@@ -158,12 +202,13 @@ internal sealed class UtilityButton : Button, IDisposable
             if (!e.TryGetPosition(this, out var position)) gesture.Keyboard();
             hold.Stop(); if (gesture.RequestDetails()) DetailsRequested?.Invoke(this, EventArgs.Empty);
         };
-        Click += (_, _) => { if (!gesture.SuppressPrimary) PrimaryRequested?.Invoke(this, EventArgs.Empty); };
+        Click += (_, _) => { if (!IsToggling && !gesture.SuppressPrimary) PrimaryRequested?.Invoke(this, EventArgs.Empty); };
         AutomationProperties.SetName(this, definition.Name);
     }
 
     public void Configure(double diameter, double iconSize, UtilityTheme theme, DockAppearanceMode dockMode, double availableWidth)
     {
+        if (RadioUtility) iconSize *= .95;
         var changed = this.diameter != diameter || icon.Width != iconSize || this.theme != theme || this.dockMode != dockMode;
         var nextMaximum = Math.Max(diameter, Definition.Kind == UtilityKind.Wifi
             ? Math.Min(MaximumExpandedWidth, availableWidth) : availableWidth);
@@ -176,7 +221,8 @@ internal sealed class UtilityButton : Button, IDisposable
         face.Width = double.NaN;
         CornerRadius = tint.CornerRadius = new(diameter / 2);
         Glass.CornerRadius = (float)(diameter / 2);
-        symbols.Width = symbols.Height = icon.Width = icon.Height = settingsIcon.Width = settingsIcon.Height = iconSize;
+        symbols.Width = symbols.Height = icon.Width = icon.Height = settingsSymbols.Width = settingsSymbols.Height = iconSize;
+        settingsBadge.Width = settingsBadge.Height = iconSize * .56;
         if (Definition.Kind == UtilityKind.Wifi)
         {
             iconSlot.Width = iconSlot.Height = diameter;
@@ -242,94 +288,194 @@ internal sealed class UtilityButton : Button, IDisposable
 
     private void UpdateCaptionEffect()
     {
-        if (diameter <= 0) return;
+        if (disposed || diameter <= 0) return;
         var wanted = Math.Max(0, maximumWidth - diameter - CaptionRightPadding);
         var room = Math.Max(0, Width - diameter - CaptionRightPadding);
         var readable = captionTitleWidth;
         var progress = readable <= 0 || wanted + .01 < readable ? 0 : Math.Clamp((room / readable - .65) / .35, 0, 1);
         if (progress > .9999) progress = 1;
-        captionArea.Visibility = progress > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var visibility = progress > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (captionArea.Visibility != visibility) captionArea.Visibility = visibility;
+        if (progress > 0 && (captionArea.ActualWidth <= 0 || captionArea.ActualHeight <= 0)) return;
         captionEffect.Update(progress, captionArea.ActualWidth, captionArea.ActualHeight);
     }
 
     public void SetState(bool on, bool available, string message)
     {
+        if (disposed) return;
         active = on; this.available = available; this.message = message;
-        AutomationProperties.SetItemStatus(this, !available ? "Unavailable" : on ? "On" : "Off");
+        AutomationProperties.SetItemStatus(this, IsToggling ? "Changing..." : !available ? "Unavailable" : on ? "On" : "Off");
         Render();
+    }
+
+    public bool TryBeginToggle()
+    {
+        if (disposed || IsToggling || IsMorphing || !RadioUtility) return false;
+        IsToggling = true; toggleVisualState = active; toggleCompletion = null;
+        nativeToggleUnderlay = Glass.UsesNativeDockBackdrop;
+        hold.Stop(); gesture.Cancel(); pressed = false;
+        AutomationProperties.SetItemStatus(this, "Changing...");
+        Render();
+        toggleLead = PlayToggleAnimationAsync(settle: false);
+        return true;
+    }
+
+    public Task CompleteToggleAsync(Action synchronizeActualState)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async void Finish()
+        {
+            try
+            {
+                await (toggleCompletion ??= CompleteToggleOnUiAsync(synchronizeActualState));
+                completion.TrySetResult();
+            }
+            catch (Exception error) { completion.TrySetException(error); }
+        }
+        if (DispatcherQueue.HasThreadAccess) Finish();
+        else if (!DispatcherQueue.TryEnqueue(Finish)) completion.TrySetResult();
+        return completion.Task;
+    }
+
+    private async Task CompleteToggleOnUiAsync(Action synchronizeActualState)
+    {
+        try
+        {
+            await toggleLead;
+            if (disposed || !IsToggling) return;
+            synchronizeActualState();
+            toggleVisualState = null; Render();
+            GeometryChanged?.Invoke(this, EventArgs.Empty);
+            await PlayToggleAnimationAsync(settle: true);
+        }
+        finally
+        {
+            CancelToggle();
+            if (!disposed) synchronizeActualState();
+        }
+    }
+
+    public void CancelToggle()
+    {
+        toggleMotion?.Stop(); toggleMotion = null;
+        toggleAnimationCompletion?.TrySetResult(); toggleAnimationCompletion = null;
+        IsToggling = false; toggleVisualState = null;
+        if (disposed) return;
+        scale.ScaleX = scale.ScaleY = symbols.Opacity = 1;
+        if (!disposed) { Render(); GeometryChanged?.Invoke(this, EventArgs.Empty); }
+    }
+
+    private Task PlayToggleAnimationAsync(bool settle)
+    {
+        if (disposed || !animations) return Task.CompletedTask;
+        var story = new Storyboard(); toggleMotion = story;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        toggleAnimationCompletion = completion;
+        if (settle) AnimateTransition(story, symbols, "Opacity", 1, .65, 1, true, TransitionDuration);
+        else
+        {
+            AnimateTransition(story, scale, "ScaleX", 1, .84, 1, true, TransitionDuration);
+            AnimateTransition(story, scale, "ScaleY", 1, .84, 1, true, TransitionDuration);
+        }
+        story.Completed += (_, _) =>
+        {
+            story.Stop();
+            if (!disposed) scale.ScaleX = scale.ScaleY = symbols.Opacity = 1;
+            completion.TrySetResult();
+        };
+        try { story.Begin(); }
+        catch (Exception error) { completion.TrySetException(error); }
+        return completion.Task;
+    }
+
+    private static void AnimateTransition(Storyboard story, DependencyObject target, string property,
+        double from, double middle, double to, bool shrink, TimeSpan duration)
+    {
+        var animation = new DoubleAnimationUsingKeyFrames { Duration = new Duration(duration), EnableDependentAnimation = true };
+        void Frame(double at, double value) => animation.KeyFrames.Add(new EasingDoubleKeyFrame
+        {
+            KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromTicks((long)(duration.Ticks * at))), Value = value,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        });
+        Frame(0, from); Frame(.3, shrink ? middle : from); Frame(.7, middle); Frame(1, to);
+        Storyboard.SetTarget(animation, target); Storyboard.SetTargetProperty(animation, property); story.Children.Add(animation);
     }
 
     public async Task SetDetailsOpenAsync(bool open)
     {
-        if (disposed || Definition.Kind != UtilityKind.Wifi || detailsOpen == open) return;
+        if (disposed || !RadioUtility || detailsOpen == open) return;
         detailsOpen = open;
         IsMorphing = true;
         var revision = ++morphRevision;
         Render();
-        // Decode both vectors before crossfading, including the first opening.
-        await Task.WhenAll(icon.SetAsync(Definition.Icon, active, IconColor()), settingsIcon.SetAsync("gear-six", active, IconColor()));
+        // Decode all vectors before crossfading, including the first opening.
+        await Task.WhenAll(icon.SetAsync(Definition.Icon, DisplayOn && !RadioUtility, IconColor()),
+            settingsIcon.SetAsync("gear-six", DisplayOn, IconColor()), settingsBadge.SetAsync(Definition.Icon, false, IconColor()));
         if (disposed || revision != morphRevision) return;
         var fromScale = morphScale.ScaleX;
         var fromWifi = icon.Opacity;
-        var fromSettings = settingsIcon.Opacity;
+        var fromSettings = settingsSymbols.Opacity;
         morph?.Stop();
         morphScale.ScaleX = morphScale.ScaleY = 1;
-        icon.Opacity = open ? 0 : 1; settingsIcon.Opacity = open ? 1 : 0;
-        if (!animations) { IsMorphing = false; return; }
-        var duration = TimeSpan.FromMilliseconds(open ? 180 : 120);
+        icon.Opacity = open ? 0 : 1; settingsSymbols.Opacity = open ? 1 : 0;
+        if (!animations) { IsMorphing = false; TrackPresentation(false); return; }
+        var duration = open ? TransitionDuration : TimeSpan.FromMilliseconds(120);
         morph = new();
-        void Animate(DependencyObject target, string property, double from, double middle, double to, bool shrink)
+        AnimateTransition(morph, morphScale, "ScaleX", fromScale, .84, 1, true, duration);
+        AnimateTransition(morph, morphScale, "ScaleY", fromScale, .84, 1, true, duration);
+        AnimateTransition(morph, icon, "Opacity", fromWifi, open ? 0 : 1, open ? 0 : 1, false, duration);
+        AnimateTransition(morph, settingsSymbols, "Opacity", fromSettings, open ? 1 : 0, open ? 1 : 0, false, duration);
+        morph.Completed += (_, _) =>
         {
-            var animation = new DoubleAnimationUsingKeyFrames { Duration = new Duration(duration), EnableDependentAnimation = true };
-            void Frame(double at, double value) => animation.KeyFrames.Add(new EasingDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromTicks((long)(duration.Ticks * at))), Value = value,
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
-            });
-            Frame(0, from); Frame(.3, shrink ? middle : from); Frame(.7, middle); Frame(1, to);
-            Storyboard.SetTarget(animation, target); Storyboard.SetTargetProperty(animation, property); morph.Children.Add(animation);
-        }
-        Animate(morphScale, "ScaleX", fromScale, .84, 1, true);
-        Animate(morphScale, "ScaleY", fromScale, .84, 1, true);
-        Animate(icon, "Opacity", fromWifi, open ? 0 : 1, open ? 0 : 1, false);
-        Animate(settingsIcon, "Opacity", fromSettings, open ? 1 : 0, open ? 1 : 0, false);
-        morph.Completed += (_, _) => { if (revision == morphRevision) IsMorphing = false; };
+            if (revision != morphRevision) return;
+            IsMorphing = false; TrackPresentation(false);
+            GeometryChanged?.Invoke(this, EventArgs.Empty);
+        };
         morph.Begin();
+        TrackPresentation(dockMode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) && !DisplayOn);
     }
 
     private UtilityTheme IconTheme => dockMode.GlassStyle() is null
         ? dockMode == DockAppearanceMode.Light ? UtilityTheme.Light : UtilityTheme.Dark : theme;
     private uint IconColor()
     {
-        if (Definition.Kind == UtilityKind.Wifi) return active ? Definition.Accent : 0xFFFFFFFF;
-        return UtilityColors.Icon(IconTheme, active, !available);
+        if (RadioUtility) return DisplayOn ? Definition.Accent : 0xFFFFFFFF;
+        return UtilityColors.Icon(IconTheme, DisplayOn, !available);
     }
 
     private void Render()
     {
-        Glass.UseDockMaterial = Definition.Kind == UtilityKind.Wifi && !active;
-        AutomationProperties.SetName(this, detailsOpen ? "Wi-Fi Settings" : Definition.Name);
-        AutomationProperties.SetHelpText(this, detailsOpen ? "Open Windows Wi-Fi Settings. Right-click shows networks."
-            : message + ". Left-click toggles Wi-Fi; right-click shows networks.");
+        var sharedGlass = dockMode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
+        var displayOn = DisplayOn;
+        Glass.UseDockMaterial = !displayOn && (sharedGlass || RadioUtility);
+        if (!IsMorphing || !sharedGlass || displayOn) TrackPresentation(false);
+        var items = Definition.Kind == UtilityKind.Bluetooth ? "paired devices" : "networks";
+        AutomationProperties.SetName(this, detailsOpen ? Definition.Name + " Settings" : Definition.Name);
+        AutomationProperties.SetHelpText(this, detailsOpen ? $"Open Windows {Definition.Name} Settings. Right-click shows {items}."
+            : message + $". Left-click toggles {Definition.Name}; right-click shows {items}.");
         if (Definition.Kind == UtilityKind.Wifi)
             AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to expand or collapse.");
-        ToolTipService.SetToolTip(this, detailsOpen ? "Wi-Fi Settings" : message);
-        var color = active ? Definition.Accent : UtilityColors.Surface(theme);
+        if (Definition.Kind == UtilityKind.Bluetooth)
+            AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to show paired devices.");
+        ToolTipService.SetToolTip(this, IsToggling ? "Changing..." : detailsOpen ? Definition.Name + " Settings" : message);
+        var color = displayOn ? Definition.Accent : UtilityColors.Surface(theme);
         var surfaceColor = global::Windows.UI.Color.FromArgb(
-            active ? (byte)(pressed ? 110 : 85) : dockMode.GlassStyle() is null ? (byte)255 : hover ? (byte)36 : (byte)12,
+            displayOn ? (byte)(pressed ? 110 : 85) : dockMode.GlassStyle() is null ? (byte)255 : hover ? (byte)36 : (byte)12,
             (byte)(color >> 16), (byte)(color >> 8), (byte)color);
         if (dockMode.GlassStyle() is null)
         {
             var basis = Desktop.DockControlPalette.SolidSurface(dockMode);
-            var blend = active ? surfaceColor.A / 255d : 0;
+            var blend = displayOn ? surfaceColor.A / 255d : 0;
             surfaceColor = global::Windows.UI.Color.FromArgb(255,
                 (byte)(basis.R + (surfaceColor.R - basis.R) * blend),
                 (byte)(basis.G + (surfaceColor.G - basis.G) * blend),
                 (byte)(basis.B + (surfaceColor.B - basis.B) * blend));
         }
-        if (Definition.Kind == UtilityKind.Wifi)
+        if (sharedGlass && !displayOn)
+            surfaceColor = Microsoft.UI.Colors.Transparent;
+        else if (RadioUtility)
         {
-            if (active)
+            if (displayOn)
                 surfaceColor = global::Windows.UI.Color.FromArgb((byte)(pressed ? 220 : hover ? 245 : 235), 255, 255, 255);
             else if (dockMode.GlassStyle() is null)
                 surfaceColor = Desktop.DockControlPalette.SolidSurface(dockMode);
@@ -337,7 +483,7 @@ internal sealed class UtilityButton : Button, IDisposable
                 surfaceColor = Desktop.DockControlPalette.Surface(dockMode, (byte)(pressed ? 30 : hover ? 20 : 0));
         }
         tint.Background = new SolidColorBrush(surfaceColor);
-        var targetScale = Definition.Kind == UtilityKind.Wifi ? 1 : pressed ? .96 : hover ? 1.03 : 1;
+        var targetScale = RadioUtility ? 1 : pressed ? .96 : hover ? 1.03 : 1;
         if (scaleTarget != targetScale)
         {
             scaleTarget = targetScale;
@@ -356,17 +502,27 @@ internal sealed class UtilityButton : Button, IDisposable
                 motion.Begin();
             }
         }
-        _ = icon.SetAsync(Definition.Icon, active, IconColor());
-        var captionTheme = Definition.Kind == UtilityKind.Wifi && active ? UtilityTheme.Light : IconTheme;
+        _ = icon.SetAsync(Definition.Icon, displayOn && !RadioUtility, IconColor());
+        var captionTheme = Definition.Kind == UtilityKind.Wifi && displayOn ? UtilityTheme.Light : IconTheme;
         var textColor = UtilityColors.Icon(captionTheme, false, !available);
         captionTitle.Foreground = captionNetwork.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
             (byte)(textColor >> 16), (byte)(textColor >> 8), (byte)textColor));
-        if (Definition.Kind == UtilityKind.Wifi) _ = settingsIcon.SetAsync("gear-six", active, IconColor());
+        if (RadioUtility)
+        {
+            settingsIcon.Width = settingsIcon.Height = symbols.Width * (displayOn ? .9 : 1);
+            settingsIcon.HorizontalAlignment = displayOn ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+            settingsIcon.VerticalAlignment = displayOn ? VerticalAlignment.Top : VerticalAlignment.Center;
+            settingsBadge.Visibility = displayOn ? Visibility.Visible : Visibility.Collapsed;
+            _ = settingsIcon.SetAsync("gear-six", displayOn, IconColor());
+            _ = settingsBadge.SetAsync(Definition.Icon, false, IconColor());
+        }
     }
-    public void Dispose() { disposed = true; IsMorphing = false; morphRevision++; hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop(); captionEffect.Dispose(); Glass.Dispose(); }
+    public void Dispose() { disposed = true; CancelToggle(); IsMorphing = false; TrackPresentation(false); morphRevision++; hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop(); captionEffect.Dispose(); Glass.Dispose(); }
 
     protected override void OnKeyDown(KeyRoutedEventArgs e)
     {
+        if (IsToggling && e.Key is (global::Windows.System.VirtualKey.Space or global::Windows.System.VirtualKey.Enter))
+        { e.Handled = true; return; }
         if (e.Key is global::Windows.System.VirtualKey.Space or global::Windows.System.VirtualKey.Enter) gesture.Keyboard();
         base.OnKeyDown(e);
     }

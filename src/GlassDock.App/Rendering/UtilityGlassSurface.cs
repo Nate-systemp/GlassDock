@@ -25,6 +25,7 @@ internal sealed class UtilityGlassSurface : IDisposable
     private PixelShaderEffect? shader;
     private LiquidGlassShaderState? previous;
     private CanvasGeometry? geometry;
+    private CanvasDevice? renderingDevice;
     private float diameter, dpi, layoutScale;
     private float height, radius;
     public bool Circular { get; init; } = true;
@@ -35,6 +36,7 @@ internal sealed class UtilityGlassSurface : IDisposable
     public Vector4 Bounds { get; set; }
     public bool Active { get; set; }
     public bool UseDockMaterial { get; set; }
+    public bool UsesNativeDockBackdrop => UseDockMaterial && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic);
     public UtilityGlassSurface() => drawRim = (drawing, shape) =>
     {
         // Frosted/Acrylic dock material already owns its texture; omit the utility's extra Clear-style sheen.
@@ -53,6 +55,8 @@ internal sealed class UtilityGlassSurface : IDisposable
     public void Draw(CanvasDevice device, CanvasBitmap bitmap, Vector2 origin, Vector2 frame, float scale)
     {
         if (!Active) return;
+        if (renderingDevice is not null && !ReferenceEquals(renderingDevice, device)) Dispose();
+        renderingDevice = device;
         shader ??= new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
         var size = Bounds.Z * scale;
         var nextHeight = Bounds.W * scale;
@@ -77,7 +81,9 @@ internal sealed class UtilityGlassSurface : IDisposable
                 target.Draw(device, shader, geometry, new(bounds.X, bounds.Y, size, height), scale, drawRim);
             else
             {
-                var physical = backdrop with { BlurAmount = backdrop.BlurAmount * scale };
+                // Match the native dock only for OFF surfaces; retain the existing ON treatment.
+                var physical = UseDockMaterial ? RefractionLayer.ForNativeBackend(backdrop)
+                    : backdrop with { BlurAmount = backdrop.BlurAmount * scale };
                 if (materialEffect is null || physical != appliedBackdrop)
                 {
                     materialEffect?.Dispose();
@@ -91,6 +97,8 @@ internal sealed class UtilityGlassSurface : IDisposable
                 baseBlur!.Source = bitmap; materialBlur!.Source = bitmap;
                 target.Draw(device, materialEffect, geometry, new(bounds.X, bounds.Y, size, height), scale, drawRim);
             }
+            Element.Opacity = UseDockMaterial && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic)
+                ? material.SurfaceOpacity : 1;
             Element.Visibility = Visibility.Visible;
             if (!HasFrame) { HasFrame = true; RenderingChanged?.Invoke(this, EventArgs.Empty); }
         }
@@ -102,8 +110,15 @@ internal sealed class UtilityGlassSurface : IDisposable
         }
     }
 
+    public void Hide()
+    {
+        Element.Visibility = Visibility.Collapsed;
+        if (HasFrame) { HasFrame = false; RenderingChanged?.Invoke(this, EventArgs.Empty); }
+    }
+
     public void Dispose()
     {
+        renderingDevice = null;
         shader?.Dispose(); shader = null; previous = null;
         blur?.Dispose(); blur = null;
         materialEffect?.Dispose(); materialEffect = null; appliedBackdrop = null;

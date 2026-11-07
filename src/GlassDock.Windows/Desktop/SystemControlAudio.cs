@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 namespace GlassDock.Windows.Desktop;
 
 // Retains the existing Core Audio endpoint/COM lifetime implementation.
-internal sealed class SystemControlAudio
+internal sealed partial class SystemControlAudio
 {
     private static readonly Type? MmDeviceEnumeratorType =
         Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"), throwOnError: false);
@@ -121,7 +121,7 @@ internal sealed class SystemControlAudio
     private interface IMMDeviceEnumerator
     {
         [PreserveSig]
-        int EnumAudioEndpoints(EDataFlow dataFlow, uint stateMask, out nint devices);
+        int EnumAudioEndpoints(EDataFlow dataFlow, uint stateMask, out IMMDeviceCollection devices);
 
         [PreserveSig]
         int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice endpoint);
@@ -149,7 +149,7 @@ internal sealed class SystemControlAudio
             [MarshalAs(UnmanagedType.IUnknown)] out object instance);
 
         [PreserveSig]
-        int OpenPropertyStore(uint access, out nint properties);
+        int OpenPropertyStore(uint access, out Applications.ApplicationNative.IPropertyStore properties);
 
         [PreserveSig]
         int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);

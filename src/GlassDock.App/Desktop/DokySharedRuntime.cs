@@ -13,6 +13,7 @@ internal sealed class DokySharedRuntime : IDisposable
 
     public WindowsApplicationService Applications { get; } = new();
     public GlassDock.Windows.Desktop.WifiUtilityService Wifi { get; } = new();
+    public GlassDock.Windows.Desktop.BluetoothUtilityService Bluetooth { get; } = new();
     public WindowsToastBadgeProvider WindowsToastBadges { get; } = new();
     public BadgeCoordinator Badges { get; }
 
@@ -44,6 +45,7 @@ internal sealed class DokySharedRuntime : IDisposable
         if (disposed) return;
         disposed = true;
         Wifi.Dispose();
+        Bluetooth.Dispose();
         Badges.Dispose();
         Applications.Dispose();
     }

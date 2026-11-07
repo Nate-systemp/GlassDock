@@ -16,6 +16,7 @@ public sealed partial class DesktopOverlayWindow
 {
     private readonly Canvas utilityArea = new();
     private readonly Dictionary<UtilityKind, UtilityButton> utilityButtons = [];
+    private readonly List<UtilityButton> fadingUtilities = [];
     private readonly Dictionary<UtilityKind, double> utilityOffsets = [];
     private WifiUtilityService? utilityWifi;
     private bool ownsWifi;
@@ -29,20 +30,22 @@ public sealed partial class DesktopOverlayWindow
                 button.Glass.Bounds.X - 2, button.Glass.Bounds.Y - 2,
                 button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y)));
 
-    private void InitializeUtilities(WifiUtilityService? shared)
+    private void InitializeUtilities(WifiUtilityService? shared, BluetoothUtilityService? sharedBluetooth)
     {
         ownsWifi = shared is null; utilityWifi = shared ?? new();
         utilityWifi.Changed += WifiStateChanged;
         utilityWifi.NetworksChanged += WifiStateChanged;
+        InitializeBluetooth(sharedBluetooth);
         root.Children.Add(utilityArea); Canvas.SetZIndex(utilityArea, 20);
         Activated += (_, e) =>
         {
-            if (e.WindowActivationState == WindowActivationState.Deactivated) DismissWifiSettingsOnly();
+            if (e.WindowActivationState == WindowActivationState.Deactivated)
+            { DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); }
         };
         root.AddHandler(UIElement.KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) =>
         {
-            if (e.Key != global::Windows.System.VirtualKey.Escape || wifiSettingsOnly is null) return;
-            DismissWifiSettingsOnly(); e.Handled = true;
+            if (e.Key != global::Windows.System.VirtualKey.Escape || (wifiSettingsOnly is null && bluetoothSettingsOnly is null)) return;
+            DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); e.Handled = true;
         }), true);
         root.AddHandler(UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
         {
@@ -50,9 +53,12 @@ public sealed partial class DesktopOverlayWindow
             if (wifiSettingsOnly is { } settingsButton && !new global::Windows.Foundation.Rect(settingsButton.Glass.Bounds.X,
                 settingsButton.Glass.Bounds.Y, settingsButton.Glass.Bounds.Z, settingsButton.Glass.Bounds.W).Contains(point))
                 DismissWifiSettingsOnly();
-            if (wifiWindow is not { IsOpen: true }) return;
+            if (bluetoothSettingsOnly is { } bluetoothButton && !new global::Windows.Foundation.Rect(bluetoothButton.Glass.Bounds.X,
+                bluetoothButton.Glass.Bounds.Y, bluetoothButton.Glass.Bounds.Z, bluetoothButton.Glass.Bounds.W).Contains(point))
+                DismissBluetoothSettingsOnly();
+            if (wifiWindow is not { IsOpen: true } && bluetoothWindow is not { IsOpen: true }) return;
             if (!utilityButtons.Values.Any(b => new global::Windows.Foundation.Rect(b.Glass.Bounds.X, b.Glass.Bounds.Y,
-                b.Glass.Bounds.Z, b.Glass.Bounds.W).Contains(point))) wifiWindow.Hide();
+                b.Glass.Bounds.Z, b.Glass.Bounds.W).Contains(point))) { wifiWindow?.Hide(); bluetoothWindow?.Hide(); }
         }), true);
         SynchronizeUtilities();
     }
@@ -64,13 +70,21 @@ public sealed partial class DesktopOverlayWindow
         foreach (var kind in utilityButtons.Keys.Where(k => !selected.Contains(k)).ToArray())
         {
             if (wifiSettingsOnly?.Definition.Kind == kind) DismissWifiSettingsOnly();
-            wifiWindow?.Hide(immediate: true);
+            if (bluetoothSettingsOnly?.Definition.Kind == kind) DismissBluetoothSettingsOnly();
+            if (kind == UtilityKind.Wifi) wifiWindow?.Hide(immediate: true);
+            if (kind == UtilityKind.Bluetooth) bluetoothWindow?.Hide(immediate: true);
             var old = utilityButtons[kind]; utilityButtons.Remove(kind);
             utilityOffsets.Remove(kind);
             old.IsHitTestVisible = false; old.Glass.Active = false;
-            FadeUtility(old, 0, () => { utilityArea.Children.Remove(old); old.Dispose(); });
+            fadingUtilities.Add(old);
+            FadeUtility(old, 0, () =>
+            {
+                fadingUtilities.Remove(old); utilityArea.Children.Remove(old); old.Dispose();
+                UpdateNativeUtilitySurfaces();
+            });
         }
-        foreach (var definition in UtilityDefinition.All.Where(d => d.Available && selected.Contains(d.Kind)))
+        foreach (var definition in UtilityDefinition.All.Where(d => d.Available && selected.Contains(d.Kind))
+            .OrderBy(d => Array.IndexOf(selected, d.Kind)))
         {
             if (!utilityButtons.TryGetValue(definition.Kind, out var button))
             {
@@ -78,12 +92,24 @@ public sealed partial class DesktopOverlayWindow
                 utilityButtons.Add(definition.Kind, button); utilityArea.Children.Add(button);
                 button.PrimaryRequested += async (_, _) =>
                 {
+                    if (button.Definition.Kind == UtilityKind.Bluetooth)
+                    { await ToggleBluetoothAsync(button); return; }
                     if (button.Definition.Kind == UtilityKind.Wifi &&
                         (ReferenceEquals(wifiSettingsOnly, button) || wifiWindow is { IsDetailsOpen: true }))
+                    {
+                        wifiWindow?.Hide();
+                        DismissWifiSettingsOnly();
                         await new GlassDock.Windows.Applications.WindowsApplicationLauncher().LaunchTargetAsync("ms-settings:network-wifi");
-                    else if (!button.IsMorphing && !utilityWifi.State.Busy) await utilityWifi.ToggleAsync();
+                    }
+                    else if (!button.IsMorphing && !utilityWifi.State.Busy)
+                        await RunUtilityToggleAsync(button, utilityWifi.ToggleAsync, () =>
+                        {
+                            var radio = utilityWifi.State;
+                            button.SetState(radio.On, radio.Available, radio.Message);
+                        });
                 };
-                button.DetailsRequested += (_, _) => ShowWifiNetworks(button);
+                button.DetailsRequested += (_, _) =>
+                { if (button.Definition.Kind == UtilityKind.Bluetooth) ShowBluetoothDevices(button); else ShowWifiNetworks(button); };
                 button.GeometryChanged += (_, _) => { if (!closing) UpdateBackdropBounds(); };
                 button.ExpansionChanged += async (_, _) => { if (button.IsExpanded) await RefreshUtilityConnectionAsync(); };
                 button.Dragged += (item, delta) =>
@@ -91,24 +117,81 @@ public sealed partial class DesktopOverlayWindow
                     utilityOffsets[item.Definition.Kind] = utilityOffsets.GetValueOrDefault(item.Definition.Kind) + delta;
                     UpdateBackdropBounds(); UpdateDockWaveOutline();
                 };
-                button.PointerEntered += async (_, _) => await utilityWifi.RefreshAsync();
+                button.PointerEntered += async (_, _) =>
+                { if (button.Definition.Kind == UtilityKind.Bluetooth) await utilityBluetooth!.RefreshAsync(); else await utilityWifi.RefreshAsync(); };
                 FadeUtility(button, 1);
-                _ = utilityWifi.RefreshAsync();
+                if (button.Definition.Kind == UtilityKind.Bluetooth) _ = utilityBluetooth!.RefreshAsync();
+                else _ = utilityWifi.RefreshAsync();
             }
         }
         UpdateUtilitySurfaces();
         WifiStateChanged(this, EventArgs.Empty);
+        BluetoothStateChanged(this, EventArgs.Empty);
         PositionUtilities();
     }
 
-    private static void FadeUtility(UtilityButton button, double to, Action? complete = null)
+    private async Task RunUtilityToggleAsync(UtilityButton button, Func<Func<Task>, Task> toggle, Action synchronizeActualState)
+    {
+        if (closing || !button.TryBeginToggle()) return;
+        Task? completion = null;
+        Task Finish() => completion ??= button.CompleteToggleAsync(synchronizeActualState);
+        try { await toggle(Finish); }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        { StartupDiagnostics.Write($"{button.Definition.Name} toggle failed", error); }
+        finally
+        {
+            // A skipped native request must also finish the already-started UI transition.
+            try { await Finish(); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                button.CancelToggle();
+                if (!closing) synchronizeActualState();
+                StartupDiagnostics.Write($"{button.Definition.Name} toggle animation failed", error);
+            }
+        }
+    }
+
+    private void FadeUtility(UtilityButton button, double to, Action? complete = null)
     {
         if (!new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
         { button.Opacity = to; complete?.Invoke(); return; }
         var animation = new DoubleAnimation { From = 1 - to, To = to, Duration = new Duration(TimeSpan.FromMilliseconds(140)), EnableDependentAnimation = true };
         Storyboard.SetTarget(animation, button); Storyboard.SetTargetProperty(animation, "Opacity");
         var story = new Storyboard(); story.Children.Add(animation);
-        story.Completed += (_, _) => complete?.Invoke(); story.Begin();
+        void Frame(object? sender, object args)
+        {
+            if (closing) { CompositionTarget.Rendering -= Frame; return; }
+            UpdateNativeUtilitySurfaces();
+        }
+        CompositionTarget.Rendering += Frame;
+        story.Completed += (_, _) =>
+        {
+            CompositionTarget.Rendering -= Frame; complete?.Invoke(); UpdateNativeUtilitySurfaces();
+        };
+        story.Begin();
+    }
+
+    private void UpdateNativeUtilitySurfaces()
+    {
+        var surfaces = new List<(System.Numerics.Vector4 Bounds, float Opacity)>();
+        if (!closing && utilityArea.Visibility == Visibility.Visible && desktopBackdrop.SupportsUtilitySurfaces &&
+            (Application.Current as App)?.BasicRendering != true)
+        {
+            foreach (var button in utilityButtons.Values.Concat(fadingUtilities))
+            {
+                if (!button.IsLoaded || !(button.Glass.UsesNativeDockBackdrop || button.NeedsNativeToggleUnderlay)) continue;
+                if (button.Glass.UsesNativeDockBackdrop)
+                {
+                    button.Glass.Active = false;
+                    button.Glass.Element.Visibility = Visibility.Collapsed;
+                }
+                var bounds = button.GlassPresentationBounds();
+                if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+                surfaces.Add((new((float)bounds.X, (float)bounds.Y, (float)bounds.Width, (float)bounds.Height),
+                    (float)(utilityArea.Opacity * button.Opacity)));
+            }
+        }
+        desktopBackdrop.SetUtilitySurfaces(surfaces);
     }
 
     private void PositionUtilities()
@@ -116,32 +199,35 @@ public sealed partial class DesktopOverlayWindow
         var visible = !closing && !windowManager.FullscreenSuppressed && state.State is DockState.Expanding or DockState.Expanded or DockState.Collapsing;
         utilityArea.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         utilityArea.Opacity = surface.Opacity;
-        if (!visible) DismissWifiSettingsOnly();
-        if (utilityButtons.Count == 0) return;
+        if (!visible) { DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); }
+        if (utilityButtons.Count == 0) { UpdateNativeUtilitySurfaces(); return; }
         var top = root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight;
         var dock = new HomeCardRect((root.ActualWidth - surface.ActualWidth) / 2, top,
             surface.ActualWidth, Math.Max(1, Math.Min(surface.ActualHeight, root.ActualHeight - top)));
         var mode = settingsSession.Current.DockAppearanceMode;
         var gap = 12 * DockScale;
         var index = 0;
+        var expansionShift = 0d;
         var minimumLeft = dock.X + dock.Width + gap;
-        var buttons = utilityButtons.Values.ToArray();
-        foreach (var button in utilityButtons.Values)
+        var buttons = settingsSession.Current.SelectedUtilities.Where(utilityButtons.ContainsKey)
+            .Select(kind => utilityButtons[kind]).ToArray();
+        foreach (var button in buttons)
         {
-            if (button.Definition.Kind == UtilityKind.Wifi) utilityOffsets.Remove(UtilityKind.Wifi);
+            if (button.Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth) utilityOffsets.Remove(button.Definition.Kind);
             var slot = UtilityPlacement.Beside(dock, gap, index);
-            var maximumRight = index + 1 < buttons.Length
-                ? UtilityPlacement.Beside(dock, gap, index + 1).X + utilityOffsets.GetValueOrDefault(buttons[index + 1].Definition.Kind) - gap
-                : root.ActualWidth - 16;
+            slot = slot with { X = slot.X + expansionShift };
+            // Reserve the remaining circles, allowing Wi-Fi to push them along its width animation.
+            var maximumRight = root.ActualWidth - 16 - (buttons.Length - index - 1) * (dock.Height + gap);
             var rect = UtilityPlacement.WithinRow(slot, slot.X + utilityOffsets.GetValueOrDefault(button.Definition.Kind), minimumLeft, maximumRight);
             utilityOffsets[button.Definition.Kind] = rect.X - slot.X;
             index++;
-            if (button.Definition.Kind == UtilityKind.Wifi)
+            if (button.Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth)
             {
                 var diameter = rect.Height * .96;
                 rect = new(rect.X + (rect.Width - diameter) / 2, rect.Y + (rect.Height - diameter) / 2, diameter, diameter);
             }
             button.Configure(rect.Height, Appearance.IconSize, settingsSession.Current.UtilityTheme, mode, maximumRight - rect.X);
+            expansionShift += Math.Max(0, button.Width - rect.Width);
             Canvas.SetLeft(button, rect.X); Canvas.SetTop(button, rect.Y);
             button.Glass.Bounds = new((float)rect.X, (float)rect.Y, (float)button.Width, (float)rect.Height);
             minimumLeft = rect.X + button.Width + gap;
@@ -150,12 +236,14 @@ public sealed partial class DesktopOverlayWindow
             button.Glass.Active = visible && mode.GlassStyle() is not null && surface.Opacity > .01 && (Application.Current as App)?.BasicRendering != true;
             button.IsHitTestVisible = state.State == DockState.Expanded;
         }
+        UpdateNativeUtilitySurfaces();
         if (wifiWindow is { IsOpen: true } window)
         {
             window.ApplyAppearance(mode, liquidGlass.BackdropMaterial, liquidGlass.Material, (float)DockScale, settingsSession.Current.ClearCircularHighlightsEnabled);
             if (!visible) window.Hide(immediate: true);
             else if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) window.Reposition(source.Glass.Bounds);
         }
+        PositionBluetoothWindow(mode, visible);
     }
 
     private void WifiStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
@@ -167,12 +255,13 @@ public sealed partial class DesktopOverlayWindow
         var connection = utilityWifi.State.On
             ? utilityWifi.CachedNetworks.FirstOrDefault(n => n.Connected)?.Name ?? (utilityWifi.HasNetworkSnapshot ? "Not Connected" : "")
             : utilityWifi.State.Available ? "Wi-Fi Off" : "";
-        foreach (var button in utilityButtons.Values)
+        if (utilityButtons.TryGetValue(UtilityKind.Wifi, out var button))
         {
             button.SetState(utilityWifi.State.On, utilityWifi.State.Available, utilityWifi.State.Message);
-            if (button.Definition.Kind == UtilityKind.Wifi) button.SetConnectionText(connection);
+            button.SetConnectionText(connection);
         }
         UpdateUtilitySurfaces();
+        UpdateLiquidGlass();
     });
 
     private async Task RefreshUtilityConnectionAsync()
@@ -193,12 +282,14 @@ public sealed partial class DesktopOverlayWindow
     {
         var surfaces = utilityButtons.Values.Select(b => b.Glass).ToList();
         if (wifiWindow is { IsOpen: true } window) surfaces.AddRange(window.GlassSurfaces);
+        if (bluetoothWindow is { IsOpen: true } bluetooth) surfaces.AddRange(bluetooth.GlassSurfaces);
         liquidGlass.SetUtilities(surfaces);
     }
 
     private void ShowWifiNetworks(UtilityButton button)
     {
         if (utilityWifi is null || closing) return;
+        bluetoothWindow?.Hide(immediate: true); DismissBluetoothSettingsOnly();
         root.ContextFlyout?.Hide();
         if (!utilityWifi.State.On)
         {
@@ -255,6 +346,7 @@ public sealed partial class DesktopOverlayWindow
 
     private void DisposeUtilities()
     {
+        DisposeBluetooth();
         DismissWifiSettingsOnly();
         wifiWindow?.Hide(immediate: true);
         if (utilityWifi is not null)
@@ -263,7 +355,9 @@ public sealed partial class DesktopOverlayWindow
             if (ownsWifi) utilityWifi.Dispose();
         }
         liquidGlass.SetUtilities(Array.Empty<Rendering.UtilityGlassSurface>());
-        foreach (var button in utilityButtons.Values) button.Dispose();
+        desktopBackdrop.SetUtilitySurfaces([]);
+        foreach (var button in utilityButtons.Values.Concat(fadingUtilities)) button.Dispose();
+        fadingUtilities.Clear();
         utilityButtons.Clear();
     }
 }

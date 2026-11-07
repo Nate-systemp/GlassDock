@@ -114,7 +114,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             showSettingsOverride,
             restoreTaskbarOverride,
             resumeTaskbarOverride,
-            runtime.Wifi)
+            runtime.Wifi, runtime.Bluetooth)
         {
             ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome(),
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
@@ -123,9 +123,8 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private void SnippingRequested(object? sender, EventArgs e)
     {
         if (shuttingDown || disposed) return;
-        if (screenshotActive) EndScreenshotCapture();
-        // Only clear-mode surfaces require temporary exposure. Other materials
-        // remain naturally screenshot-visible and do not change appearance.
+        if (screenshotActive) return;
+        // Utilities share this capture even when the main dock is Frosted/Acrylic.
         PrimaryWindow.BeginSnippingCapture();
         foreach (var secondary in secondaryDocks.Values)
             secondary.BeginSnippingCapture();
@@ -147,9 +146,12 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         screenshotTimer.Stop();
         if (!screenshotActive) return;
-        screenshotActive = false;
-        PrimaryWindow.EndSnippingCapture();
-        foreach (var secondary in secondaryDocks.Values) secondary.EndSnippingCapture();
+        try
+        {
+            PrimaryWindow.EndSnippingCapture();
+            foreach (var secondary in secondaryDocks.Values) secondary.EndSnippingCapture();
+        }
+        finally { screenshotActive = false; }
     }
 
     private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs e)

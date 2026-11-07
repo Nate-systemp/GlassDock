@@ -177,11 +177,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             {
                 device = CanvasDevice.GetSharedDevice();
                 shader = new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
-                if (popupTarget is null)
-                {
-                    swapChain = new CanvasSwapChain(device, next.Width, next.Height, 96);
-                    Panel.SwapChain = swapChain;
-                }
                 {
                     popupCrop = new();
                     popupBlur = new() { Source = popupCrop, BorderMode = EffectBorderMode.Hard };
@@ -195,6 +190,13 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                 SetStatus(CaptureBorderPermission.IsAllowed
                     ? "Liquid awaiting GPU capture · borderless permission granted"
                     : "Liquid awaiting GPU capture · Windows capture indicator required");
+            }
+            // Utility-only capture draws into its retained drawing targets; it
+            // must not churn an unused WinUI SwapChainPanel on every radio toggle.
+            if (popupTarget is null && clearActive && swapChain is null)
+            {
+                swapChain = new CanvasSwapChain(device!, next.Width, next.Height, 96);
+                Panel.SwapChain = swapChain;
             }
             if (swapChain is not null && (swapChain.Size.Width != next.Width || swapChain.Size.Height != next.Height))
                 swapChain.ResizeBuffers(next.Width, next.Height);
@@ -210,28 +212,35 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
     }
-    // Called on the UI thread. Preserve the already-presented swap-chain image,
-    // rather than re-rendering a frame that might include this window recursively.
+    // Called on the UI thread. Re-present only our owned clean frame,
+    // never a monitor sample that might include this window recursively.
     public bool BeginScreenshotMode()
     {
         if (screenshotFrozen) return true;
         if (disposed || !enabled || capture is null || bitmap is null ||
             !(clearActive && Output.Visibility == Visibility.Visible || utilities.Any(u => u.Active && u.HasFrame))) return false;
-        // Detach retained references to pooled WGC surfaces before stopping the pool.
-        shader!.Source1 = null;
-        if (popupCrop is not null) popupCrop.Source = null;
-        if (lensBackdrop is not null) lensBackdrop.Source1 = null;
-        if (lensBlur is not null) lensBlur.Source = null;
-        bitmap.Dispose(); bitmap = null;
-        currentFrame?.Dispose(); currentFrame = null;
-        screenshotFrozen = true; // stop any queued renders before toggling display affinity
+        CanvasRenderTarget? snapshot = null;
         try
         {
+            // Own a clean GPU copy: affinity changes can invalidate presentation,
+            // and pooled WGC surfaces cannot outlive the stopped frame pool.
+            snapshot = new CanvasRenderTarget(device!, bitmap.SizeInPixels.Width, bitmap.SizeInPixels.Height, 96);
+            using (var drawing = snapshot.CreateDrawingSession()) drawing.DrawImage(bitmap);
+            shader!.Source1 = null;
+            if (popupCrop is not null) popupCrop.Source = null;
+            if (lensBackdrop is not null) lensBackdrop.Source1 = null;
+            if (lensBlur is not null) lensBlur.Source = null;
+            bitmap.Dispose(); bitmap = snapshot; snapshot = null;
+            currentFrame?.Dispose(); currentFrame = null;
+            screenshotFrozen = true; // stop queued sampling before toggling display affinity
             if (!capture.PauseForScreenshot())
             {
                 screenshotFrozen = false;
+                QueueDraw();
                 return false;
             }
+            DrawFrame(visualChanged: true, frozenFrame: true);
+            if (!screenshotFrozen) return false;
             SetStatus("Liquid screenshot mode · frozen clean frame");
             return true;
         }
@@ -240,15 +249,17 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             Fail(error);
             return false;
         }
+        finally { snapshot?.Dispose(); }
     }
 
     public void EndScreenshotMode()
     {
-        if (!screenshotFrozen) return;
+        if (!screenshotFrozen) { failed = false; return; }
         screenshotFrozen = false;
         try
         {
             capture?.ResumeAfterScreenshot();
+            DrawFrame(visualChanged: true, frozenFrame: true);
             QueueDraw();
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
@@ -265,17 +276,18 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         queuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         if (!dispatcher.TryEnqueue(Draw)) drawGate.EnqueueFailed();
     }
-    private void Draw()
+    private void Draw() => DrawFrame(drawGate.Begin());
+    private void DrawFrame(bool visualChanged, bool frozenFrame = false)
     {
         var scheduledAt = queuedAt;
-        var visualChanged = drawGate.Begin();
-        if (disposed || !enabled || screenshotFrozen || capture is null || shader is null || (swapChain is null && popupTarget is null)) return;
+        if (disposed || !enabled || (screenshotFrozen && !frozenFrame) || capture is null || shader is null ||
+            (clearActive && swapChain is null && popupTarget is null)) return;
         var started = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         long preparedAt = 0;
         if (started != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordDrawQueueDelay(started - scheduledAt);
         try
         {
-            var pending = capture.TakeFrame();
+            var pending = frozenFrame ? null : capture.TakeFrame();
             // A queued FrameArrived notification can outlive the frame it announced.
             // Keep the already-presented output unless geometry/content changed.
             if (pending is null && !visualChanged)
@@ -479,7 +491,9 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
-        foreach (var utility in utilities) utility.Dispose();
+        // Utility panels/buttons own their targets. A stopped monitor capture
+        // hides them without disposing visuals still referenced by WinUI.
+        foreach (var utility in utilities) utility.Hide();
         screenshotFrozen = false;
         ReleaseLens();
         Output.Visibility = Visibility.Collapsed;

@@ -26,6 +26,7 @@ internal sealed class WindowsKeyHook : IDisposable
     // brief fallback/helper handoff before the latest UI state arrives.
     private State state = new(false, true, 0);
     private uint pressRevision;
+    private uint snippingRevision;
     public void RecoverAfterResume()
     {
         // Must run on the owning message-pump thread. Re-register because Windows
@@ -431,22 +432,23 @@ internal sealed class WindowsKeyHook : IDisposable
         // OTHER KEYS
         // ==================================================
         //
-        // Observe Win+Shift+S without intercepting or delaying the OS shortcut.
+        // Observe Win+Shift+S and Print Screen without intercepting either shortcut.
         // The callback merely prepares the already-rendered glass for Snipping.
-        if (keyCode == 0x53) // S
+        if (keyCode is 0x53 or 0x2C) // S / Print Screen
         {
             if (!down) snipKeyHeld = false;
-            else if (!snipKeyHeld && winHeld && gesture.IsShiftHeld)
+            else if (!snipKeyHeld && (keyCode == 0x2C || winHeld && gesture.IsShiftHeld))
             {
                 snipKeyHeld = true;
                 snipSessionActive = true;
-                snippingShortcut?.Invoke(pressRevision);
+                snippingRevision = keyCode == 0x2C ? current.Revision : pressRevision;
+                snippingShortcut?.Invoke(snippingRevision);
             }
         }
         else if (keyCode == 0x1B && down && snipSessionActive) // Escape cancels a snip
         {
             snipSessionActive = false;
-            snippingCanceled?.Invoke(pressRevision);
+            snippingCanceled?.Invoke(snippingRevision);
         }
         // Keep WindowsKeyGesture synchronized so regular
         // shortcuts such as Win+E, Win+R, Win+D remain chords.
