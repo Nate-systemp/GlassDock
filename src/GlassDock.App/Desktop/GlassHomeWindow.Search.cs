@@ -240,7 +240,8 @@ internal sealed partial class GlassHomeWindow
         var revision = visibilityRevision;
         try
         {
-            var success = await launcher.LaunchTargetAsync(result.LaunchTarget);
+            var success = await launcher.LaunchTargetAsync(result.LaunchTarget,
+                owner: WinRT.Interop.WindowNative.GetWindowHandle(this));
             if (closed || visibilityRevision != revision) return;
             if (success) HideHome();
             else

@@ -103,7 +103,7 @@
           </ComboBox>
           <Grid x:Name="UtilitiesGrid">
             <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
           </Grid>
         </StackPanel>
         <StackPanel x:Name="DockPage" Spacing="24" Visibility="Collapsed">

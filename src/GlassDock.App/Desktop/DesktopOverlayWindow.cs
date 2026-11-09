@@ -321,7 +321,8 @@ public sealed partial class DesktopOverlayWindow : Window
         Action? restoreTaskbarOverride = null,
         Action? resumeTaskbarOverride = null,
         WifiUtilityService? sharedWifi = null, BluetoothUtilityService? sharedBluetooth = null,
-        AirplaneModeUtilityService? sharedAirplaneMode = null)
+        AirplaneModeUtilityService? sharedAirplaneMode = null, NightLightUtilityService? sharedNightLight = null,
+        EnergySaverUtilityService? sharedEnergySaver = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -477,7 +478,7 @@ public sealed partial class DesktopOverlayWindow : Window
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator, hoverArtworkForeground);
         animation.HoverPresentationChanged += (_, _) => UpdateDockWaveOutline();
-        InitializeUtilities(sharedWifi, sharedBluetooth, sharedAirplaneMode);
+        InitializeUtilities(sharedWifi, sharedBluetooth, sharedAirplaneMode, sharedNightLight, sharedEnergySaver);
 
         ApplyAppearance(settingsSession.Appearance);
         animation.PlacementChanged += (_, _) =>
@@ -1008,7 +1009,7 @@ public sealed partial class DesktopOverlayWindow : Window
                 SetStatus($"Windows could not access a running {item.Name} window.");
                 return;
             }
-            if (!applications.Activate(item))
+            if (!applications.Activate(item, WinRT.Interop.WindowNative.GetWindowHandle(this)))
                 SetStatus($"Windows could not launch or focus {item.Name}.");
     }
 
@@ -3190,7 +3191,7 @@ public sealed partial class DesktopOverlayWindow : Window
                         return target is not null &&
                             (applicationService.ActivateWindow(target) || await keyboard.RestoreElevatedWindowAsync(target));
                     }
-                    return applicationService.LaunchOrActivate(app);
+                    return applicationService.LaunchOrActivate(app, WinRT.Interop.WindowNative.GetWindowHandle(this));
                 });
             home = window;
             window.HomeVisibilityChanged += (_, _) =>

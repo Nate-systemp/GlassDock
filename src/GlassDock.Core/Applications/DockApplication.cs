@@ -37,11 +37,11 @@ public interface IApplicationService : IDisposable
     event EventHandler<ApplicationSnapshot>? SnapshotChanged;
     void Start();
     void RequestRefresh();
-    bool LaunchOrActivate(DockApplication application);
-    bool Launch(DockApplication application);
+    bool LaunchOrActivate(DockApplication application, nint owner = 0);
+    Task<bool> LaunchAsync(DockApplication application, nint owner);
     bool ActivateWindow(ApplicationWindow window);
     bool CloseWindow(ApplicationWindow window);
     bool SetPinned(DockApplication application, bool pinned);
-    bool RunAsAdministrator(DockApplication application);
+    Task<bool> RunAsAdministratorAsync(DockApplication application, nint owner);
     bool OpenFileLocation(DockApplication application);
 }

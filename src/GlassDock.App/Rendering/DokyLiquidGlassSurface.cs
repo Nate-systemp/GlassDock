@@ -72,10 +72,11 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private PixelShaderEffect? shader;
     private LiquidGlassShaderState? shaderState, lensShaderState;
     private DesktopCaptureSource? capture;
+    private InputDesktopMonitor? inputDesktop;
     private DesktopCaptureSource.Placement placement;
     private Direct3D11CaptureFrame? currentFrame;
     private CanvasBitmap? bitmap;
-    private bool disposed, failed, enabled, screenshotFrozen;
+    private bool disposed, failed, enabled, screenshotFrozen, desktopRecoveryQueued;
     private readonly GlassDock.Core.Desktop.CaptureDrawGate drawGate = new();
     private long queuedAt;
     private Vector4 dock, wave;
@@ -175,6 +176,11 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             placement = next;
             if (capture is null)
             {
+                if (inputDesktop is null)
+                {
+                    inputDesktop = new();
+                    inputDesktop.Restored += InputDesktopRestored;
+                }
                 device = CanvasDevice.GetSharedDevice();
                 shader = new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
                 {
@@ -266,6 +272,25 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
 
     private void FrameAvailable(object? sender, EventArgs args) { if (!screenshotFrozen) QueueDraw(visualChanged: false); }
+    private void InputDesktopRestored(object? sender, EventArgs args)
+    {
+        if (disposed || desktopRecoveryQueued) return;
+        desktopRecoveryQueued = true;
+        if (!dispatcher.TryEnqueue(() =>
+        {
+            desktopRecoveryQueued = false;
+            if (disposed || !enabled || screenshotFrozen || inputDesktop?.IsCurrent != true) return;
+            // Secure-desktop transitions can invalidate capture without closing its item.
+            // Keep this observer alive across Fail/Stop so recovery needs no click or snip.
+            try
+            {
+                Stop();
+                failed = false;
+                Update(clearActive, Output.Opacity, scale, dock, wave);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
+        })) desktopRecoveryQueued = false;
+    }
     private void CaptureClosed(object? sender, EventArgs args) => dispatcher.TryEnqueue(() =>
     {
         if (!disposed && ReferenceEquals(sender, capture)) Fail(new InvalidOperationException("Monitor capture closed."));
@@ -513,5 +538,15 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         swapChain?.Dispose(); swapChain = null;
         device = null; // Shared Win2D device is borrowed, never disposed here.
     }
-    public void Dispose() { if (disposed) return; disposed = true; enabled = false; Stop(); }
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true; enabled = false;
+        if (inputDesktop is not null)
+        {
+            inputDesktop.Restored -= InputDesktopRestored;
+            inputDesktop.Dispose(); inputDesktop = null;
+        }
+        Stop();
+    }
 }

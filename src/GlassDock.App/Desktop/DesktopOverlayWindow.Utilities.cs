@@ -24,6 +24,10 @@ public sealed partial class DesktopOverlayWindow
     private UtilityButton? wifiSettingsOnly;
     private AirplaneModeUtilityService? utilityAirplaneMode;
     private bool ownsAirplaneMode;
+    private NightLightUtilityService? utilityNightLight;
+    private bool ownsNightLight;
+    private EnergySaverUtilityService? utilityEnergySaver;
+    private bool ownsEnergySaver;
     private double UtilitySpace => settingsSession.Current.SelectedUtilities.Length * (ExpandedDockHeight + 12 * DockScale);
 
     private bool IsPointerOverUtility(double x, double y) =>
@@ -33,7 +37,8 @@ public sealed partial class DesktopOverlayWindow
                 button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y)));
 
     private void InitializeUtilities(WifiUtilityService? shared, BluetoothUtilityService? sharedBluetooth,
-        AirplaneModeUtilityService? sharedAirplaneMode)
+        AirplaneModeUtilityService? sharedAirplaneMode, NightLightUtilityService? sharedNightLight,
+        EnergySaverUtilityService? sharedEnergySaver)
     {
         ownsWifi = shared is null; utilityWifi = shared ?? new();
         utilityWifi.Changed += WifiStateChanged;
@@ -42,6 +47,12 @@ public sealed partial class DesktopOverlayWindow
         ownsAirplaneMode = sharedAirplaneMode is null;
         utilityAirplaneMode = sharedAirplaneMode ?? new();
         utilityAirplaneMode.Changed += AirplaneModeStateChanged;
+        ownsNightLight = sharedNightLight is null;
+        utilityNightLight = sharedNightLight ?? new();
+        utilityNightLight.Changed += NightLightStateChanged;
+        ownsEnergySaver = sharedEnergySaver is null;
+        utilityEnergySaver = sharedEnergySaver ?? new();
+        utilityEnergySaver.Changed += EnergySaverStateChanged;
         root.Children.Add(utilityArea); Canvas.SetZIndex(utilityArea, 20);
         Activated += (_, e) =>
         {
@@ -74,6 +85,8 @@ public sealed partial class DesktopOverlayWindow
         if (utilityWifi is null) return;
         var selected = settingsSession.Current.SelectedUtilities;
         utilityAirplaneMode?.SetMonitoring(selected.Contains(UtilityKind.AirplaneMode));
+        utilityNightLight?.SetMonitoring(selected.Contains(UtilityKind.NightLight));
+        utilityEnergySaver?.SetMonitoring(selected.Contains(UtilityKind.BatterySaver));
         foreach (var kind in utilityButtons.Keys.Where(k => !selected.Contains(k)).ToArray())
         {
             if (wifiSettingsOnly?.Definition.Kind == kind) DismissWifiSettingsOnly();
@@ -86,7 +99,8 @@ public sealed partial class DesktopOverlayWindow
             fadingUtilities.Add(old);
             FadeUtility(old, 0, () =>
             {
-                fadingUtilities.Remove(old); utilityArea.Children.Remove(old); old.Dispose();
+                if (!fadingUtilities.Remove(old)) return;
+                old.Dispose(); utilityArea.Children.Remove(old);
                 UpdateNativeUtilitySurfaces();
             });
         }
@@ -99,6 +113,18 @@ public sealed partial class DesktopOverlayWindow
                 utilityButtons.Add(definition.Kind, button); utilityArea.Children.Add(button);
                 button.PrimaryRequested += async (_, _) =>
                 {
+                    if (button.Definition.Kind == UtilityKind.BatterySaver)
+                    {
+                        if (utilityEnergySaver is { } energy && energy.State.Available && !energy.State.Busy)
+                            await RunUtilityToggleAsync(button, energy.ToggleAsync, () => SetEnergySaverState(button, energy.State));
+                        return;
+                    }
+                    if (button.Definition.Kind == UtilityKind.NightLight)
+                    {
+                        if (utilityNightLight is { } nightLight && !nightLight.State.Busy)
+                            await RunUtilityToggleAsync(button, nightLight.ToggleAsync, () => SetNightLightState(button, nightLight.State));
+                        return;
+                    }
                     if (button.Definition.Kind == UtilityKind.AirplaneMode)
                     {
                         if (utilityAirplaneMode is { } airplane && !airplane.State.Busy)
@@ -135,12 +161,16 @@ public sealed partial class DesktopOverlayWindow
                 };
                 button.PointerEntered += async (_, _) =>
                 {
-                    if (button.Definition.Kind == UtilityKind.AirplaneMode) await utilityAirplaneMode!.RefreshAsync();
+                    if (button.Definition.Kind == UtilityKind.BatterySaver) await utilityEnergySaver!.RefreshAsync();
+                    else if (button.Definition.Kind == UtilityKind.NightLight) await utilityNightLight!.RefreshAsync();
+                    else if (button.Definition.Kind == UtilityKind.AirplaneMode) await utilityAirplaneMode!.RefreshAsync();
                     else if (button.Definition.Kind == UtilityKind.Bluetooth) await utilityBluetooth!.RefreshAsync();
                     else await utilityWifi.RefreshAsync();
                 };
                 FadeUtility(button, 1);
-                if (button.Definition.Kind == UtilityKind.AirplaneMode) _ = utilityAirplaneMode!.RefreshAsync();
+                if (button.Definition.Kind == UtilityKind.BatterySaver) _ = utilityEnergySaver!.RefreshAsync();
+                else if (button.Definition.Kind == UtilityKind.NightLight) _ = utilityNightLight!.RefreshAsync();
+                else if (button.Definition.Kind == UtilityKind.AirplaneMode) _ = utilityAirplaneMode!.RefreshAsync();
                 else if (button.Definition.Kind == UtilityKind.Bluetooth) _ = utilityBluetooth!.RefreshAsync();
                 else _ = utilityWifi.RefreshAsync();
             }
@@ -149,11 +179,35 @@ public sealed partial class DesktopOverlayWindow
         WifiStateChanged(this, EventArgs.Empty);
         BluetoothStateChanged(this, EventArgs.Empty);
         AirplaneModeStateChanged(this, EventArgs.Empty);
+        NightLightStateChanged(this, EventArgs.Empty);
+        EnergySaverStateChanged(this, EventArgs.Empty);
         PositionUtilities();
     }
 
     private static void SetAirplaneModeState(UtilityButton button, AirplaneModeState state) =>
         button.SetState(state.On == true, state.Available, state.Message);
+
+    private static void SetNightLightState(UtilityButton button, NightLightState state) =>
+        button.SetState(state.On == true, state.Available, state.Message);
+
+    private static void SetEnergySaverState(UtilityButton button, EnergySaverState state) =>
+        button.SetState(state.On == true, state.Available, state.Message);
+
+    private void EnergySaverStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (closing || utilityEnergySaver is null) return;
+        if (utilityButtons.TryGetValue(UtilityKind.BatterySaver, out var button))
+            SetEnergySaverState(button, utilityEnergySaver.State);
+        UpdateUtilitySurfaces(); UpdateLiquidGlass();
+    });
+
+    private void NightLightStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (closing || utilityNightLight is null) return;
+        if (utilityButtons.TryGetValue(UtilityKind.NightLight, out var button))
+            SetNightLightState(button, utilityNightLight.State);
+        UpdateUtilitySurfaces(); UpdateLiquidGlass();
+    });
 
     private void AirplaneModeStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
     {
@@ -199,7 +253,14 @@ public sealed partial class DesktopOverlayWindow
         CompositionTarget.Rendering += Frame;
         story.Completed += (_, _) =>
         {
-            CompositionTarget.Rendering -= Frame; complete?.Invoke(); UpdateNativeUtilitySurfaces();
+            CompositionTarget.Rendering -= Frame;
+            // Let WinUI finish its animation callback before tearing down the animated subtree.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (closing) return;
+                button.Opacity = to; story.Stop();
+                complete?.Invoke(); UpdateNativeUtilitySurfaces();
+            });
         };
         story.Begin();
     }
@@ -379,6 +440,16 @@ public sealed partial class DesktopOverlayWindow
 
     private void DisposeUtilities()
     {
+        if (utilityEnergySaver is not null)
+        {
+            utilityEnergySaver.Changed -= EnergySaverStateChanged;
+            if (ownsEnergySaver) utilityEnergySaver.Dispose();
+        }
+        if (utilityNightLight is not null)
+        {
+            utilityNightLight.Changed -= NightLightStateChanged;
+            if (ownsNightLight) utilityNightLight.Dispose();
+        }
         if (utilityAirplaneMode is not null)
         {
             utilityAirplaneMode.Changed -= AirplaneModeStateChanged;

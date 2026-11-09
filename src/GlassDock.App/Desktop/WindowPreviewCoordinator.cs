@@ -322,8 +322,12 @@ internal sealed class WindowPreviewCoordinator : IDisposable
                 entries.Add(new("More windows", "\uE737", Children: model.RunningWindows.Skip(4).Select(WindowEntry).ToArray()));
             entries.Add(new("", ""));
         }
-        else if (state.CanLaunch) Add("Open", () => applications.Activate(item));
-        if (state.ShowNewWindow) Add("New window", () => applications.Launch(item));
+        else if (state.CanLaunch) Add("Open", () => applications.Activate(item, dock));
+        if (state.ShowNewWindow) entries.Add(new("New window", Glyph("New window"), async () =>
+        {
+            if (!await applications.LaunchAsync(item, dock) && !disposed)
+                ActionFailed?.Invoke(this, $"Could not complete 'New window' for {item.Name}.");
+        }));
         if (model.CanOpenFile) entries.Add(new("Open file…", "\uE8E5", () => PickFiles(item.Application)));
 
         if (item.IsRunning)
@@ -357,7 +361,11 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         if (canElevate || canLocate)
         {
             entries.Add(new("", ""));
-            if (canElevate) Add("Run as Administrator", () => applications.RunAsAdministrator(item));
+            if (canElevate) entries.Add(new("Run as Administrator", Glyph("Run as Administrator"), async () =>
+            {
+                if (!await applications.RunAsAdministratorAsync(item, dock) && !disposed)
+                    ActionFailed?.Invoke(this, $"Could not complete 'Run as Administrator' for {item.Name}.");
+            }));
             if (canLocate) Add("Open File Location", () => applications.OpenFileLocation(item));
         }
         return entries;

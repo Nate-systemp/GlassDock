@@ -18,12 +18,18 @@ public sealed class WindowsApplicationLauncher
         thread.Start();
         return completion.Task;
     }
-    public Task<bool> LaunchTargetAsync(string target)
+    public Task<bool> LaunchTargetAsync(string target, string? arguments = null, string? verb = null, nint owner = 0)
+        => RunOnStaAsync(() => LaunchTarget(target, arguments, verb, owner: owner));
+
+    public Task<bool> LaunchAsync(DockApplication application, nint owner)
+        => RunOnStaAsync(() => Launch(application, owner));
+
+    internal static Task<bool> RunOnStaAsync(Func<bool> launch)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            try { completion.SetResult(LaunchTarget(target)); }
+            try { completion.SetResult(launch()); }
             catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException)
             { completion.SetResult(false); }
         }) { IsBackground = true, Name = "GlassDock search launch" };
@@ -42,12 +48,12 @@ public sealed class WindowsApplicationLauncher
     public static bool CanOpenFileLocation(DockApplication application) =>
         ResolveFileLocation(application) is not null;
 
-    public bool Launch(DockApplication application)
+    public bool Launch(DockApplication application, nint owner = 0)
     {
         var target = Target(application);
         return LaunchTarget(target, application.LaunchTarget is null ||
             string.Equals(target, application.Identity.ExecutablePath, StringComparison.OrdinalIgnoreCase)
-            ? application.Identity.Arguments : null);
+            ? application.Identity.Arguments : null, owner: owner);
     }
 
     // Cheap metadata-only admission check; shortcut COM resolution happens only on drop.
@@ -138,11 +144,11 @@ public sealed class WindowsApplicationLauncher
         return result.ToString();
     }
 
-    public bool RunAsAdministrator(DockApplication application)
+    public Task<bool> RunAsAdministratorAsync(DockApplication application, nint owner)
     {
         var target = application.Identity.ExecutablePath;
-        if (!IsLaunchableExecutable(target)) return false;
-        return LaunchTarget(target, application.Identity.Arguments, "runas");
+        if (!IsLaunchableExecutable(target)) return Task.FromResult(false);
+        return LaunchTargetAsync(target!, application.Identity.Arguments, "runas", owner);
     }
 
     public bool OpenFileLocation(DockApplication application)
@@ -160,12 +166,16 @@ public sealed class WindowsApplicationLauncher
         return ApplicationNative.ShellExecuteEx(ref info);
     }
 
-    public bool LaunchTarget(string? target, string? arguments = null, string? verb = null, string? workingDirectory = null)
+    public bool LaunchTarget(string? target, string? arguments = null, string? verb = null, string? workingDirectory = null, nint owner = 0)
     {
         if (string.IsNullOrWhiteSpace(target)) return false;
+        // Hand off this user-initiated launch before Shell can request elevation.
+        if (owner != 0) ApplicationNative.SetForegroundWindow(owner);
         var info = new ApplicationNative.ShellExecuteInfo
         {
-            Size = (uint)Marshal.SizeOf<ApplicationNative.ShellExecuteInfo>(), Mask = 0x400,
+            // Complete the owned launch before its short-lived STA can exit.
+            Size = (uint)Marshal.SizeOf<ApplicationNative.ShellExecuteInfo>(), Mask = 0x400 | (owner != 0 ? 0x100u : 0u),
+            Window = owner,
             Verb = verb, File = target, Parameters = arguments, Directory = workingDirectory, Show = 1
         };
         // Preserve the exact shortcut or AppsFolder item, including its launch arguments.

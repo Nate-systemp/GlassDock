@@ -51,12 +51,12 @@ public sealed class DockApplicationsViewModel : IDisposable
         snapshots.Reapply();
     }
 
-    public bool Activate(DockApplicationItem item) => service.LaunchOrActivate(item.Application);
-    public bool Launch(DockApplicationItem item) => service.Launch(item.Application);
+    public bool Activate(DockApplicationItem item, nint owner) => service.LaunchOrActivate(item.Application, owner);
+    public Task<bool> LaunchAsync(DockApplicationItem item, nint owner) => service.LaunchAsync(item.Application, owner);
     public bool ActivateWindow(ApplicationWindow window) => service.ActivateWindow(window);
     public bool CloseWindow(ApplicationWindow window) => service.CloseWindow(window);
     public bool SetPinned(DockApplicationItem item, bool pinned) => service.SetPinned(item.Application, pinned);
-    public bool RunAsAdministrator(DockApplicationItem item) => service.RunAsAdministrator(item.Application);
+    public Task<bool> RunAsAdministratorAsync(DockApplicationItem item, nint owner) => service.RunAsAdministratorAsync(item.Application, owner);
     public bool OpenFileLocation(DockApplicationItem item) => service.OpenFileLocation(item.Application);
     public void Dispose()
     {

@@ -90,7 +90,8 @@ internal sealed class UtilityButton : Button, IDisposable
     }
     private void PresentationChanged(object? sender, object e) => GeometryChanged?.Invoke(this, EventArgs.Empty);
     private bool HasDetails => Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth;
-    private bool RadioUtility => HasDetails || Definition.Kind == UtilityKind.AirplaneMode;
+    private bool RadioUtility => HasDetails || AlwaysFilled;
+    private bool AlwaysFilled => Definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver;
     private bool active, available = true, hover, pressed;
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
@@ -265,16 +266,17 @@ internal sealed class UtilityButton : Button, IDisposable
         var target = IsExpanded ? Math.Min(maximumWidth, preferred) : diameter;
         if (!changed && Math.Abs(target - expansionTarget) < .01) return;
         expansionTarget = target;
-        var from = Math.Clamp(Width, diameter, maximumWidth); expansion?.Stop(); Width = target;
+        var from = Math.Clamp(Width, diameter, maximumWidth); expansion?.Stop(); Width = from;
         if (animations && !changed && Math.Abs(from - target) > .01)
         {
             var story = new Storyboard(); expansion = story;
-            var animation = new DoubleAnimation { From = from, To = target, Duration = new(TimeSpan.FromMilliseconds(220)),
-                EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
+            var animation = new DoubleAnimation { From = from, To = target, Duration = new(TimeSpan.FromMilliseconds(320)),
+                EnableDependentAnimation = true, EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } };
             Storyboard.SetTarget(animation, this); Storyboard.SetTargetProperty(animation, "Width"); story.Children.Add(animation);
             story.Completed += (_, _) => { if (ReferenceEquals(expansion, story)) { story.Stop(); Width = target; UpdateExpansionContent(); } };
             story.Begin();
         }
+        else Width = target;
         UpdateExpansionContent();
     }
 
@@ -293,7 +295,7 @@ internal sealed class UtilityButton : Button, IDisposable
         var wanted = Math.Max(0, maximumWidth - diameter - CaptionRightPadding);
         var room = Math.Max(0, Width - diameter - CaptionRightPadding);
         var readable = captionTitleWidth;
-        var progress = readable <= 0 || wanted + .01 < readable ? 0 : Math.Clamp((room / readable - .65) / .35, 0, 1);
+        var progress = readable <= 0 || wanted + .01 < readable ? 0 : Math.Clamp((room / readable - .35) / .65, 0, 1);
         if (progress > .9999) progress = 1;
         var visibility = progress > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (captionArea.Visibility != visibility) captionArea.Visibility = visibility;
@@ -446,6 +448,7 @@ internal sealed class UtilityButton : Button, IDisposable
 
     private void Render()
     {
+        if (disposed) return;
         var sharedGlass = dockMode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
         var displayOn = DisplayOn;
         Glass.UseDockMaterial = !displayOn && (sharedGlass || RadioUtility);
@@ -503,8 +506,8 @@ internal sealed class UtilityButton : Button, IDisposable
                 motion.Begin();
             }
         }
-        _ = icon.SetAsync(Definition.Icon, Definition.Kind == UtilityKind.AirplaneMode || displayOn && !RadioUtility, IconColor(),
-            Definition.Kind == UtilityKind.AirplaneMode && animations ? TransitionDuration : null);
+        _ = icon.SetAsync(Definition.Icon, AlwaysFilled || displayOn && !RadioUtility, IconColor(),
+            AlwaysFilled && animations ? TransitionDuration : null);
         var captionTheme = Definition.Kind == UtilityKind.Wifi && displayOn ? UtilityTheme.Light : IconTheme;
         var textColor = UtilityColors.Icon(captionTheme, false, !available);
         captionTitle.Foreground = captionNetwork.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
@@ -519,7 +522,14 @@ internal sealed class UtilityButton : Button, IDisposable
             _ = settingsBadge.SetAsync(Definition.Icon, false, IconColor());
         }
     }
-    public void Dispose() { disposed = true; CancelToggle(); IsMorphing = false; TrackPresentation(false); morphRevision++; hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop(); captionEffect.Dispose(); Glass.Dispose(); }
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        CancelToggle(); IsMorphing = false; TrackPresentation(false); morphRevision++;
+        hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop();
+        captionEffect.Dispose(); Glass.Dispose();
+    }
 
     protected override void OnKeyDown(KeyRoutedEventArgs e)
     {

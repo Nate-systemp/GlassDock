@@ -63,7 +63,8 @@ public sealed partial class DesktopOverlayWindow
         previews.Hide();
         if (stackWindow is null)
         {
-            stackWindow = new(WinRT.Interop.WindowNative.GetWindowHandle(this), app => applicationService.LaunchOrActivate(app),
+            stackWindow = new(WinRT.Interop.WindowNative.GetWindowHandle(this), app => applicationService.LaunchOrActivate(app,
+                WinRT.Interop.WindowNative.GetWindowHandle(this)),
                 badges.ForApplication, (id, name) => applicationService.RenameStack(id, name),
                 (id, order) => applicationService.ReorderStack(id, order), StackSourceOwnsPointer);
             stackWindow.Hidden += (_, _) => { if (!closing) { RefreshHoverVisuals(); ScheduleCollapse(); } };

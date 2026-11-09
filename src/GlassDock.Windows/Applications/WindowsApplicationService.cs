@@ -14,7 +14,7 @@ public sealed class WindowsApplicationService : IApplicationService
 {
     private readonly AutoResetEvent refresh = new(false);
     private readonly ConcurrentDictionary<nint, long> activationTimes = new();
-    private readonly ConcurrentDictionary<string, DockApplication> pendingActivations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (DockApplication Application, nint Owner)> pendingActivations = new(StringComparer.Ordinal);
     private readonly WindowsApplicationLauncher launcher = new();
     private readonly ShellApplicationIdentityResolver identityResolver = new();
     private readonly DockPinStore pinStore = new();
@@ -156,7 +156,7 @@ public sealed class WindowsApplicationService : IApplicationService
                     foreach (var request in activationRequests)
                     {
                         if (stopping) break;
-                        try { LaunchOrActivateFromSnapshot(request.Value, windows); }
+                        try { LaunchOrActivateFromSnapshot(request.Value.Application, windows, request.Value.Owner); }
                         finally { pendingActivations.TryRemove(request.Key, out _); }
                     }
                     var visibleWindows = VirtualDesktopPolicy.Filter(windows, WindowsVirtualDesktopQuery.ShowAllWindows());
@@ -357,15 +357,15 @@ public sealed class WindowsApplicationService : IApplicationService
         return ApplicationNative.QueryFullProcessImageName(process, 0, path, ref length) ? path.ToString() : "";
     }
 
-    public bool LaunchOrActivate(DockApplication application)
+    public bool LaunchOrActivate(DockApplication application, nint owner = 0)
     {
         if (stopping || worker is null) return false;
-        pendingActivations.TryAdd(application.Id, application);
+        pendingActivations.TryAdd(application.Id, (application, owner));
         RequestRefresh();
         return true; // Accepted for fresh enumeration; never block the UI on Shell COM.
     }
 
-    private bool LaunchOrActivateFromSnapshot(DockApplication application, IReadOnlyList<ApplicationWindow> windows)
+    private bool LaunchOrActivateFromSnapshot(DockApplication application, IReadOnlyList<ApplicationWindow> windows, nint owner)
     {
         // Recheck before launching: an app can open between reconciliation and the user's click.
         var current = DockApplicationCollection.Combine(Volatile.Read(ref currentPins), windows)
@@ -380,12 +380,15 @@ public sealed class WindowsApplicationService : IApplicationService
         // A known running window may be inaccessible (for example privilege or
         // identity validation failure). Do not reinterpret that as a closed app.
         if (application.Windows.Count > 0) { RequestRefresh(); return false; }
-        return application.IsPinned && Launch(application);
+        if (!application.IsPinned) return false;
+        var launched = launcher.Launch(application, owner);
+        RequestRefresh();
+        return launched;
     }
 
-    public bool Launch(DockApplication application)
+    public async Task<bool> LaunchAsync(DockApplication application, nint owner)
     {
-        var launched = launcher.Launch(application);
+        var launched = await launcher.LaunchAsync(application, owner).ConfigureAwait(false);
         RequestRefresh();
         return launched;
     }
@@ -517,9 +520,9 @@ public sealed class WindowsApplicationService : IApplicationService
         return queue.Count == 0 ? merged : null;
     }
 
-    public bool RunAsAdministrator(DockApplication application)
+    public async Task<bool> RunAsAdministratorAsync(DockApplication application, nint owner)
     {
-        var launched = launcher.RunAsAdministrator(application);
+        var launched = await launcher.RunAsAdministratorAsync(application, owner).ConfigureAwait(false);
         if (launched) RequestRefresh();
         return launched;
     }
