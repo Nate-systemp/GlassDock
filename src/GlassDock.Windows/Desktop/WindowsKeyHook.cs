@@ -12,6 +12,8 @@ internal sealed class WindowsKeyHook : IDisposable
     private readonly Action<uint>? snippingShortcut;
     private readonly Action<uint>? snippingCanceled;
     private readonly Action<int, uint>? shortcutRequested;
+    private readonly Func<uint, bool>? volumeRequested;
+    private readonly VolumeKeyCapture volumeKeys = new();
     private readonly HashSet<int> consumedShortcutKeys = [];
     private readonly NativeMethods.KeyboardProc keyboardCallback;
     private readonly WindowsKeyGesture gesture = new();
@@ -56,6 +58,7 @@ internal sealed class WindowsKeyHook : IDisposable
         snipKeyHeld = false;
         snipSessionActive = false;
         consumedShortcutKeys.Clear();
+        volumeKeys.Reset();
         suppressCurrentWindowsPress = false;
         capturedWindowsDown = false;
         capturedWindowsKey = 0;
@@ -63,12 +66,14 @@ internal sealed class WindowsKeyHook : IDisposable
     }
     public void UpdateState(bool suppress, bool capture, uint revision) =>
         Volatile.Write(ref state, new(suppress, capture, revision));
-    public WindowsKeyHook(Action<bool, uint> signal, Action<uint>? snippingShortcut = null, Action<uint>? snippingCanceled = null, Action<int, uint>? shortcutRequested = null)
+    public WindowsKeyHook(Action<bool, uint> signal, Action<uint>? snippingShortcut = null, Action<uint>? snippingCanceled = null, Action<int, uint>? shortcutRequested = null,
+        Func<uint, bool>? volumeRequested = null)
     {
         this.signal = signal;
         this.snippingShortcut = snippingShortcut;
         this.snippingCanceled = snippingCanceled;
         this.shortcutRequested = shortcutRequested;
+        this.volumeRequested = volumeRequested;
         keyboardCallback = KeyboardMessage;
         for (var key = 8; key < 256; key++)
             if (NativeMethods.GetAsyncKeyState(key) < 0) gesture.Process(key, true);
@@ -129,6 +134,8 @@ internal sealed class WindowsKeyHook : IDisposable
 
         var keyCode =
             (int)key.Key;
+
+        if (volumeRequested is not null && volumeKeys.Process(key.Key, down, true, volumeRequested)) return 1;
 
         var isWindowsKey =
             keyCode == LeftWindows ||

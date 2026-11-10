@@ -6,6 +6,20 @@ namespace GlassDock.Windows.Tests;
 public sealed class InputHelperProtocolTests
 {
     [Fact]
+    public void Volume_events_share_sequence_and_expire_without_accepting_arbitrary_keys()
+    {
+        long sequence = 0;
+        Assert.Equal((uint)0xAF, WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|1|1000|175", ref sequence, 1000));
+        Assert.Null(WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|1|1000|175", ref sequence, 1000));
+        Assert.Null(WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|2|1000|65", ref sequence, 1000));
+        Assert.Null(WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|2|1000|174|extra", ref sequence, 1000));
+        Assert.Null(WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|2|1000|174", ref sequence, 1501));
+        Assert.Null(WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|3|1600|173", ref sequence, 1599));
+        Assert.Equal((uint)0xAD, WindowsInputHelperProtocol.ReadVolumeEvent("VOLUME|4|1600|173", ref sequence, 1600));
+        Assert.NotNull(WindowsInputHelperProtocol.ReadEvent("EVENT|5|1600|0|HOME", ref sequence, 1600));
+    }
+
+    [Fact]
     public void Five_hundred_helper_events_preserve_order_and_reject_duplicate_delivery()
     {
         long sequence = 0;

@@ -136,6 +136,8 @@ public sealed partial class SettingsWindow : Window
     {
         populating = true;
 
+        NativeVolumeOsdToggle.IsOn = settings.SuppressNativeVolumeOsd;
+
         if (!glassDirty) LoadGlassDraft(settings);
         DockAppearanceModeBox.SelectedIndex = (int)glassDraft.Mode;
         UpdateDockAppearanceDescription(glassDraft.Mode);

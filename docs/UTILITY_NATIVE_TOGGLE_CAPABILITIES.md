@@ -103,6 +103,8 @@ References:
 
 ## Implementation boundary
 
+The separately authorized experimental Windows 11 Do Not Disturb implementation uses private QuietHoursSettings COM for manual profile selection and the public notification-mode getter/event for actual-state verification. It is disabled unless `DOKY_ENABLE_EXPERIMENTAL_DND=1` is set before startup. It does not control Focus sessions. See [DND_EXPERIMENTAL.md](DND_EXPERIMENTAL.md) for ABI/source references, compatibility, failure behavior, successful compilation and unverified Windows-toggle behavior.
+
 The subsequently authorized experimental Energy Saver WNF implementation is documented in [ENERGY_SAVER_WNF_RESEARCH.md](ENERGY_SAVER_WNF_RESEARCH.md#subsequently-authorized-experimental-implementation-2026-11-09). It is disabled by default behind `DOKY_ENABLE_EXPERIMENTAL_ENERGY_SAVER=1`, restricted to the verified 26100.9818 x64 binary fingerprints, and confirms actual state through `GUID_ENERGY_SAVER_STATUS`. This supersedes the original implementation block for that opt-in private integration only; no supported public setter has been established.
 
 The existing shared Wi-Fi/Bluetooth transition and zero-queue service gates remain available for real supported toggles. No new animation, request queue, polling loop or speculative service is added for unavailable operations. Sound and Brightness remain untouched.

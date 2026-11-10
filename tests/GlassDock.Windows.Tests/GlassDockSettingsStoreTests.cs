@@ -7,6 +7,19 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class GlassDockSettingsStoreTests
 {
+    [Fact]
+    public async Task Native_volume_suppression_is_opt_in_and_round_trips_without_changing_other_settings()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        var original = await store.LoadAsync();
+        Assert.False(original.SuppressNativeVolumeOsd);
+        await store.SaveAsync(original with { SuppressNativeVolumeOsd = true });
+        Assert.Equal(original with { SuppressNativeVolumeOsd = true }, await location.CreateStore().LoadAsync());
+        await store.SaveAsync(original);
+        Assert.Equal(original, await location.CreateStore().LoadAsync());
+    }
+
     [Theory]
     [InlineData(.7)] [InlineData(.8)] [InlineData(1)]
     public async Task Compact_floating_settings_survive_restart_without_changing_original_icon_preferences(double size)

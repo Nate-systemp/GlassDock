@@ -229,6 +229,11 @@ public sealed class WindowPreviewPlacement : IDisposable
         var (area, dpi, bounds) = GetArea(dock);
 
         var rectangle = WindowPreviewLayout.Position(area, bounds, dpi, anchorXDip, dockTopDip, width, height);
+        Position(rectangle);
+    }
+
+    public void Position(PreviewRect rectangle)
+    {
         if (!WindowPreviewLayout.NeedsNativeMove(lastPhysicalBounds, rectangle)) return;
         // Cache the physical rectangle only after SetWindowPos succeeds. Otherwise
         // the next frame must retry it instead of leaving a stale placement.

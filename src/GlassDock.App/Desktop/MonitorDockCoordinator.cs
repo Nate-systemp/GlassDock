@@ -29,6 +29,9 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private bool reconcilePending;
     private bool shuttingDown;
     private bool disposed;
+    private VolumeHudWindow? volumeHud;
+    private DesktopOverlayWindow? volumeOwner;
+    private readonly NativeVolumeOsdSuppression nativeVolumeOsd;
 
     public DesktopOverlayWindow PrimaryWindow { get; }
 
@@ -65,7 +68,12 @@ internal sealed class MonitorDockCoordinator : IDisposable
             restoreTaskbarOverride: null,
             resumeTaskbarOverride: null);
 
+        nativeVolumeOsd = new(runtime.Volume);
+        ConfigureVolumeSuppression();
         runtime.StartApplications();
+        runtime.Volume.Changed += VolumeChanged;
+        runtime.Volume.VolumeKeyHandled += VolumeKeyHandled;
+        runtime.Volume.Start();
         settingsSession.Changed += SettingsChanged;
         PrimaryWindow.KeyboardService.SnippingRequested += SnippingRequested;
         PrimaryWindow.KeyboardService.SnippingCanceled += SnippingCanceled;
@@ -95,8 +103,9 @@ internal sealed class MonitorDockCoordinator : IDisposable
         WindowsKeyboardService? sharedKeyboard,
         Action? showSettingsOverride,
         Action? restoreTaskbarOverride,
-        Action? resumeTaskbarOverride) =>
-        new(
+        Action? resumeTaskbarOverride)
+    {
+        var window = new DesktopOverlayWindow(
             settingsSession,
             settingsStore,
             shutdown,
@@ -114,16 +123,63 @@ internal sealed class MonitorDockCoordinator : IDisposable
             showSettingsOverride,
             restoreTaskbarOverride,
             resumeTaskbarOverride,
-            runtime.Wifi, runtime.Bluetooth, runtime.AirplaneMode, runtime.NightLight, runtime.EnergySaver)
+            runtime.Wifi, runtime.Bluetooth, runtime.AirplaneMode, runtime.NightLight, runtime.EnergySaver, runtime.DoNotDisturb, runtime.Volume)
         {
             ShowHomeOverride = ownsGlobalServices ? null : () => PrimaryWindow.ShowHome(),
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
         };
+        window.SoundRequested += (_, _) => ShowVolume(window, explicitOpen: true);
+        return window;
+    }
+
+    private void VolumeChanged(object? sender, MasterVolumeChangedEventArgs args) => PrimaryWindow.DispatcherQueue.TryEnqueue(() =>
+    {
+        if (shuttingDown || disposed) return;
+        ConfigureVolumeSuppression();
+        volumeHud?.Update(runtime.Volume.State);
+        if (!args.External || screenshotActive) return;
+        ShowVolume(VolumeSource(), explicitOpen: false);
+    });
+
+    private DesktopOverlayWindow VolumeSource() => (volumeHud?.IsOpen == true ? volumeOwner : null) ??
+        secondaryDocks.Values.Prepend(PrimaryWindow)
+            .FirstOrDefault(window => window.SoundMonitor == WindowsMonitorService.ForegroundMonitorHandle()) ?? PrimaryWindow;
+
+    private void VolumeKeyHandled(object? sender, EventArgs args) => PrimaryWindow.DispatcherQueue.TryEnqueue(() =>
+    {
+        if (!shuttingDown && !disposed) ShowVolume(VolumeSource(), explicitOpen: false);
+    });
+
+    private void ConfigureVolumeSuppression()
+    {
+        var enabled = settingsSession.Current.SuppressNativeVolumeOsd && !safeMode && !inspection;
+        nativeVolumeOsd.SetEnabled(enabled);
+        PrimaryWindow.KeyboardService.SetVolumeKeyHandler(enabled && runtime.Volume.State.Available
+            ? runtime.Volume.TryHandleVolumeKey : null);
+    }
+
+    private bool ShowVolume(DesktopOverlayWindow source, bool explicitOpen)
+    {
+        if (shuttingDown || disposed || screenshotActive || !runtime.Volume.State.Available) return false;
+        volumeHud ??= new(runtime.Volume);
+        volumeOwner = source;
+        volumeHud.ApplyAppearance(settingsSession.Appearance, settingsSession.Current.DockAppearanceMode);
+        volumeHud.Show(runtime.Volume.State, () => source.SoundAnchor, explicitOpen);
+        return volumeHud.IsOpen;
+    }
+
+    private void DisposeVolumeHud()
+    {
+        nativeVolumeOsd.Dispose();
+        PrimaryWindow.KeyboardService.SetVolumeKeyHandler(null);
+        volumeHud?.Dispose(); volumeHud = null; volumeOwner = null;
+    }
 
     private void SnippingRequested(object? sender, EventArgs e)
     {
         if (shuttingDown || disposed) return;
         if (screenshotActive) return;
+        volumeHud?.BeginScreenshot();
         // Utilities share this capture even when the main dock is Frosted/Acrylic.
         PrimaryWindow.BeginSnippingCapture();
         foreach (var secondary in secondaryDocks.Values)
@@ -150,12 +206,15 @@ internal sealed class MonitorDockCoordinator : IDisposable
         {
             PrimaryWindow.EndSnippingCapture();
             foreach (var secondary in secondaryDocks.Values) secondary.EndSnippingCapture();
+            volumeHud?.EndScreenshot();
         }
         finally { screenshotActive = false; }
     }
 
     private void SettingsChanged(object? sender, GlassDockSettingsChangedEventArgs e)
     {
+        if (!shuttingDown && !disposed) ConfigureVolumeSuppression();
+        if (!shuttingDown && !disposed) volumeHud?.ApplyAppearance(settingsSession.Appearance, e.Settings.DockAppearanceMode);
         if (shuttingDown || disposed || e.Settings.DockDisplayMode == lastDisplayMode)
             return;
 
@@ -288,6 +347,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             return;
 
         shuttingDown = true;
+        DisposeVolumeHud();
         EndScreenshotCapture();
         topologyTimer.Stop();
         settingsSession.Changed -= SettingsChanged;
@@ -315,6 +375,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private async Task ShutdownAsync()
     {
+        DisposeVolumeHud();
         foreach (var window in secondaryDocks.Values.ToArray())
             await window.ShutdownForCoordinatorAsync();
         secondaryDocks.Clear();
@@ -328,6 +389,9 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        runtime.Volume.Changed -= VolumeChanged;
+        runtime.Volume.VolumeKeyHandled -= VolumeKeyHandled;
+        DisposeVolumeHud();
         EndScreenshotCapture();
         screenshotTimer.Stop();
         PrimaryWindow.KeyboardService.SnippingRequested -= SnippingRequested;

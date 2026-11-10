@@ -9,11 +9,11 @@ public sealed record UtilityDefinition(UtilityKind Kind, string Name, string Ico
         new UtilityDefinition(UtilityKind.Wifi, "Wi-Fi", "wifi-high", 0xFF0A84FF, true),
         new UtilityDefinition(UtilityKind.Bluetooth, "Bluetooth", "bluetooth", 0xFF007AFF, true),
         new UtilityDefinition(UtilityKind.AirplaneMode, "Airplane mode (experimental)", "airplane", 0xFFFF9F0A, true),
-        new UtilityDefinition(UtilityKind.Volume, "Volume", "speaker-high", 0xFF0A84FF),
+        new UtilityDefinition(UtilityKind.Volume, "Sound", "speaker-high", 0xFF0A84FF, true),
         new UtilityDefinition(UtilityKind.Brightness, "Brightness", "sun", 0xFFFFB340),
         new UtilityDefinition(UtilityKind.Battery, "Battery", "battery-full", 0xFF30D158),
         new UtilityDefinition(UtilityKind.BatterySaver, "Energy Saver (experimental)", "battery-charging", 0xFF30D158, true),
-        new UtilityDefinition(UtilityKind.Focus, "Focus / Do not disturb", "moon", 0xFFBF5AF2),
+        new UtilityDefinition(UtilityKind.Focus, "Do Not Disturb (experimental)", "moon", 0xFFAF52DE, true),
         new UtilityDefinition(UtilityKind.NightLight, "Night Light (experimental)", "moon", 0xFFFF9F0A, true)
     });
     public static UtilityKind[] Normalize(IEnumerable<UtilityKind>? values) => (values ?? [])

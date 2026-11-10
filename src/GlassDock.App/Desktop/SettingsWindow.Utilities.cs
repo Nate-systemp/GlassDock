@@ -8,6 +8,18 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class SettingsWindow
 {
+    private async void NativeVolumeOsdChanged(object sender, RoutedEventArgs e)
+    {
+        if (populating || !shellReady || saving || closed || settingsSession.Current.SuppressNativeVolumeOsd == NativeVolumeOsdToggle.IsOn) return;
+        await SaveRecoverySettingsAsync(settingsSession.Current with { SuppressNativeVolumeOsd = NativeVolumeOsdToggle.IsOn }, "Volume popup preference saved.");
+        if (!closed)
+        {
+            populating = true;
+            try { NativeVolumeOsdToggle.IsOn = settingsSession.Current.SuppressNativeVolumeOsd; }
+            finally { populating = false; }
+        }
+    }
+
     private void RefreshUtilitiesPage()
     {
         UtilitiesGrid.Children.Clear();
@@ -18,7 +30,7 @@ public sealed partial class SettingsWindow
             var definition = UtilityDefinition.All[i];
             var added = current.SelectedUtilities.Contains(definition.Kind);
             var icon = new UtilityIcon { Width = 28, Height = 28 };
-            _ = icon.SetAsync(definition.Icon, definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver || added,
+            _ = icon.SetAsync(definition.Icon, definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver or UtilityKind.Focus || added,
                 UtilityColors.Icon(current.UtilityTheme, false, !definition.Available));
             var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
             content.Children.Add(icon);

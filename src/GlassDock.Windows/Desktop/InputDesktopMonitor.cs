@@ -19,18 +19,17 @@ public sealed class InputDesktopMonitor : IDisposable
         if (hook == 0) throw new Win32Exception("Cannot monitor input desktop restoration.");
     }
 
-    public bool IsCurrent
+    public bool IsCurrent => IsCallingDesktopCurrent();
+
+    internal static bool IsCallingDesktopCurrent()
     {
-        get
+        var input = OpenInputDesktop(0, false, 1); // DESKTOP_READOBJECTS only
+        if (input == 0) return false;
+        try
         {
-            var input = OpenInputDesktop(0, false, 1); // DESKTOP_READOBJECTS only
-            if (input == 0) return false;
-            try
-            {
-                return CanResumeCapture(Name(input), Name(GetThreadDesktop(GetCurrentThreadId())));
-            }
-            finally { CloseDesktop(input); }
+            return CanResumeCapture(Name(input), Name(GetThreadDesktop(GetCurrentThreadId())));
         }
+        finally { CloseDesktop(input); }
     }
 
     internal static bool CanResumeCapture(string? input, string? rendering) =>

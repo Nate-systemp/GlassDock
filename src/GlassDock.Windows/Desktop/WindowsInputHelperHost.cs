@@ -49,17 +49,21 @@ public static class WindowsInputHelperHost
             // event; it does not queue completed animations. Stale events still expire.
             var events = Channel.CreateUnbounded<(InputSignal Signal, int Kind)>(new UnboundedChannelOptions
             { SingleReader = true, SingleWriter = true });
+            var captureVolume = 0;
             using var hook = new WindowsKeyHook((launcher, revision) =>
                 events.Writer.TryWrite((new InputSignal(launcher, revision, Environment.TickCount64), 0)),
                 revision => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 1)),
                 revision => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 2)),
-                (index, revision) => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 10 + index)));
+                (index, revision) => events.Writer.TryWrite((new InputSignal(false, revision, Environment.TickCount64), 10 + index)),
+                key => Volatile.Read(ref captureVolume) != 0 && events.Writer.TryWrite(
+                    (new InputSignal(false, 0, Environment.TickCount64), 20 + (int)key - 0xAD)));
             ApplyState(initial, hook);
             writer.WriteLine("READY");
             // Older clients ignore this optional capability; keyboard protocol is unchanged.
             writer.WriteLine("CAPS|RESTORE1");
             writer.WriteLine("CAPS|RECOVER1");
             writer.WriteLine("CAPS|SNIP1");
+            writer.WriteLine("CAPS|VOLUME1");
             var hookThread = GetCurrentThreadId();
             // Force creation of this thread's message queue before the bridge
             // can post a lifecycle recovery command to it.
@@ -103,7 +107,9 @@ public static class WindowsInputHelperHost
                 {
                     while (await reader.ReadLineAsync(lifetime.Token) is { } line)
                     {
-                        if (WindowsInputHelperProtocol.ReadRecovery(line) is { } recoveryRequest)
+                        if (line is "VOLUME|0" or "VOLUME|1")
+                            Volatile.Write(ref captureVolume, line == "VOLUME|1" ? 1 : 0);
+                        else if (WindowsInputHelperProtocol.ReadRecovery(line) is { } recoveryRequest)
                         {
                             if (recoveryRequest.State is { } recoveryState)
                                 ApplyState(recoveryState, hook);
@@ -140,6 +146,7 @@ public static class WindowsInputHelperHost
                             1 => $"SNIP|{++sequence}|{signal.Timestamp}|{signal.Revision}",
                             2 => $"SNIPEND|{++sequence}|{signal.Timestamp}|{signal.Revision}",
                             >= 10 and <= 19 => $"SHORTCUT|{++sequence}|{signal.Timestamp}|{signal.Revision}|{value.Kind - 10}",
+                            >= 20 and <= 22 => $"VOLUME|{++sequence}|{signal.Timestamp}|{value.Kind - 20 + 0xAD}",
                             _ => $"EVENT|{++sequence}|{signal.Timestamp}|{signal.Revision}|{(signal.Launcher ? "LAUNCHER" : "HOME")}"
                         });
                     }

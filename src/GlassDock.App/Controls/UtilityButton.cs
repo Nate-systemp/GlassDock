@@ -91,8 +91,9 @@ internal sealed class UtilityButton : Button, IDisposable
     private void PresentationChanged(object? sender, object e) => GeometryChanged?.Invoke(this, EventArgs.Empty);
     private bool HasDetails => Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth;
     private bool RadioUtility => HasDetails || AlwaysFilled;
-    private bool AlwaysFilled => Definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver;
+    private bool AlwaysFilled => Definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver or UtilityKind.Focus;
     private bool active, available = true, hover, pressed;
+    private bool soundMuted;
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
     {
@@ -311,6 +312,12 @@ internal sealed class UtilityButton : Button, IDisposable
         Render();
     }
 
+    internal void SetSoundState(bool available, bool muted)
+    {
+        soundMuted = muted;
+        SetState(false, available, available ? muted ? "Sound muted" : "Sound · click to adjust volume" : "Audio output unavailable");
+    }
+
     public bool TryBeginToggle()
     {
         if (disposed || IsToggling || IsMorphing || !RadioUtility) return false;
@@ -506,7 +513,7 @@ internal sealed class UtilityButton : Button, IDisposable
                 motion.Begin();
             }
         }
-        _ = icon.SetAsync(Definition.Icon, AlwaysFilled || displayOn && !RadioUtility, IconColor(),
+        _ = icon.SetAsync(Definition.Kind == UtilityKind.Volume && soundMuted ? "speaker-x" : Definition.Icon, AlwaysFilled || displayOn && !RadioUtility, IconColor(),
             AlwaysFilled && animations ? TransitionDuration : null);
         var captionTheme = Definition.Kind == UtilityKind.Wifi && displayOn ? UtilityTheme.Light : IconTheme;
         var textColor = UtilityColors.Icon(captionTheme, false, !available);

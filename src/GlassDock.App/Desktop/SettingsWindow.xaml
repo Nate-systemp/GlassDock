@@ -101,6 +101,8 @@
           <ComboBox x:Name="UtilityThemeBox" Header="Settings and utility appearance" SelectionChanged="UtilityThemeChanged">
             <ComboBoxItem Content="Dark" /><ComboBoxItem Content="Light" />
           </ComboBox>
+          <ToggleSwitch x:Name="NativeVolumeOsdToggle" Header="Hide Windows volume popup" OffContent="Off" OnContent="On" Toggled="NativeVolumeOsdChanged" />
+          <TextBlock Text="Use Doky's HUD for volume keys. Windows handles keys normally when disabled or audio is unavailable." TextWrapping="Wrap" FontSize="12" />
           <Grid x:Name="UtilitiesGrid">
             <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>

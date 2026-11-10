@@ -21,6 +21,8 @@ public readonly record struct DesktopMonitor(
 /// </summary>
 public static class WindowsMonitorService
 {
+    public static nint ForegroundMonitorHandle() => NativeMethods.MonitorFromWindow(NativeMethods.GetForegroundWindow(), 2);
+
     public static PixelRect GetWorkAreaForWindow(nint window)
     {
         var monitor = NativeMethods.MonitorFromWindow(window, 2);

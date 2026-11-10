@@ -14,6 +14,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private readonly bool dockShortcutsEnabled;
     private readonly WindowsInputHelperBridge? elevatedHelper;
     private WindowsKeyHook? hook;
+    private Func<uint, bool>? volumeKeyHandler;
     private bool suppressDockToggle, captureBareWindowsKey, disposed;
     private uint revision;
     private readonly InputSignalMailbox signals = new();
@@ -86,7 +87,8 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 PostSignal,
                 PostSnipping,
                 PostSnippingCancel,
-                PostShortcut);
+                PostShortcut,
+                key => Volatile.Read(ref volumeKeyHandler)?.Invoke(key));
             UpdateState();
         }
     }
@@ -101,6 +103,12 @@ public sealed class WindowsKeyboardService : IKeyboardService
         var captureWinDown = dockShortcutsEnabled;
         hook?.UpdateState(suppressDockToggle, captureWinDown, revision);
         elevatedHelper?.UpdateState(suppressDockToggle, captureWinDown, revision);
+    }
+    public void SetVolumeKeyHandler(Func<uint, bool>? handler)
+    {
+        if (disposed) return;
+        Volatile.Write(ref volumeKeyHandler, handler);
+        elevatedHelper?.UpdateVolumeCapture(handler is not null);
     }
     private void StartFallback()
     {

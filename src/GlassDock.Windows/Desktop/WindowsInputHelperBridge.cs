@@ -22,6 +22,8 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     private readonly Action<uint> snippingShortcut;
     private readonly Action<uint> snippingCanceled;
     private readonly Action<int, uint> shortcutRequested;
+    private readonly Action<uint> volumeRequested;
+    private int captureVolume;
     private readonly CancellationTokenSource lifetime = new();
     private readonly Channel<string> states = Channel.CreateBounded<string>(new BoundedChannelOptions(1)
     { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
@@ -93,7 +95,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(uint processId);
 
     public WindowsInputHelperBridge(string helperPath, Action<bool> ownership, Action<InputSignal> signal,
-        Action<uint> snippingShortcut, Action<uint> snippingCanceled, Action<int, uint> shortcutRequested)
+        Action<uint> snippingShortcut, Action<uint> snippingCanceled, Action<int, uint> shortcutRequested, Action<uint> volumeRequested)
     {
         this.helperPath = Path.GetFullPath(helperPath);
         this.ownership = ownership;
@@ -101,6 +103,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         this.snippingShortcut = snippingShortcut;
         this.snippingCanceled = snippingCanceled;
         this.shortcutRequested = shortcutRequested;
+        this.volumeRequested = volumeRequested;
         attempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         runTask = RunAsync(attempt.Token);
     }
@@ -111,6 +114,11 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         states.Writer.TryWrite(value);
     }
     public void AllowHelper() => Volatile.Read(ref grant)?.TrySetResult();
+    public void UpdateVolumeCapture(bool enabled)
+    {
+        if (Interlocked.Exchange(ref captureVolume, enabled ? 1 : 0) == (enabled ? 1 : 0)) return;
+        states.Writer.TryWrite(Volatile.Read(ref state));
+    }
 
     private async Task RunAsync(CancellationToken token)
     {
@@ -175,11 +183,13 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             }
 
             stateWriter = WriteStatesAsync(writer, connection.Token);
+            states.Writer.TryWrite(Volatile.Read(ref state)); // Send volume readiness after every connection.
             long sequence = 0;
             while (await reader.ReadLineAsync(token) is { } line)
             {
                 if (line == "CAPS|RECOVER1") { Volatile.Write(ref supportsRecovery, 1); continue; }
                 if (line == "CAPS|SNIP1") { Log("Input helper supports Doky screenshot mode."); continue; }
+                if (line == "CAPS|VOLUME1") { Log("Input helper supports elevated volume-key capture."); continue; }
                 if (Volatile.Read(ref recoveryPending) is { } recovery && line == "RECOVERED|" + recovery.Id)
                 { recovery.Completion.TrySetResult(true); continue; }
                 if (line == "CAPS|RESTORE1") { Volatile.Write(ref restoreHelperPid, helper.Id); continue; }
@@ -187,7 +197,11 @@ internal sealed class WindowsInputHelperBridge : IDisposable
                 if (acknowledgement.Length == 3 && acknowledgement[0] == "RESTORED" &&
                     Volatile.Read(ref restorePending) is { } request && request.Id == acknowledgement[1])
                 { request.Completion.TrySetResult(acknowledgement[2] == "1"); continue; }
-                if (DockKeyboardShortcut.Read(line, ref sequence, Environment.TickCount64) is { } shortcut)
+                if (WindowsInputHelperProtocol.ReadVolumeEvent(line, ref sequence, Environment.TickCount64) is { } volumeKey)
+                {
+                    if (Volatile.Read(ref captureVolume) != 0) volumeRequested(volumeKey);
+                }
+                else if (DockKeyboardShortcut.Read(line, ref sequence, Environment.TickCount64) is { } shortcut)
                     shortcutRequested(shortcut.Index, shortcut.Revision);
                 else if (WindowsInputHelperProtocol.ReadEvent(line, ref sequence, Environment.TickCount64) is { } value)
                     signal(value);
@@ -245,7 +259,11 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             if (ReferenceEquals(completed, stateReady))
             {
                 stateReady = null;
-                if (states.Reader.TryRead(out var value)) await writer.WriteLineAsync(value.AsMemory(), token);
+                if (states.Reader.TryRead(out var value))
+                {
+                    await writer.WriteLineAsync(value.AsMemory(), token);
+                    await writer.WriteLineAsync(Volatile.Read(ref captureVolume) != 0 ? "VOLUME|1" : "VOLUME|0");
+                }
             }
             else
             {
@@ -433,6 +451,17 @@ internal static class WindowsInputHelperProtocol
 
     internal static InputSignal? ReadSnippingEnd(string line, ref long sequence, long now) =>
         ReadSnipMessage(line, "SNIPEND", ref sequence, now);
+
+    internal static uint? ReadVolumeEvent(string line, ref long sequence, long now)
+    {
+        var parts = line.Split('|');
+        if (parts.Length != 4 || parts[0] != "VOLUME" ||
+            !long.TryParse(parts[1], out var next) || next <= sequence ||
+            !long.TryParse(parts[2], out var stamp) ||
+            !uint.TryParse(parts[3], out var key) || !VolumeKeyCapture.IsVolumeKey(key)) return null;
+        sequence = next;
+        return now - stamp is >= 0 and <= 500 ? key : null;
+    }
 
     private static InputSignal? ReadSnipMessage(string line, string kind, ref long sequence, long now)
     {

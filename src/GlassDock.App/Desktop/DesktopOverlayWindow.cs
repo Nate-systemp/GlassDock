@@ -322,7 +322,8 @@ public sealed partial class DesktopOverlayWindow : Window
         Action? resumeTaskbarOverride = null,
         WifiUtilityService? sharedWifi = null, BluetoothUtilityService? sharedBluetooth = null,
         AirplaneModeUtilityService? sharedAirplaneMode = null, NightLightUtilityService? sharedNightLight = null,
-        EnergySaverUtilityService? sharedEnergySaver = null)
+        EnergySaverUtilityService? sharedEnergySaver = null, DndUtilityService? sharedDnd = null,
+        MasterVolumeService? sharedVolume = null)
     {
         this.settingsSession = settingsSession;
         this.settingsStore = settingsStore;
@@ -478,7 +479,7 @@ public sealed partial class DesktopOverlayWindow : Window
         applications.WarningChanged += (_, _) => { if (applications.Warning is { } warning) SetStatus(warning); };
         animation = new DockAnimationController(surface, icons, indicator, hoverArtworkForeground);
         animation.HoverPresentationChanged += (_, _) => UpdateDockWaveOutline();
-        InitializeUtilities(sharedWifi, sharedBluetooth, sharedAirplaneMode, sharedNightLight, sharedEnergySaver);
+        InitializeUtilities(sharedWifi, sharedBluetooth, sharedAirplaneMode, sharedNightLight, sharedEnergySaver, sharedDnd, sharedVolume);
 
         ApplyAppearance(settingsSession.Appearance);
         animation.PlacementChanged += (_, _) =>
