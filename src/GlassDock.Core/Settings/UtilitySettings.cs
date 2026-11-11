@@ -10,7 +10,7 @@ public sealed record UtilityDefinition(UtilityKind Kind, string Name, string Ico
         new UtilityDefinition(UtilityKind.Bluetooth, "Bluetooth", "bluetooth", 0xFF007AFF, true),
         new UtilityDefinition(UtilityKind.AirplaneMode, "Airplane mode (experimental)", "airplane", 0xFFFF9F0A, true),
         new UtilityDefinition(UtilityKind.Volume, "Sound", "speaker-high", 0xFF0A84FF, true),
-        new UtilityDefinition(UtilityKind.Brightness, "Brightness", "sun", 0xFFFFB340),
+        new UtilityDefinition(UtilityKind.Brightness, "Brightness", "sun", 0xFFFFB340, true),
         new UtilityDefinition(UtilityKind.Battery, "Battery", "battery-full", 0xFF30D158),
         new UtilityDefinition(UtilityKind.BatterySaver, "Energy Saver (experimental)", "battery-charging", 0xFF30D158, true),
         new UtilityDefinition(UtilityKind.Focus, "Do Not Disturb (experimental)", "moon", 0xFFAF52DE, true),

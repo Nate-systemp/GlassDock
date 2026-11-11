@@ -30,7 +30,7 @@ public sealed partial class SettingsWindow
             var definition = UtilityDefinition.All[i];
             var added = current.SelectedUtilities.Contains(definition.Kind);
             var icon = new UtilityIcon { Width = 28, Height = 28 };
-            _ = icon.SetAsync(definition.Icon, definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver or UtilityKind.Focus || added,
+            _ = icon.SetAsync(definition.Icon, definition.Kind is UtilityKind.Brightness or UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver or UtilityKind.Focus || added,
                 UtilityColors.Icon(current.UtilityTheme, false, !definition.Available));
             var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
             content.Children.Add(icon);

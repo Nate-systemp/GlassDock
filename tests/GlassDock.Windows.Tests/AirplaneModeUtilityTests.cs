@@ -5,6 +5,29 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class AirplaneModeUtilityTests
 {
+    [Fact]
+    public async Task Click_waits_for_hover_refresh_instead_of_being_dropped()
+    {
+        using var releaseRefresh = new ManualResetEventSlim();
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toggles = 0;
+        using var service = new AirplaneModeUtilityService((toggle, cancel) =>
+        {
+            if (!toggle) { reading.TrySetResult(); releaseRefresh.Wait(cancel); }
+            else Interlocked.Increment(ref toggles);
+            return new(toggle);
+        });
+        var refresh = service.RefreshAsync();
+        await reading.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var click = service.ToggleAsync();
+        try { Assert.False(click.IsCompleted); }
+        finally { releaseRefresh.Set(); }
+        await Task.WhenAll(refresh, click).WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, toggles);
+        Assert.True(service.State.On);
+        Assert.False(service.State.Busy);
+    }
+
     [Theory]
     [InlineData(true, 0)]
     [InlineData(false, 1)]

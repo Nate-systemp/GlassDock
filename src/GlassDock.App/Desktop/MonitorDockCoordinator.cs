@@ -29,9 +29,15 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private bool reconcilePending;
     private bool shuttingDown;
     private bool disposed;
-    private VolumeHudWindow? volumeHud;
+    private UtilityHudWindow? volumeHud;
     private DesktopOverlayWindow? volumeOwner;
+    private UtilityHudWindow? brightnessHud;
+    private DesktopOverlayWindow? brightnessOwner;
+    private string? selectedBrightnessDisplay, brightnessTarget;
     private readonly NativeVolumeOsdSuppression nativeVolumeOsd;
+    private readonly NativeBrightnessOsdLease nativeBrightnessOsd = new();
+    private readonly DispatcherQueueTimer? brightnessOsdTimer;
+    private long lastBrightnessHudSignal;
 
     public DesktopOverlayWindow PrimaryWindow { get; }
 
@@ -74,6 +80,15 @@ internal sealed class MonitorDockCoordinator : IDisposable
         runtime.Volume.Changed += VolumeChanged;
         runtime.Volume.VolumeKeyHandled += VolumeKeyHandled;
         runtime.Volume.Start();
+        runtime.Brightness.Changed += BrightnessChanged;
+        runtime.Brightness.Start();
+        if (nativeBrightnessOsd.Enabled)
+        {
+            brightnessOsdTimer = PrimaryWindow.DispatcherQueue.CreateTimer();
+            brightnessOsdTimer.Interval = TimeSpan.FromMilliseconds(33);
+            brightnessOsdTimer.Tick += (_, _) => PulseBrightnessSuppression();
+            brightnessOsdTimer.Start();
+        }
         settingsSession.Changed += SettingsChanged;
         PrimaryWindow.KeyboardService.SnippingRequested += SnippingRequested;
         PrimaryWindow.KeyboardService.SnippingCanceled += SnippingCanceled;
@@ -88,6 +103,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         topologyTimer.Interval = TimeSpan.FromSeconds(1);
         topologyTimer.Tick += (_, _) =>
         {
+            if (!shuttingDown && !disposed) UpdateBrightnessButtons();
             if (!shuttingDown && settingsSession.DisplayMode == DockDisplayMode.AllDisplays)
                 _ = ReconcileMonitorsAsync();
         };
@@ -129,6 +145,15 @@ internal sealed class MonitorDockCoordinator : IDisposable
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
         };
         window.SoundRequested += (_, _) => ShowVolume(window, explicitOpen: true);
+        window.BrightnessRequested += (_, _) => ShowBrightness(window, explicitOpen: true);
+        window.BrightnessMonitorsRequested += (_, _) =>
+        {
+            brightnessHud?.Hide(true);
+            window.ShowBrightnessMonitors(runtime.Brightness.Displays, selectedBrightnessDisplay, id =>
+            {
+                selectedBrightnessDisplay = id; UpdateBrightnessButtons(); ShowBrightness(window, explicitOpen: true);
+            });
+        };
         return window;
     }
 
@@ -136,7 +161,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         if (shuttingDown || disposed) return;
         ConfigureVolumeSuppression();
-        volumeHud?.Update(runtime.Volume.State);
+        volumeHud?.Update(UtilityHudValue.Volume(runtime.Volume.State));
         if (!args.External || screenshotActive) return;
         ShowVolume(VolumeSource(), explicitOpen: false);
     });
@@ -161,11 +186,65 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private bool ShowVolume(DesktopOverlayWindow source, bool explicitOpen)
     {
         if (shuttingDown || disposed || screenshotActive || !runtime.Volume.State.Available) return false;
-        volumeHud ??= new(runtime.Volume);
+        if (!explicitOpen && brightnessHud?.IsInteracting == true) return false;
+        brightnessHud?.Hide(true);
+        volumeHud ??= new(UtilityKind.Volume, () => UtilityHudValue.Volume(runtime.Volume.State), runtime.Volume.SetVolume);
         volumeOwner = source;
         volumeHud.ApplyAppearance(settingsSession.Appearance, settingsSession.Current.DockAppearanceMode);
-        volumeHud.Show(runtime.Volume.State, () => source.SoundAnchor, explicitOpen);
+        volumeHud.Show(UtilityHudValue.Volume(runtime.Volume.State), () => source.SoundAnchor, explicitOpen);
         return volumeHud.IsOpen;
+    }
+
+    private BrightnessDisplay? BrightnessFor(DesktopOverlayWindow source) =>
+        runtime.Brightness.Displays.FirstOrDefault(d => d.Id == selectedBrightnessDisplay) ?? runtime.Brightness.ForMonitor(source.SoundMonitor);
+
+    private UtilityHudValue BrightnessValue() => UtilityHudValue.Brightness(runtime.Brightness.Displays.FirstOrDefault(d => d.Id == brightnessTarget),
+        brightnessTarget is { } id && runtime.Brightness.IsPending(id));
+
+    private void UpdateBrightnessButtons()
+    {
+        foreach (var dock in secondaryDocks.Values.Prepend(PrimaryWindow)) dock.SetBrightnessStatus(BrightnessFor(dock));
+    }
+
+    private void BrightnessChanged(object? sender, BrightnessChangedEventArgs args) => PrimaryWindow.DispatcherQueue.TryEnqueue(() =>
+    {
+        if (shuttingDown || disposed) return;
+        if (selectedBrightnessDisplay is not null && !runtime.Brightness.Displays.Any(d => d.Id == selectedBrightnessDisplay)) selectedBrightnessDisplay = null;
+        UpdateBrightnessButtons(); brightnessHud?.Update(BrightnessValue());
+        if (screenshotActive || !args.External || args.Display is not { Available: true } changed) return;
+        lastBrightnessHudSignal = Environment.TickCount64;
+        var source = secondaryDocks.Values.Prepend(PrimaryWindow).FirstOrDefault(d => d.SoundMonitor == changed.Monitor) ?? PrimaryWindow;
+        if (brightnessHud?.IsOpen == true && brightnessTarget == changed.Id && brightnessOwner is not null) source = brightnessOwner;
+        ShowBrightness(source, explicitOpen: false, changed.Id);
+    });
+
+    private void PulseBrightnessSuppression()
+    {
+        var display = runtime.Brightness.Displays.FirstOrDefault(d => d.Available && d.Backend == "WMI");
+        var ready = !disposed && !shuttingDown && !safeMode && !inspection && !screenshotActive &&
+            display is not null && volumeHud?.IsInteracting != true;
+        if (!nativeBrightnessOsd.Pulse(ready) || !ready || display is null || Environment.TickCount64 - lastBrightnessHudSignal < 100) return;
+        // Show unchanged 0/100% key requests too, without duplicating the WMI update's entrance.
+        lastBrightnessHudSignal = Environment.TickCount64;
+        var source = secondaryDocks.Values.Prepend(PrimaryWindow).FirstOrDefault(d => d.SoundMonitor == display.Monitor) ?? PrimaryWindow;
+        ShowBrightness(source, explicitOpen: false, display.Id);
+    }
+
+    private bool ShowBrightness(DesktopOverlayWindow source, bool explicitOpen, string? changedDisplay = null)
+    {
+        if (shuttingDown || disposed || screenshotActive) return false;
+        var display = changedDisplay is null ? BrightnessFor(source) : runtime.Brightness.Displays.FirstOrDefault(d => d.Id == changedDisplay);
+        if (display?.Available != true || !explicitOpen && volumeHud?.IsInteracting == true) return false;
+        if (!explicitOpen && brightnessHud?.IsInteracting == true && brightnessTarget != display.Id) return false;
+        volumeHud?.Hide(true);
+        brightnessOwner = source; brightnessTarget = display.Id;
+        brightnessHud ??= new(UtilityKind.Brightness, BrightnessValue, value =>
+        {
+            if (brightnessTarget is { } id) runtime.Brightness.SetBrightness(id, value * 100);
+        });
+        brightnessHud.ApplyAppearance(settingsSession.Appearance, settingsSession.Current.DockAppearanceMode);
+        brightnessHud.Show(BrightnessValue(), () => brightnessOwner?.BrightnessAnchor, explicitOpen);
+        return brightnessHud.IsOpen;
     }
 
     private void DisposeVolumeHud()
@@ -173,6 +252,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         nativeVolumeOsd.Dispose();
         PrimaryWindow.KeyboardService.SetVolumeKeyHandler(null);
         volumeHud?.Dispose(); volumeHud = null; volumeOwner = null;
+        brightnessHud?.Dispose(); brightnessHud = null; brightnessOwner = null;
     }
 
     private void SnippingRequested(object? sender, EventArgs e)
@@ -180,6 +260,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         if (shuttingDown || disposed) return;
         if (screenshotActive) return;
         volumeHud?.BeginScreenshot();
+        brightnessHud?.BeginScreenshot();
         // Utilities share this capture even when the main dock is Frosted/Acrylic.
         PrimaryWindow.BeginSnippingCapture();
         foreach (var secondary in secondaryDocks.Values)
@@ -207,6 +288,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             PrimaryWindow.EndSnippingCapture();
             foreach (var secondary in secondaryDocks.Values) secondary.EndSnippingCapture();
             volumeHud?.EndScreenshot();
+            brightnessHud?.EndScreenshot();
         }
         finally { screenshotActive = false; }
     }
@@ -215,6 +297,11 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         if (!shuttingDown && !disposed) ConfigureVolumeSuppression();
         if (!shuttingDown && !disposed) volumeHud?.ApplyAppearance(settingsSession.Appearance, e.Settings.DockAppearanceMode);
+        if (!shuttingDown && !disposed)
+        {
+            brightnessHud?.ApplyAppearance(settingsSession.Appearance, e.Settings.DockAppearanceMode);
+            UpdateBrightnessButtons();
+        }
         if (shuttingDown || disposed || e.Settings.DockDisplayMode == lastDisplayMode)
             return;
 
@@ -389,7 +476,10 @@ internal sealed class MonitorDockCoordinator : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        brightnessOsdTimer?.Stop();
+        nativeBrightnessOsd.Dispose();
         runtime.Volume.Changed -= VolumeChanged;
+        runtime.Brightness.Changed -= BrightnessChanged;
         runtime.Volume.VolumeKeyHandled -= VolumeKeyHandled;
         DisposeVolumeHud();
         EndScreenshotCapture();

@@ -213,7 +213,9 @@ public sealed partial class DesktopOverlayWindow : Window
     private double DockScale => settingsSession.Current.DockSize;
     private DockSizing appliedSizing;
     private DockSizing Sizing => new(DockScale, settingsSession.Current.IconSize, settingsSession.Current.PinnedPlacement, settingsSession.Current.FloatingDockGap);
-    private DockAppearanceSettings Appearance => settingsSession.Appearance.ForDock(DockScale);
+    private double AvailableDockWidth => Math.Max(120d, (root.ActualWidth > 0 ? root.ActualWidth : windowManager.CurrentHostWidthDips) - 32d);
+    private DockAppearanceSettings Appearance => settingsSession.Appearance.ForDock(DockScale)
+        .FitAppRow(VisibleDockApplications.Count, AvailableDockWidth, 36d * DockScale);
     private bool HoverWaveEnabled => !safeMode && settingsSession.Current.HoverWaveEnabled;
     private double ExpandedDockHeight => Sizing.Height;
     private double ExpandedContentTop => root.ActualHeight - icons.Margin.Bottom - ExpandedDockHeight;
@@ -446,6 +448,14 @@ public sealed partial class DesktopOverlayWindow : Window
 
         root.SizeChanged += (_, _) =>
         {
+            if (animation is not null)
+            {
+                UpdateApplicationSizing();
+                if (state.State == DockState.Expanded)
+                    animation.ResizeExpanded(CalculateTargetDockWidth(), ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0));
+                else if (state.State == DockState.Expanding)
+                    animation.RetargetExpandedSize(CalculateTargetDockWidth(), ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0));
+            }
             UpdateBackdropBounds();
             UpdateDockWaveOutline();
             UpdateExternalDropHighlight();
@@ -783,23 +793,22 @@ public sealed partial class DesktopOverlayWindow : Window
         }
         if (keyboardDockNavigation && keyboardDockIndex >= VisibleDockApplications.Count)
             keyboardDockIndex = VisibleDockApplications.Count - 1;
+        UpdateApplicationSizing();
         if (state.State == DockState.Expanded)
         {
             var targetWidth = CalculateTargetDockWidth();
             animation.ResizeExpanded(targetWidth, ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0));
             UpdateBackdropBounds();
         }
+        else if (state.State == DockState.Expanding)
+            animation.RetargetExpandedSize(CalculateTargetDockWidth(), ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0));
     }
     private double CalculateTargetDockWidth()
     {
         var count = VisibleDockApplications.Count;
 
-        // Do not use DockAppearanceSettings.TargetDockWidth here: that helper
-        // intentionally caps the app-only dock at 560 DIP. Once the fixed
-        // system/clock cluster was added, that legacy cap made the icon StackPanel
-        // wider than the glass surface, producing the visible overflow near the
-        // right edge. Compute the real content width from the configured button
-        // geometry instead.
+        // The surface and button row use the same fitted geometry. Utilities
+        // move above the dock when the right-hand row no longer fits.
         var applicationWidth = count <= 0
             ? 100d
             : count * Appearance.ButtonWidth +
@@ -811,9 +820,18 @@ public sealed partial class DesktopOverlayWindow : Window
         var hostWidth = root.ActualWidth > 0
             ? root.ActualWidth
             : windowManager.CurrentHostWidthDips;
-        var maximumWidth = Math.Max(120d, hostWidth - 32d - 2 * UtilitySpace);
+        var maximumWidth = Math.Max(120d, hostWidth - 32d);
 
         return Math.Min(maximumWidth, applicationWidth);
+    }
+
+    private void UpdateApplicationSizing()
+    {
+        var appearance = Appearance;
+        icons.Spacing = appearance.IconSpacing;
+        foreach (var button in applicationButtons.Values)
+            if (button.Content is Grid content && content.Children.FirstOrDefault() is AdaptiveAppIcon icon)
+                ApplyIconLayout(button, content, icon, appearance);
     }
 
     private void BadgesChanged(object? sender, EventArgs e) => QueueNotificationBadgeRefresh();
@@ -2989,7 +3007,7 @@ public sealed partial class DesktopOverlayWindow : Window
         DockAppearanceMode dockAppearance)
     {
         stackWindow?.ApplyAppearance(appearance, dockAppearance);
-        appearance = appearance.ForDock(DockScale);
+        appearance = appearance.ForDock(DockScale).FitAppRow(VisibleDockApplications.Count, AvailableDockWidth, 36d * DockScale);
         appliedSizing = Sizing;
         animation.SetLayoutScale(DockScale);
         icons.Spacing = appearance.IconSpacing;

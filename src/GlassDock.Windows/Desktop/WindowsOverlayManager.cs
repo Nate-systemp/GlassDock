@@ -143,7 +143,8 @@ public sealed class WindowsOverlayManager : IDisposable
     // monitor so the visible dock can grow with pinned applications without
     // ever extending beyond the display.
     public const double Width = 1600;
-    public const double Height = 144;
+    // Two rows, maximum icon size and the configured bottom gap remain in the host.
+    public const double Height = 320;
     public double CurrentHostWidthDips { get; private set; } = 960;
     // Keep a remembered expanded dock width so an external OLE drag can be
     // acquired before WinUI receives DragEnter and expands the dock.
@@ -314,7 +315,7 @@ public sealed class WindowsOverlayManager : IDisposable
         // only the glass surface grows to its content. Leave a small physical
         // edge margin so large docks never touch or cross the display edges.
         var availableWidthDips = Math.Max(320d, screen.Width / scale - 32d);
-        var hostWidthDips = Math.Min(Width, availableWidthDips);
+        var hostWidthDips = availableWidthDips;
 
         var rect = DesktopPlacement.BottomCenter(
             screen,
@@ -614,10 +615,11 @@ public sealed class WindowsOverlayManager : IDisposable
         // HTTRANSPARENT / WS_EX_TRANSPARENT outside this region.
         NativeMethods.SetWindowRgn(hwnd, 0, true);
         var hostWidth = NativeMethods.GetClientRect(hwnd, out var client) ? (client.Right - client.Left) / scale : Width;
+        var hostHeight = client.Bottom > client.Top ? (client.Bottom - client.Top) / scale : Height;
         var x = expanded ? 0 : (hostWidth - 200) / 2;
-        var y = expanded ? 0 : Math.Max(0, Height - bottomMargin - 28);
+        var y = expanded ? 0 : Math.Max(0, hostHeight - bottomMargin - 28);
         var width = expanded ? hostWidth : 200;
-        var height = Height - y;
+        var height = hostHeight - y;
         var region = NativeMethods.CreateRoundRectRgn((int)(x * scale), (int)(y * scale),
             (int)((x + width) * scale) + 1, (int)((y + height) * scale) + 1, (int)(16 * scale), (int)(16 * scale));
         if (region == 0) throw new Win32Exception();
@@ -669,8 +671,9 @@ public sealed class WindowsOverlayManager : IDisposable
     public void SetPeekInteraction(double bottom)
     {
         var hostWidth = NativeMethods.GetClientRect(hwnd, out var client) ? (client.Right - client.Left) / Scale : Width;
+        var hostHeight = client.Bottom > client.Top ? (client.Bottom - client.Top) / Scale : Height;
         var left = (hostWidth - 120) / 2;
-        var top = Height - bottom - 5;
+        var top = hostHeight - bottom - 5;
         SetInteractionPolygon([(left, top), (left + 120, top),
             (left + 120, top + 13), (left, top + 13)]);
     }

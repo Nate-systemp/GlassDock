@@ -45,6 +45,18 @@ public readonly record struct DockAppearanceSettings(
         return Math.Clamp(target, 100, 560);
     }
 
+    public DockAppearanceSettings FitAppRow(int iconCount, double availableWidth, double padding)
+    {
+        if (!double.IsFinite(availableWidth) || !double.IsFinite(padding) || availableWidth <= padding || padding < 0)
+            throw new ArgumentOutOfRangeException(nameof(availableWidth));
+        if (iconCount <= 0) return this;
+        var contentWidth = iconCount * ButtonWidth + Math.Max(0, iconCount - 1) * IconSpacing;
+        if (contentWidth <= availableWidth - padding) return this;
+        var factor = (availableWidth - padding) / contentWidth;
+        return this with { LayoutScale = LayoutScale * factor, IconSize = IconSize * factor,
+            IconSpacing = IconSpacing * factor, BorderThickness = BorderThickness * factor };
+    }
+
     public double ScaleAtDistance(double distance)
     {
         if (!double.IsFinite(distance))

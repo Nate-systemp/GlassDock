@@ -30,7 +30,7 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void Windows_references_only_Core()
+    public void Windows_references_Core_and_the_WMI_platform_package()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "GlassDock.sln")))
@@ -39,6 +39,8 @@ public sealed class ArchitectureTests
         var project = XDocument.Load(Path.Combine(directory.FullName, "src", "GlassDock.Windows", "GlassDock.Windows.csproj"));
         var reference = Assert.Single(project.Descendants("ProjectReference"));
         Assert.Equal("../GlassDock.Core/GlassDock.Core.csproj", reference.Attribute("Include")?.Value);
-        Assert.Empty(project.Descendants("PackageReference"));
+        var package = Assert.Single(project.Descendants("PackageReference"));
+        Assert.Equal("System.Management", package.Attribute("Include")?.Value);
+        Assert.Equal("10.0.0", package.Attribute("Version")?.Value);
     }
 }

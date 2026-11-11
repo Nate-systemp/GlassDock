@@ -19,6 +19,7 @@ internal sealed class DokySharedRuntime : IDisposable
     public GlassDock.Windows.Desktop.EnergySaverUtilityService EnergySaver { get; } = new();
     public GlassDock.Windows.Desktop.DndUtilityService DoNotDisturb { get; } = new();
     public GlassDock.Windows.Desktop.MasterVolumeService Volume { get; } = new();
+    public GlassDock.Windows.Desktop.BrightnessService Brightness { get; } = new();
     public WindowsToastBadgeProvider WindowsToastBadges { get; } = new();
     public BadgeCoordinator Badges { get; }
 
@@ -56,6 +57,7 @@ internal sealed class DokySharedRuntime : IDisposable
         EnergySaver.Dispose();
         DoNotDisturb.Dispose();
         Volume.Dispose();
+        Brightness.Dispose();
         Badges.Dispose();
         Applications.Dispose();
     }

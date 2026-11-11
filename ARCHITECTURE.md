@@ -53,7 +53,7 @@ Visual Studio with WinUI development tools is the intended full IDE; VS Code can
 Packaging, signing, distribution, installer and updater decisions are deferred to Phase 15. Never store signing keys in Git.
 
 ## Testing
-Dock app menus, stacks, and previews share popup material and native rendering infrastructure. GlassDock.Windows has no external package dependency.
+Dock app menus, stacks, previews and scalar utility HUDs share popup material and native rendering infrastructure. GlassDock.Windows uses Microsoft's System.Management package for bounded WMI brightness queries and hardware-change events; DDC/CI uses the native Monitor Configuration APIs. Core remains independent of platform packages.
 
 Core tests can run without Windows desktop UI. Foundation tests inspect project dependencies and enforce platform boundaries rather than pretending to test unimplemented features.
 Windows tests enforce isolation; OS visibility/recovery checks are explicit local integration experiments, excluded from automatic tests and CI.

@@ -20,16 +20,16 @@ using Microsoft.UI.Xaml.Media.Animation;
 
 namespace GlassDock.App.Desktop;
 
-internal readonly record struct VolumeHudAnchor(nint Window, PreviewRect Dock, IReadOnlyList<PreviewRect> Utilities, PreviewRect? Sound);
+internal readonly record struct UtilityHudAnchor(nint Window, PreviewRect Dock, IReadOnlyList<PreviewRect> Utilities, PreviewRect? Button);
 
 /// <summary>One retained non-activating capsule; its host never resizes during a burst.</summary>
-internal sealed class VolumeHudWindow : Window, IDisposable
+internal sealed class UtilityHudWindow : Window, IDisposable
 {
     private const double CapsuleWidth = VolumeHudPlacement.Width, ExpandedHeight = VolumeHudPlacement.ExpandedHeight,
         CompactHeight = VolumeHudPlacement.CompactHeight;
     private const double HostWidth = VolumeHudPlacement.HostWidth, HostHeight = VolumeHudPlacement.HostHeight;
     private readonly Grid root = new() { Width = HostWidth, Height = HostHeight };
-    private readonly VolumeHudCapsule capsule;
+    private readonly UtilityHudCapsule capsule;
     private readonly GlassSurface glass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
     private readonly Grid fill = new() { Width = 0, HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false };
     private readonly UtilityIcon speaker = new() { Width = 16, Height = 16, Margin = new(12, 0, 0, 0),
@@ -38,7 +38,10 @@ internal sealed class VolumeHudWindow : Window, IDisposable
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
     private readonly WindowPreviewPlacement placement;
-    private readonly MasterVolumeService audio;
+    private readonly Func<UtilityHudValue> read;
+    private readonly Action<float> write;
+    private readonly bool previewBrightness;
+    private float? dragPreview;
     private readonly VolumeHudState state = new();
     private readonly ScaleTransform springScale = new() { ScaleX = 1, ScaleY = 1 };
     private readonly TranslateTransform springOffset = new();
@@ -46,7 +49,7 @@ internal sealed class VolumeHudWindow : Window, IDisposable
     private readonly bool animations = new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
     private readonly CompositionRoundedRectangleGeometry rounded;
     private readonly CompositionGeometricClip roundedClip;
-    private Func<VolumeHudAnchor?>? anchor;
+    private Func<UtilityHudAnchor?>? anchor;
     private Storyboard? presentation, shape, filling;
     private double shapeTarget = ExpandedHeight, fillTarget, dpi = 1;
     private double layoutScale = 1;
@@ -58,14 +61,17 @@ internal sealed class VolumeHudWindow : Window, IDisposable
     private DockAppearanceSettings? appliedAppearance;
     private DockAppearanceMode appliedMode;
     internal bool IsOpen => open;
+    internal bool IsInteracting => state.Interacting;
 
-    internal VolumeHudWindow(MasterVolumeService audio)
+    internal UtilityHudWindow(UtilityKind kind, Func<UtilityHudValue> read, Action<float> write)
     {
-        this.audio = audio;
-        capsule = new(audio) { Width = CapsuleWidth, Height = ExpandedHeight,
+        this.read = read; this.write = write;
+        previewBrightness = kind == UtilityKind.Brightness;
+        var name = kind == UtilityKind.Volume ? "Master volume" : "Display brightness";
+        capsule = new(name, read, write) { Width = CapsuleWidth, Height = ExpandedHeight,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new(0, 0, 0, VolumeHudPlacement.Padding) };
-        Title = "Doky — Volume"; WindowBranding.Apply(this);
+        Title = kind == UtilityKind.Volume ? "Doky — Volume" : "Doky — Brightness"; WindowBranding.Apply(this);
         AppWindow.IsShownInSwitchers = false;
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
         presenter.SetBorderAndTitleBar(false, false);
@@ -106,21 +112,21 @@ internal sealed class VolumeHudWindow : Window, IDisposable
         };
         capsule.PointerPressed += (_, e) =>
         {
-            if (!audio.State.Available || !e.GetCurrentPoint(capsule).Properties.IsLeftButtonPressed) return;
+            if (!read().Available || !e.GetCurrentPoint(capsule).Properties.IsLeftButtonPressed) return;
             dragging = true; state.BeginInteraction(); idle.Stop(); AnimateShape();
-            capsule.CapturePointer(e.Pointer); SetPointerVolume(e); e.Handled = true;
+            capsule.CapturePointer(e.Pointer); SetPointerLevel(e); e.Handled = true;
         };
-        capsule.PointerMoved += (_, e) => { if (dragging) { SetPointerVolume(e); e.Handled = true; } };
+        capsule.PointerMoved += (_, e) => { if (dragging) { SetPointerLevel(e); e.Handled = true; } };
         capsule.PointerReleased += (_, e) =>
         {
             if (!dragging) return;
-            SetPointerVolume(e); dragging = false; capsule.ReleasePointerCapture(e.Pointer);
+            SetPointerLevel(e); dragging = false; capsule.ReleasePointerCapture(e.Pointer);
             EndInteraction(); e.Handled = true;
         };
         capsule.PointerCaptureLost += (_, _) => { dragging = false; EndInteraction(); };
         capsule.PointerCanceled += (_, _) => { dragging = false; EndInteraction(); };
         Closed += (_, _) => Cleanup();
-        AutomationProperties.SetName(capsule, "Master volume");
+        AutomationProperties.SetName(capsule, name);
     }
 
     internal void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
@@ -132,7 +138,7 @@ internal sealed class VolumeHudWindow : Window, IDisposable
         UpdateGeometry();
     }
 
-    internal void Show(MasterVolumeState value, Func<VolumeHudAnchor?> source, bool explicitOpen)
+    internal void Show(UtilityHudValue value, Func<UtilityHudAnchor?> source, bool explicitOpen)
     {
         if (disposed || !value.Available) return;
         var entering = state.Phase == VolumeHudPhase.Hidden;
@@ -148,13 +154,19 @@ internal sealed class VolumeHudWindow : Window, IDisposable
         AnimateShape(); Update(value); RestartIdle();
     }
 
-    internal void Update(MasterVolumeState value)
+    internal void Update(UtilityHudValue value)
     {
         if (disposed || !open) return;
         if (!value.Available) { Hide(true); return; }
-        _ = speaker.SetAsync(value.Muted ? "speaker-x" : value.Volume < .4 ? "speaker-low" : "speaker-high", true, 0xFF99958B);
-        AutomationProperties.SetItemStatus(capsule, value.Muted ? "Muted" : $"{Math.Round(value.Volume * 100)} percent");
-        var target = ContentWidth * value.Volume;
+        _ = speaker.SetAsync(value.Icon, true, 0xFF99958B);
+        if (dragPreview is { } preview && (dragging || value.Pending))
+        {
+            AutomationProperties.SetItemStatus(capsule, $"Requested {Math.Round(preview * 100)} percent; applying hardware brightness. {value.Status}");
+            return;
+        }
+        dragPreview = null;
+        AutomationProperties.SetItemStatus(capsule, value.Status);
+        var target = ContentWidth * value.Level;
         if (Math.Abs(fillTarget - target) < .01) return;
         fillTarget = target;
         var current = fill.Width; filling?.Stop(); fill.Width = target;
@@ -163,7 +175,17 @@ internal sealed class VolumeHudWindow : Window, IDisposable
         filling.Begin();
     }
 
-    private void SetPointerVolume(PointerRoutedEventArgs e) => audio.SetVolume((float)VolumeHudState.VolumeAt(e.GetCurrentPoint(capsule).Position.X, ContentWidth));
+    private void SetPointerLevel(PointerRoutedEventArgs e)
+    {
+        var value = (float)VolumeHudState.VolumeAt(e.GetCurrentPoint(capsule).Position.X, ContentWidth);
+        if (previewBrightness)
+        {
+            dragPreview = value;
+            filling?.Stop(); fillTarget = fill.Width = ContentWidth * value;
+            AutomationProperties.SetItemStatus(capsule, $"Requested {Math.Round(value * 100)} percent; applying hardware brightness.");
+        }
+        write(value);
+    }
     private void EndInteraction()
     {
         if (hovering) return;
@@ -230,11 +252,11 @@ internal sealed class VolumeHudWindow : Window, IDisposable
             shapeTarget = (state.Phase == VolumeHudPhase.Compact ? CompactHeight : ExpandedHeight) * fit;
             capsule.Height = shapeTarget;
             speaker.Width = speaker.Height = 16 * fit; speaker.Margin = new(12 * fit, 0, 0, 0);
-            fillTarget = ContentWidth * audio.State.Volume; fill.Width = fillTarget;
+            fillTarget = ContentWidth * read().Level; fill.Width = fillTarget;
         }
         PreviewRect Physical(PreviewRect rect) => new(host.X + rect.X * dpi, host.Y + rect.Y * dpi, rect.Width * dpi, rect.Height * dpi);
         var rectangle = VolumeHudPlacement.Position(area, Physical(source.Dock), source.Utilities.Select(Physical).ToArray(),
-            source.Sound is { } sound ? Physical(sound) : null, dpi * layoutScale);
+            source.Button is { } button ? Physical(button) : null, dpi * layoutScale);
         if (rectangle is not { } position) { Hide(true); return; }
         placement.Position(position);
     }
@@ -269,6 +291,7 @@ internal sealed class VolumeHudWindow : Window, IDisposable
     {
         if (!open) return;
         revision++; open = false; dragging = hovering = false;
+        dragPreview = null;
         idle.Stop(); presentation?.Stop(); shape?.Stop(); filling?.Stop();
         capsule.ReleasePointerCaptures();
         state.EndInteraction(); state.Hide();
@@ -301,28 +324,37 @@ internal sealed class VolumeHudWindow : Window, IDisposable
     public void Dispose() { if (disposed) return; Cleanup(); Close(); }
 }
 
-internal sealed class VolumeHudCapsule(MasterVolumeService audio) : Grid
+internal readonly record struct UtilityHudValue(float Level, bool Available, string Icon, string Status, bool Pending = false)
 {
-    protected override AutomationPeer OnCreateAutomationPeer() => new VolumeHudAutomationPeer(this, audio);
+    internal static UtilityHudValue Volume(MasterVolumeState value) => new(value.Volume, value.Available,
+        value.Muted ? "speaker-x" : value.Volume < .4 ? "speaker-low" : "speaker-high",
+        value.Muted ? "Muted" : $"{Math.Round(value.Volume * 100)} percent");
+    internal static UtilityHudValue Brightness(BrightnessDisplay? value, bool pending) => new((value?.Percent ?? 0) / 100f,
+        value?.Available == true, "sun", value?.Message ?? "Brightness unavailable", pending);
 }
 
-internal sealed class VolumeHudAutomationPeer(VolumeHudCapsule owner, MasterVolumeService audio)
+internal sealed class UtilityHudCapsule(string name, Func<UtilityHudValue> read, Action<float> write) : Grid
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new UtilityHudAutomationPeer(this, name, read, write);
+}
+
+internal sealed class UtilityHudAutomationPeer(UtilityHudCapsule owner, string name, Func<UtilityHudValue> read, Action<float> write)
     : FrameworkElementAutomationPeer(owner), IRangeValueProvider
 {
-    protected override string GetClassNameCore() => "DokyVolumeCapsule";
+    protected override string GetClassNameCore() => name == "Master volume" ? "DokyVolumeCapsule" : "DokyBrightnessCapsule";
     protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Slider;
     protected override bool IsControlElementCore() => true;
     protected override object GetPatternCore(PatternInterface pattern) => pattern == PatternInterface.RangeValue ? this : base.GetPatternCore(pattern);
-    public bool IsReadOnly => !audio.State.Available;
+    public bool IsReadOnly => !read().Available;
     public double LargeChange => 10;
     public double SmallChange => 2;
     public double Maximum => 100;
     public double Minimum => 0;
-    public double Value => audio.State.Volume * 100;
+    public double Value => read().Level * 100;
     public void SetValue(double value)
     {
         if (!double.IsFinite(value) || value is < 0 or > 100) throw new ArgumentOutOfRangeException(nameof(value));
-        if (IsReadOnly) throw new InvalidOperationException("Audio output unavailable.");
-        audio.SetVolume((float)(value / 100));
+        if (IsReadOnly) throw new InvalidOperationException(name + " unavailable.");
+        write((float)(value / 100));
     }
 }

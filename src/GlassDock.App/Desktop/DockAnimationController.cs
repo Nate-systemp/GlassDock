@@ -230,6 +230,15 @@ internal sealed class DockAnimationController : IDisposable
         surface.Height = indicator.Height = height;
     }
 
+    public void RetargetExpandedSize(double width, double height)
+    {
+        if (disposed) return;
+        expandedWidth = width;
+        expandedHeight = height;
+        iconTransition.SetExpandedSize(width, height);
+        ApplyProgress();
+    }
+
     // Pin placement changes the expanded surface depth, not collapse progress.
     public void SetPlacementHeight(double height)
     {

@@ -59,6 +59,7 @@ internal sealed class UtilityButton : Button, IDisposable
     private bool detailsOpen, disposed;
     private bool trackingPresentation;
     private string message = "";
+    private ToolTip? statusTip;
     private double scaleTarget = 1;
     private global::Windows.Foundation.Point pointerStart, pointerLast;
     private readonly UtilityPointerGesture gesture = new();
@@ -312,6 +313,19 @@ internal sealed class UtilityButton : Button, IDisposable
         Render();
     }
 
+    internal async Task ShowStatusAsync()
+    {
+        if (disposed) return;
+        if (statusTip is not null) statusTip.IsOpen = false;
+        var tip = new ToolTip { Content = message, PlacementTarget = this };
+        statusTip = tip;
+        ToolTipService.SetToolTip(this, tip);
+        tip.IsOpen = true;
+        await Task.Delay(2500);
+        tip.IsOpen = false;
+        if (ReferenceEquals(statusTip, tip)) { statusTip = null; if (!disposed) Render(); }
+    }
+
     internal void SetSoundState(bool available, bool muted)
     {
         soundMuted = muted;
@@ -468,7 +482,7 @@ internal sealed class UtilityButton : Button, IDisposable
             AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to expand or collapse.");
         if (Definition.Kind == UtilityKind.Bluetooth)
             AutomationProperties.SetHelpText(this, AutomationProperties.GetHelpText(this) + " Hold to show paired devices.");
-        ToolTipService.SetToolTip(this, IsToggling ? "Changing..." : detailsOpen ? Definition.Name + " Settings" : message);
+        ToolTipService.SetToolTip(this, statusTip?.IsOpen == true ? statusTip : IsToggling ? "Changing..." : detailsOpen ? Definition.Name + " Settings" : message);
         var color = displayOn ? Definition.Accent : UtilityColors.Surface(theme);
         var surfaceColor = global::Windows.UI.Color.FromArgb(
             displayOn ? (byte)(pressed ? 110 : 85) : dockMode.GlassStyle() is null ? (byte)255 : hover ? (byte)36 : (byte)12,
@@ -513,7 +527,7 @@ internal sealed class UtilityButton : Button, IDisposable
                 motion.Begin();
             }
         }
-        _ = icon.SetAsync(Definition.Kind == UtilityKind.Volume && soundMuted ? "speaker-x" : Definition.Icon, AlwaysFilled || displayOn && !RadioUtility, IconColor(),
+        _ = icon.SetAsync(Definition.Kind == UtilityKind.Volume && soundMuted ? "speaker-x" : Definition.Icon, Definition.Kind == UtilityKind.Brightness || AlwaysFilled || displayOn && !RadioUtility, IconColor(),
             AlwaysFilled && animations ? TransitionDuration : null);
         var captionTheme = Definition.Kind == UtilityKind.Wifi && displayOn ? UtilityTheme.Light : IconTheme;
         var textColor = UtilityColors.Icon(captionTheme, false, !available);
@@ -533,6 +547,7 @@ internal sealed class UtilityButton : Button, IDisposable
     {
         if (disposed) return;
         disposed = true;
+        if (statusTip is not null) statusTip.IsOpen = false;
         CancelToggle(); IsMorphing = false; TrackPresentation(false); morphRevision++;
         hold.Stop(); motion?.Stop(); morph?.Stop(); expansion?.Stop();
         captionEffect.Dispose(); Glass.Dispose();

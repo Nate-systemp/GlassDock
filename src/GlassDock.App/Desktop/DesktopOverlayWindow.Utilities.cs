@@ -34,23 +34,50 @@ public sealed partial class DesktopOverlayWindow
     private MasterVolumeService? utilityVolume;
     private bool ownsVolume;
     internal event EventHandler? SoundRequested;
+    internal event EventHandler? BrightnessRequested;
+    internal event EventHandler? BrightnessMonitorsRequested;
+    private MenuFlyout? brightnessSelector;
     internal nint SoundMonitor => windowManager.CurrentMonitor;
-    internal VolumeHudAnchor? SoundAnchor
+    internal UtilityHudAnchor? SoundAnchor => HudAnchor(UtilityKind.Volume);
+    internal UtilityHudAnchor? BrightnessAnchor => HudAnchor(UtilityKind.Brightness);
+    private UtilityHudAnchor? HudAnchor(UtilityKind kind)
     {
-        get
-        {
-            if (closing) return null;
-            PreviewRect Bounds(UtilityButton button) => new(button.Glass.Bounds.X, button.Glass.Bounds.Y, button.Glass.Bounds.Z, button.Glass.Bounds.W);
-            var utilities = utilityArea.Visibility == Visibility.Visible
-                ? utilityButtons.Values.Select(Bounds).ToArray() : Array.Empty<PreviewRect>();
-            PreviewRect? sound = utilityArea.Visibility == Visibility.Visible && utilityButtons.TryGetValue(UtilityKind.Volume, out var button)
-                ? Bounds(button) : null;
-            return new(WinRT.Interop.WindowNative.GetWindowHandle(this),
-                new((root.ActualWidth - surface.ActualWidth) / 2, root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight,
-                    surface.ActualWidth, surface.ActualHeight), utilities, sound);
-        }
+        if (closing) return null;
+        PreviewRect Bounds(UtilityButton button) => new(button.Glass.Bounds.X, button.Glass.Bounds.Y, button.Glass.Bounds.Z, button.Glass.Bounds.W);
+        var utilities = utilityArea.Visibility == Visibility.Visible
+            ? utilityButtons.Values.Select(Bounds).ToArray() : Array.Empty<PreviewRect>();
+        PreviewRect? sound = utilityArea.Visibility == Visibility.Visible && utilityButtons.TryGetValue(kind, out var button)
+            ? Bounds(button) : null;
+        return new(WinRT.Interop.WindowNative.GetWindowHandle(this),
+            new((root.ActualWidth - surface.ActualWidth) / 2, root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight,
+                surface.ActualWidth, surface.ActualHeight), utilities, sound);
     }
-    private double UtilitySpace => settingsSession.Current.SelectedUtilities.Length * (ExpandedDockHeight + 12 * DockScale);
+
+    internal void SetBrightnessStatus(BrightnessDisplay? display)
+    {
+        if (!closing && utilityButtons.TryGetValue(UtilityKind.Brightness, out var button))
+            button.SetState(false, display?.Available == true, display?.Message ?? "Brightness unavailable on this display · right-click to choose a monitor");
+    }
+
+    internal void ShowBrightnessMonitors(IReadOnlyList<BrightnessDisplay> displays, string? selected, Action<string?> select)
+    {
+        if (closing || !utilityButtons.TryGetValue(UtilityKind.Brightness, out var button)) return;
+        brightnessSelector?.Hide();
+        var menu = new MenuFlyout(); brightnessSelector = menu;
+        var follow = new ToggleMenuFlyoutItem { Text = "Follow dock display", IsChecked = selected is null };
+        follow.Click += (_, _) => select(null); menu.Items.Add(follow);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        foreach (var display in displays)
+        {
+            var item = new ToggleMenuFlyoutItem { Text = display.Name + (display.Available ? $" · {display.Percent}%" : " · Unsupported"),
+                IsChecked = selected == display.Id, IsEnabled = display.Available };
+            item.Click += (_, _) => select(display.Id); menu.Items.Add(item);
+        }
+        if (displays.Count == 0) menu.Items.Add(new MenuFlyoutItem { Text = "Checking displays…", IsEnabled = false });
+        menu.Opened += (_, _) => previews.BeginContextMenu(menu);
+        menu.Closed += (_, _) => { previews.EndContextMenu(menu); if (brightnessSelector == menu) brightnessSelector = null; };
+        menu.ShowAt(button);
+    }
 
     private bool IsPointerOverUtility(double x, double y) =>
         utilityArea.Visibility == Visibility.Visible && utilityButtons.Values.Any(button =>
@@ -123,6 +150,7 @@ public sealed partial class DesktopOverlayWindow
             if (bluetoothSettingsOnly?.Definition.Kind == kind) DismissBluetoothSettingsOnly();
             if (kind == UtilityKind.Wifi) wifiWindow?.Hide(immediate: true);
             if (kind == UtilityKind.Bluetooth) bluetoothWindow?.Hide(immediate: true);
+            if (kind == UtilityKind.Brightness) brightnessSelector?.Hide();
             var old = utilityButtons[kind]; utilityButtons.Remove(kind);
             utilityOffsets.Remove(kind);
             old.IsHitTestVisible = false; old.Glass.Active = false;
@@ -143,6 +171,11 @@ public sealed partial class DesktopOverlayWindow
                 utilityButtons.Add(definition.Kind, button); utilityArea.Children.Add(button);
                 button.PrimaryRequested += async (_, _) =>
                 {
+                    if (button.Definition.Kind == UtilityKind.Brightness)
+                    {
+                        BrightnessRequested?.Invoke(this, EventArgs.Empty);
+                        return;
+                    }
                     if (button.Definition.Kind == UtilityKind.Volume)
                     {
                         if (utilityVolume?.State.Available == true) SoundRequested?.Invoke(this, EventArgs.Empty);
@@ -150,14 +183,20 @@ public sealed partial class DesktopOverlayWindow
                     }
                     if (button.Definition.Kind == UtilityKind.Focus)
                     {
-                        if (utilityDnd is { } dnd && dnd.State.Available && !dnd.State.Busy)
+                        if (utilityDnd is { } dnd && !dnd.State.Busy)
+                        {
                             await RunUtilityToggleAsync(button, dnd.ToggleAsync, () => SetDndState(button, dnd.State));
+                            if (!dnd.State.Available) await button.ShowStatusAsync();
+                        }
                         return;
                     }
                     if (button.Definition.Kind == UtilityKind.BatterySaver)
                     {
-                        if (utilityEnergySaver is { } energy && energy.State.Available && !energy.State.Busy)
+                        if (utilityEnergySaver is { } energy && !energy.State.Busy)
+                        {
                             await RunUtilityToggleAsync(button, energy.ToggleAsync, () => SetEnergySaverState(button, energy.State));
+                            if (!energy.State.Available) await button.ShowStatusAsync();
+                        }
                         return;
                     }
                     if (button.Definition.Kind == UtilityKind.NightLight)
@@ -190,7 +229,8 @@ public sealed partial class DesktopOverlayWindow
                 };
                 button.DetailsRequested += (_, _) =>
                 {
-                    if (button.Definition.Kind == UtilityKind.Bluetooth) ShowBluetoothDevices(button);
+                    if (button.Definition.Kind == UtilityKind.Brightness) BrightnessMonitorsRequested?.Invoke(this, EventArgs.Empty);
+                    else if (button.Definition.Kind == UtilityKind.Bluetooth) ShowBluetoothDevices(button);
                     else if (button.Definition.Kind == UtilityKind.Wifi) ShowWifiNetworks(button);
                 };
                 button.GeometryChanged += (_, _) => { if (!closing) UpdateBackdropBounds(); };
@@ -202,7 +242,7 @@ public sealed partial class DesktopOverlayWindow
                 };
                 button.PointerEntered += async (_, _) =>
                 {
-                    if (button.Definition.Kind == UtilityKind.Volume) return;
+                    if (button.Definition.Kind is UtilityKind.Volume or UtilityKind.Brightness) return;
                     if (button.Definition.Kind == UtilityKind.Focus) await utilityDnd!.RefreshAsync();
                     else if (button.Definition.Kind == UtilityKind.BatterySaver) await utilityEnergySaver!.RefreshAsync();
                     else if (button.Definition.Kind == UtilityKind.NightLight) await utilityNightLight!.RefreshAsync();
@@ -211,7 +251,7 @@ public sealed partial class DesktopOverlayWindow
                     else await utilityWifi.RefreshAsync();
                 };
                 FadeUtility(button, 1);
-                if (button.Definition.Kind == UtilityKind.Volume) { }
+                if (button.Definition.Kind is UtilityKind.Volume or UtilityKind.Brightness) { }
                 else if (button.Definition.Kind == UtilityKind.Focus) _ = utilityDnd!.RefreshAsync();
                 else if (button.Definition.Kind == UtilityKind.BatterySaver) _ = utilityEnergySaver!.RefreshAsync();
                 else if (button.Definition.Kind == UtilityKind.NightLight) _ = utilityNightLight!.RefreshAsync();
@@ -369,6 +409,14 @@ public sealed partial class DesktopOverlayWindow
         var minimumLeft = dock.X + dock.Width + gap;
         var buttons = settingsSession.Current.SelectedUtilities.Where(utilityButtons.ContainsKey)
             .Select(kind => utilityButtons[kind]).ToArray();
+        var rowWidth = buttons.Length * (dock.Height + gap) - gap;
+        if (minimumLeft + rowWidth > root.ActualWidth - 16)
+        {
+            // Keep utilities accessible without stealing width from pinned apps.
+            var left = Math.Max(16, Math.Min(dock.X + dock.Width - rowWidth, root.ActualWidth - 16 - rowWidth));
+            dock = new(left - gap, Math.Max(0, dock.Y - gap - dock.Height), 0, dock.Height);
+            minimumLeft = left;
+        }
         foreach (var button in buttons)
         {
             if (button.Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth) utilityOffsets.Remove(button.Definition.Kind);
@@ -384,7 +432,7 @@ public sealed partial class DesktopOverlayWindow
                 var diameter = rect.Height * .96;
                 rect = new(rect.X + (rect.Width - diameter) / 2, rect.Y + (rect.Height - diameter) / 2, diameter, diameter);
             }
-            button.Configure(rect.Height, Appearance.IconSize, settingsSession.Current.UtilityTheme, mode, maximumRight - rect.X);
+            button.Configure(rect.Height, settingsSession.Appearance.IconSize * DockScale, settingsSession.Current.UtilityTheme, mode, maximumRight - rect.X);
             expansionShift += Math.Max(0, button.Width - rect.Width);
             Canvas.SetLeft(button, rect.X); Canvas.SetTop(button, rect.Y);
             button.Glass.Bounds = new((float)rect.X, (float)rect.Y, (float)button.Width, (float)rect.Height);
@@ -504,6 +552,7 @@ public sealed partial class DesktopOverlayWindow
 
     private void DisposeUtilities()
     {
+        brightnessSelector?.Hide(); brightnessSelector = null;
         if (utilityVolume is not null)
         {
             utilityVolume.Changed -= VolumeStateChanged;
