@@ -24,7 +24,6 @@ internal sealed class NightLightRegistry
         cancel.ThrowIfCancellationRequested();
         write(before, updated, cancel);
         highestWritten = new NightLightCloudStore(updated).Modified;
-        // Two readbacks detect immediate rejection/reversion, not the physical display effect.
         var confirmations = 0;
         while (true)
         {
@@ -54,7 +53,6 @@ internal sealed class NightLightRegistry
 
     private static void WriteState(byte[] expected, byte[] updated, CancellationToken cancel)
     {
-        // Open only the existing state key. Never create keys or write the schedule/settings/Cloud records.
         using var key = Registry.CurrentUser.OpenSubKey(StateKey, writable: true) ?? throw new NotSupportedException("Night Light state is unavailable.");
         if (!ReadValue(key).AsSpan().SequenceEqual(expected))
             throw new IOException("Night Light changed externally before the write. Try again.");

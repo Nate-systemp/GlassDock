@@ -73,8 +73,6 @@ internal sealed partial class GlassHomeWindow
     private void ApplyAppearance()
     {
         var selectedMode = settingsSession.Current.DockAppearanceMode;
-        // Preserve the selected material: Dark/Light are solid, only the three
-        // explicit glass modes may sample the desktop behind Home.
         var materialMode = selectedMode;
         var paletteMode = selectedMode == DockAppearanceMode.Light ? DockAppearanceMode.Light :
             selectedMode == DockAppearanceMode.Dark ? DockAppearanceMode.Dark :
@@ -83,8 +81,6 @@ internal sealed partial class GlassHomeWindow
         theme.ApplyReadingContrast(settingsSession.Current.DockOpacity, materialMode);
         root.RequestedTheme = paletteMode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
         var material = PopupMaterial.CreateForPopup(settingsSession.Appearance, materialMode);
-        // Initialize the disjoint mask before Clear is applied: no full-window specular layer.
-        // Reuse the current, already pixel-aligned card bounds during live changes.
         UpdateMaterialBounds();
         PopupStyle.Apply(cards[0].Surface, backdrop, settingsSession.Appearance, materialMode);
         foreach (var card in cards) card.Apply(PopupMaterial.ForDashboardCard(material, materialMode));
@@ -127,7 +123,6 @@ internal sealed partial class GlassHomeWindow
     {
         if (launching || !IsVisible) return;
         launching = true;
-        // Hide before foreground transfer; hiding after activation can steal focus from the target.
         HideHome();
         try
         {

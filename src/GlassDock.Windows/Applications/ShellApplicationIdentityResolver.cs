@@ -4,12 +4,6 @@ using GlassDock.Core.Applications;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>
-/// Resolves the canonical Shell AppUserModelID for Win32 windows that expose no
-/// window/process AUMID. This is especially common for Squirrel/Electron apps:
-/// Windows Notification Center identifies them by the Start Menu shortcut AUMID,
-/// while the running executable itself reports no AUMID.
-/// </summary>
 internal sealed class ShellApplicationIdentityResolver
 {
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(2);
@@ -25,11 +19,6 @@ internal sealed class ShellApplicationIdentityResolver
         return Resolve(executablePath, Snapshot());
     }
 
-    /// <summary>
-    /// Resolves a user-supplied .lnk pin to the same canonical identity used by
-    /// the running application. The launch target remains the original shortcut
-    /// so custom arguments/profile behavior is preserved.
-    /// </summary>
     internal ApplicationIdentity? ResolveShortcut(string shortcutPath)
     {
         if (string.IsNullOrWhiteSpace(shortcutPath) ||
@@ -66,24 +55,12 @@ internal sealed class ShellApplicationIdentityResolver
             .Where(hint => !string.IsNullOrWhiteSpace(hint.AppUserModelId))
             .ToArray();
 
-        // Prefer an exact executable target. This covers conventional Win32
-        // shortcuts that carry an explicit System.AppUserModel.ID property.
         var exact = all.Where(hint =>
             SamePath(hint.ExecutablePath, executablePath)).ToArray();
 
         if (exact.Length > 0)
-            return UniqueAppId(exact); // Ambiguous direct evidence must not fall through.
+            return UniqueAppId(exact);
 
-        // Squirrel/Electron shortcuts commonly take one of two forms:
-        //
-        // 1. Update.exe --processStart Foo.exe
-        // 2. <app-root>\Foo.exe, while the real window belongs to
-        //    <app-root>\app-x.y.z\Foo.exe
-        //
-        // Treat both as strong evidence only when the executable stays inside
-        // the same versioned application root. Combine the candidates before
-        // selecting an AUMID so conflicting Shell registrations remain
-        // ambiguous instead of being guessed.
         return UniqueAppId(all.Where(hint =>
             MatchesProcessStartShortcut(hint, executablePath) ||
             MatchesVersionedChildShortcut(hint, executablePath)));
@@ -141,8 +118,6 @@ internal sealed class ShellApplicationIdentityResolver
                     }
                     catch (Exception error) when (ShellApplicationMetadata.IsDiscoveryError(error))
                     {
-                        // A single stale or third-party shortcut must not affect
-                        // discovery for the rest of the dock.
                     }
                 }
             }
@@ -242,10 +217,6 @@ internal sealed class ShellApplicationIdentityResolver
             string.IsNullOrWhiteSpace(runningDirectory))
             return false;
 
-        // Only accept the common Squirrel layout:
-        //   <root>\App.exe
-        //   <root>\app-1.2.3\App.exe
-        // This intentionally rejects deeper/nested or sibling paths.
         if (!Path.GetFileName(runningDirectory).StartsWith("app-", StringComparison.OrdinalIgnoreCase))
             return false;
 

@@ -2,11 +2,6 @@ using System.Diagnostics;
 
 namespace GlassDock.Core.Desktop;
 
-/// <summary>
-/// Low-overhead, opt-in diagnostic counters for investigating UI-thread and rendering activity.
-/// Enabled via DOKY_PERF_DIAG=1 environment variable or --perf-diag command-line flag.
-/// Never performs per-frame file I/O.
-/// </summary>
 public static class DockPerformanceDiagnostics
 {
     public static readonly bool Enabled =

@@ -29,14 +29,13 @@ internal static class TaskbarAutoHide
     {
         WithLock(() =>
         {
-        // The watchdog holds the session lease. Recover an interrupted older lease first.
         if (!RestoreCore(window)) throw new IOException("Cannot restore the previous taskbar setting.");
         var original = Read();
         Directory.CreateDirectory(Path.GetDirectoryName(Journal)!);
         using (var stream = new FileStream(Journal, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
         {
             stream.Write(System.Text.Encoding.UTF8.GetBytes(original.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-            stream.Flush(true); // Recovery information must be durable before changing the shell setting.
+            stream.Flush(true);
         }
         if (!Set(window, original & ~1u)) throw new InvalidOperationException("Windows did not suspend taskbar auto-hide.");
         return true;
@@ -66,7 +65,7 @@ internal static class TaskbarAutoHide
             File.Delete(Journal);
             return true;
         }
-        catch (FileNotFoundException) { return true; } // The other recovery participant completed first.
+        catch (FileNotFoundException) { return true; }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }

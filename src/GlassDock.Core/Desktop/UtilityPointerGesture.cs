@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>One pointer gesture can toggle, drag, or request details, never more than one.</summary>
 public sealed class UtilityPointerGesture
 {
     public bool PrimaryDown { get; private set; }

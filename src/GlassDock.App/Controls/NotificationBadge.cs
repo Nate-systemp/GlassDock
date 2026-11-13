@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Controls;
 
-/// <summary>Non-interactive overlay; its parent's hover/reorder transform moves the complete icon.</summary>
 internal sealed class NotificationBadge : Grid
 {
     private readonly NotificationBadgeState state = new();
@@ -87,7 +86,7 @@ internal sealed class NotificationBadge : Grid
         var previous = state.Display;
         var transition = state.SetDisplay(display);
         if (transition == BadgeTransition.None)
-            return; // Source/timestamp metadata changed, but the visible badge did not.
+            return;
 
         var version = ++revision;
         Stop();

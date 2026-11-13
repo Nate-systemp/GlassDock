@@ -2,10 +2,6 @@ using Microsoft.Win32;
 
 namespace GlassDock.Windows.Settings;
 
-/// <summary>
-/// Owns GlassDock's per-user Windows sign-in registration.
-/// No polling or background worker is used.
-/// </summary>
 public sealed class WindowsStartupService
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";

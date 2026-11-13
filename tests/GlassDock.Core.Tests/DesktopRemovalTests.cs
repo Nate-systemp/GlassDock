@@ -25,7 +25,7 @@ public sealed class DesktopRemovalTests
         for (var i = 0; i < 40; i++)
         {
             pump.Publish(Snapshot(Window(1, true), Window(2, false)));
-            pump.Publish(Snapshot()); // Transitional enumeration while Shell moves windows.
+            pump.Publish(Snapshot());
             pump.Publish(Snapshot(Window(1, true), Window(2, true)));
             Assert.Single(ui);
             ui.Dequeue()();
@@ -58,7 +58,7 @@ public sealed class DesktopRemovalTests
         {
             pump.Publish(moved);
             pump.Reapply();
-            Assert.Empty(ui); // No callback available to run inside this mutation.
+            Assert.Empty(ui);
         };
         pump.Publish(Snapshot(Window(1, true)));
         ui.Dequeue()();

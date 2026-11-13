@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>One immutable membership/layout transaction, captured before native UI calls can reenter.</summary>
 public sealed record WindowPreviewFrame(WindowPreviewLayout Compact, WindowPreviewLayout Expanded,
     IReadOnlyList<ApplicationWindow> Windows, int Page, int Total)
 {

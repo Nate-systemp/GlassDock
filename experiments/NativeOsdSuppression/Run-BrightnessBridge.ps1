@@ -98,7 +98,7 @@ enabled=1
         if ($engineProcess.HasExited) { throw 'The Windhawk bridge exited. Native brightness handling is restored.' }
         $currentShell = [DokyBrightnessShellIdentity]::Pid()
         if ($currentShell -ne 0 -and $currentShell -ne $shellProcess.Id) {
-            # Reload only the owned bridge after Windows independently recreates its Shell.
+
             & (Join-Path $WindhawkPath 'windhawk.exe') -exit -wait -timeout 15000
             $engineProcess = Start-Process (Join-Path $WindhawkPath 'windhawk.exe') -ArgumentList '-tray-only' -WindowStyle Hidden -PassThru
             $shellProcess = Wait-BrightnessModule $currentShell

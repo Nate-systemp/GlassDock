@@ -22,7 +22,6 @@ public sealed class DockReversalTests
                 state.Complete(revision);
                 Assert.Equal(opening ? DockState.Expanding : DockState.Collapsing, state.State);
             }
-            // A zero-duration (reduced-motion) completion may happen immediately.
             if (i % 3 == 0) state.Complete(state.Revision);
             var expected = state.State;
             foreach (var old in stale.Where(value => value != state.Revision)) state.Complete(old);

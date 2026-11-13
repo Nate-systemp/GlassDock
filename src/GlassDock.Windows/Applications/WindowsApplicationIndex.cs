@@ -8,15 +8,6 @@ public sealed record ApplicationIndexSnapshot(
     bool IsIndexing,
     string? Warning);
 
-/// <summary>
-/// Retained metadata index for Glass Home.
-///
-/// Important memory policy:
-/// - app metadata is indexed only when Start() is requested;
-/// - icons are NOT extracted while building the installed-app index;
-/// - only the currently requested search-result icons are loaded;
-/// - the icon request queue and retained icon cache are both bounded.
-/// </summary>
 public sealed class WindowsApplicationIndex : IDisposable
 {
     private const int MetadataPublishBatch = 64;
@@ -43,15 +34,12 @@ public sealed class WindowsApplicationIndex : IDisposable
 
     private readonly Queue<string> loadedIconOrder = new();
 
-    // Home only displays 32px search icons. A 64px source is already ample for
-    // normal/high DPI rendering and is dramatically smaller than 256px RGBA.
     private readonly WindowsApplicationIconService iconService =
         new(
             targetIconSize: 64,
             cacheCapacity: MaxRetainedIcons,
             allowLargerIcons: false);
 
-    // Start and Dispose are owned by Home's UI thread.
     public void Start()
     {
         if (worker is not null || stopping)
@@ -87,8 +75,6 @@ public sealed class WindowsApplicationIndex : IDisposable
                     if (stopping)
                         return;
 
-                    // Do not keep Shell-extracted icon payloads in the metadata
-                    // index even if a discovery source happens to provide one.
                     entries.TryAdd(
                         entry.StableId,
                         entry with { Icon = null });
@@ -115,9 +101,6 @@ public sealed class WindowsApplicationIndex : IDisposable
         }
     }
 
-    /// <summary>
-    /// Returns a small lazily-loaded Home search icon, if one is currently cached.
-    /// </summary>
     public ApplicationIcon? GetIcon(string stableId)
     {
         lock (iconGate)
@@ -128,10 +111,6 @@ public sealed class WindowsApplicationIndex : IDisposable
         }
     }
 
-    /// <summary>
-    /// Replaces the pending icon queue with the current visible result set.
-    /// Old queries therefore cannot build an ever-growing backlog.
-    /// </summary>
     public void RequestIcons(IEnumerable<GlassSearchResult> results)
     {
         if (stopping)
@@ -225,7 +204,6 @@ public sealed class WindowsApplicationIndex : IDisposable
                               error is COMException ||
                               error is InvalidOperationException)
                     {
-                        // A missing/uncooperative Shell icon must never break Home.
                     }
 
                     if (icon is null)
@@ -246,7 +224,6 @@ public sealed class WindowsApplicationIndex : IDisposable
                     }
                 }
 
-                // Publish once per drained batch, not once per icon.
                 if (changed && !stopping)
                     Changed?.Invoke(this, EventArgs.Empty);
             }
@@ -275,8 +252,6 @@ public sealed class WindowsApplicationIndex : IDisposable
         if (stopping)
             return;
 
-        // Shell discovery can expose the same application more than once
-        // (for example from per-user and all-users Start Menu locations).
         var deduplicated =
             DeduplicateApplications(entries);
 
@@ -312,8 +287,6 @@ public sealed class WindowsApplicationIndex : IDisposable
     {
         var candidates = group.ToArray();
 
-        // Keep one deterministic "main" launch entry. Prefer a canonical
-        // AppsFolder item, then a Start Menu shortcut, then a direct exe.
         var preferred = candidates
             .OrderByDescending(EntryQuality)
             .ThenBy(
@@ -399,7 +372,5 @@ public sealed class WindowsApplicationIndex : IDisposable
         else
             iconSignal.Set();
 
-        // Do not block shutdown on third-party Shell extensions.
-        // Background workers own and release their COM resources.
     }
 }

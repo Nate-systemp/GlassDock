@@ -24,7 +24,6 @@ public static class HomeDesktopEnvironment
             if (!NativeMethods.GetMonitorInfo(monitor, ref info)) throw new InvalidOperationException("Monitor work area unavailable.");
         }
         var scale = NativeMethods.GetDpiForMonitor(monitor, 0, out var dpi, out _) >= 0 ? dpi / 96d : 1;
-        // Honor reserved work areas and leave room for the existing dock plus a visible gap.
         var bottom = Math.Min(info.Work.Bottom, info.Monitor.Bottom - (int)Math.Round((bottomMargin + 92) * scale));
         var inset = (int)Math.Round(12 * scale);
         return new(info.Work.Left + inset, info.Work.Top + inset,

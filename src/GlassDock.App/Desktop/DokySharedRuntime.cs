@@ -3,10 +3,6 @@ using GlassDock.Windows.Applications;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>
-/// Process-wide services shared by every monitor dock. Individual overlay windows
-/// own only their HWND/UI state; application discovery and badge providers run once.
-/// </summary>
 internal sealed class DokySharedRuntime : IDisposable
 {
     private bool disposed;

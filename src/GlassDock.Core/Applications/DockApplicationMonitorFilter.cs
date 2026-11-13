@@ -1,11 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>
-/// Produces a monitor-local application snapshot without changing global pin state.
-/// Pinned applications remain visible on every monitor, but their running-window
-/// collection contains only windows owned by the target monitor. Unpinned running
-/// applications are shown only when at least one of their windows belongs there.
-/// </summary>
 public static class DockApplicationMonitorFilter
 {
     public static ApplicationSnapshot ForMonitor(

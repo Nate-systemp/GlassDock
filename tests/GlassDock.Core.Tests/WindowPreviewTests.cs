@@ -65,7 +65,6 @@ public sealed class WindowPreviewTests
             var first = WindowPreviewLayout.Position(work, dock, dpi, 350, 80, 300, 160);
             Assert.True(WindowPreviewLayout.NeedsNativeMove(null, first));
             Assert.False(WindowPreviewLayout.NeedsNativeMove(first, first));
-            // A fractional-DIP change often rounds to the same physical rectangle.
             var repeated = WindowPreviewLayout.Position(work, dock, dpi, 350, 80, 300, 160);
             Assert.False(WindowPreviewLayout.NeedsNativeMove(first, repeated));
             var moved = WindowPreviewLayout.Position(work, dock, dpi, 400, 80, 300, 160);
@@ -118,7 +117,7 @@ public sealed class WindowPreviewTests
             Assert.Equal(WindowPreviewState.Expanding, session.State);
         }
         Assert.True(session.CompleteTransition(1));
-        Assert.False(session.CompleteTransition(1)); // Completion only triggers the stationary-pointer hit test once.
+        Assert.False(session.CompleteTransition(1));
         session.Select(count);
         Assert.Equal(count, session.SelectedWindow);
         session.Select(1);

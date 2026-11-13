@@ -1,4 +1,3 @@
-// Native fixture only. No remote threads, DLL injection, Shell mutation or production integration.
 #include "PolicyHooks.hpp"
 #include "NativeShellIdentity.hpp"
 #include <cstdio>
@@ -84,7 +83,6 @@ HANDLE FixtureJob() {
         }
         return value;
     }();
-    // Non-inheritable controller handle. Kernel teardown cleans only our child fixtures on host crash.
     return job;
 }
 struct Child {
@@ -118,7 +116,6 @@ struct Child {
     Child(const Child&) = delete;
     ~Child() { Stop(); if (output) CloseHandle(output); if (info.hThread) CloseHandle(info.hThread); if (info.hProcess) CloseHandle(info.hProcess); }
     void Stop() noexcept {
-        // Only the immutable handle returned by our own CreateProcess is ever terminated.
         if (info.hProcess && WaitForSingleObject(info.hProcess, 0) == WAIT_TIMEOUT) {
             TerminateProcess(info.hProcess, 0); WaitForSingleObject(info.hProcess, 2000);
         }

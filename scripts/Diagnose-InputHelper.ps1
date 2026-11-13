@@ -1,5 +1,5 @@
-# No administrator rights or changes required. Reports why normal Doky may
-# still be using its fallback hook instead of the elevated input helper.
+
+
 [CmdletBinding()]
 param(
     [string]$OutputPath = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads\Doky-InputHelper-Diagnostics.txt')

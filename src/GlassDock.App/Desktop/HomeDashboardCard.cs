@@ -9,7 +9,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>A retained card: one shadow surface and one content host; desktop pixels come from Home's shared backdrop.</summary>
 internal sealed class HomeDashboardCard
 {
     public Grid Host { get; } = new();
@@ -30,7 +29,6 @@ internal sealed class HomeDashboardCard
     }
 }
 
-/// <summary>Six retained slots, paged from the dock's canonical snapshot. No second pin database.</summary>
 internal sealed class HomeAppStrip
 {
     private readonly Button[] buttons = new Button[6];

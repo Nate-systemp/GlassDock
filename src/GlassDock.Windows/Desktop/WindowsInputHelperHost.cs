@@ -21,7 +21,6 @@ public static class WindowsInputHelperHost
         {
             using var pipe = new NamedPipeClientStream(".", WindowsInputHelperProtocol.GetPipeName(),
                 PipeDirection.InOut, PipeOptions.Asynchronous);
-            // A bounded initial connection, before any hook exists. No polling/reconnect loop.
             pipe.Connect(3000);
             RunConnected(pipe);
         }
@@ -33,9 +32,6 @@ public static class WindowsInputHelperHost
     private static void RunConnected(NamedPipeClientStream pipe)
     {
         using var reader = new StreamReader(pipe, leaveOpen: true);
-        // StreamWriter.Dispose flushes even when LeaveOpen is true. If Doky
-        // closes the pipe during shutdown, that flush used to crash the helper.
-        // Own disposal here so a normal disconnect is not an unhandled exception.
         var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
         try
         {
@@ -45,8 +41,6 @@ public static class WindowsInputHelperHost
 
             using var disconnected = new ManualResetEvent(false);
             using var lifetime = new CancellationTokenSource();
-            // Preserve distinct key releases in transport. The UI retargets on each
-            // event; it does not queue completed animations. Stale events still expire.
             var events = Channel.CreateUnbounded<(InputSignal Signal, int Kind)>(new UnboundedChannelOptions
             { SingleReader = true, SingleWriter = true });
             var captureVolume = 0;
@@ -59,14 +53,11 @@ public static class WindowsInputHelperHost
                     (new InputSignal(false, 0, Environment.TickCount64), 20 + (int)key - 0xAD)));
             ApplyState(initial, hook);
             writer.WriteLine("READY");
-            // Older clients ignore this optional capability; keyboard protocol is unchanged.
             writer.WriteLine("CAPS|RESTORE1");
             writer.WriteLine("CAPS|RECOVER1");
             writer.WriteLine("CAPS|SNIP1");
             writer.WriteLine("CAPS|VOLUME1");
             var hookThread = GetCurrentThreadId();
-            // Force creation of this thread's message queue before the bridge
-            // can post a lifecycle recovery command to it.
             NativeMethods.PeekMessage(out _, 0, 0, 0, 0);
             TaskCompletionSource? recovery = null;
             using var writeLock = new SemaphoreSlim(1, 1);
@@ -76,7 +67,6 @@ public static class WindowsInputHelperHost
             Marshal.WriteIntPtr(handles, disconnected.SafeWaitHandle.DangerousGetHandle());
             try
             {
-                // Native message delivery wakes this thread immediately; disconnect is an event.
                 while (NativeMethods.MsgWaitForMultipleObjectsEx(1, handles, uint.MaxValue, 0x04FF, 0x0004) == 1)
                     while (NativeMethods.PeekMessage(out var message, 0, 0, 0, 1))
                     {
@@ -92,12 +82,11 @@ public static class WindowsInputHelperHost
             }
             finally
             {
-                hook.Dispose(); // release ownership BEFORE the app can restore fallback
+                hook.Dispose();
                 lifetime.Cancel();
                 events.Writer.TryComplete();
-                pipe.Dispose(); // unblock pending pipe reads/writes on disconnect
+                pipe.Dispose();
                 Marshal.FreeHGlobal(handles);
-                // Join workers before disposing writer, so no thread uses it after cleanup.
                 Task.WhenAll(readTask, writeTask).GetAwaiter().GetResult();
             }
 
@@ -166,8 +155,6 @@ public static class WindowsInputHelperHost
             try { writer.Dispose(); }
             catch (Exception e) when (e is IOException or ObjectDisposedException)
             {
-                // The peer can close the pipe between the last write and the
-                // final StreamWriter flush. That is expected, not a helper crash.
             }
         }
     }
@@ -186,8 +173,6 @@ public static class WindowsInputHelperHost
 
     private static bool RestoreWindow(WindowsInputHelperProtocol.RestoreRequest request)
     {
-        // Only normal restore/foreground of a live, identity-validated HWND in
-        // this desktop session. No arbitrary messages, launch, close or commands.
         try
         {
             using var process = Process.GetProcessById(request.Window.ProcessId);

@@ -13,7 +13,6 @@ public static class GlassMaterialPresets
             BorderOpacity = 0.32, ShadowOpacity = 0.18, ShadowBlur = 26,
             ShadowOffset = 10, EdgeHighlight = 0.07
         },
-        // Lighting experiment only. Refraction stays zero because this backend cannot bend rays.
         GlassMaterialPreset.Refractive => new()
         {
             BlurAmount = 10, Opacity = 0.74, Saturation = 1.25, Brightness = 1.12,

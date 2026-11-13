@@ -17,7 +17,6 @@ namespace GlassDock.App.Desktop;
 
 internal sealed record StackAppDrag(string StackId, string AppId);
 
-/// <summary>Retained grid surface; uses the dock's glass pipeline and shared application/badge sources.</summary>
 internal sealed class DockStackWindow : Window
 {
     internal const string DragFormat = "Doky.StackApplication";
@@ -142,8 +141,6 @@ internal sealed class DockStackWindow : Window
             global::Windows.Foundation.Point? press = null;
             long suppressClickUntil = 0;
             button.Click += (_, _) => { if (!dragging && Environment.TickCount64 >= suppressClickUntil && launch(app)) Hide(); };
-            // ButtonBase consumes pointer input before CanDrag's gesture recognition.
-            // Observe handled events, then hand the real gesture to WinUI's drag broker once.
             button.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
             {
                 var point = e.GetCurrentPoint(button);
@@ -168,7 +165,6 @@ internal sealed class DockStackWindow : Window
             button.DragStarting += (_, e) =>
             {
                 dragging = true;
-                // Properties describe content; a real format is required to transport it between HWNDs.
                 e.Data.SetData(DragFormat, value.Id + "\n" + app.Id);
                 e.Data.RequestedOperation = DataPackageOperation.Move;
                 TraceDrag("Starting: custom format registered");
@@ -230,7 +226,6 @@ internal sealed class DockStackWindow : Window
         var width = columns * slot + (columns - 1) * 4 + 24;
         var height = 92 + (name.Visibility == Visibility.Visible ? 36 : 0);
         var bounds = WindowPreviewLayout.Position(new(area.X, area.Y, area.Width, area.Height),
-            // Position uses the HWND bottom; the visible surface ends Gutter DIP above it.
             new(owner.X, owner.Y, owner.Width, owner.Height), scale, anchorX, dockTop + Gutter - DockGap, width, height);
         if (AppWindow.Position.X != (int)bounds.X || AppWindow.Position.Y != (int)bounds.Y ||
             AppWindow.Size.Width != (int)bounds.Width || AppWindow.Size.Height != (int)bounds.Height)

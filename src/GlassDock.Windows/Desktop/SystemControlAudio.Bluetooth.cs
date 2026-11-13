@@ -10,7 +10,6 @@ internal sealed partial class SystemControlAudio
     private static readonly ApplicationNative.PropertyKey ContainerIdProperty = new()
         { Format = new("8C7ED206-3F8A-4827-B3AB-AE9E1FAEFC6C"), Id = 2 };
 
-    // A successful KS request only starts the attempt; endpoint state must confirm the result.
     internal static Task<bool?> SetBluetoothConnectionAsync(Guid containerId, bool connect, CancellationToken cancel) =>
         Task.Run<bool?>(() => SetBluetoothConnection(containerId, connect, cancel), cancel);
 
@@ -39,7 +38,6 @@ internal sealed partial class SystemControlAudio
                 {
                     if (ReadContainerId(endpoint) != containerId) continue;
                     matched = true;
-                    // Do not enable an endpoint the user has explicitly disabled.
                     if (endpoint.GetState(out var state) < 0 || (state & 2) != 0) continue;
                     endpoints.Add(lease); lease = null;
                     var topologyId = typeof(IDeviceTopology).GUID;
@@ -69,7 +67,7 @@ internal sealed partial class SystemControlAudio
                         if (requested.Add(filterId))
                         {
                             cancel.ThrowIfCancellationRequested();
-                            property.Flags = 1; // KSPROPERTY_TYPE_GET; ONESHOT requests have no value buffer.
+                            property.Flags = 1;
                             accepted |= control.Value.KsProperty(ref property, (uint)Marshal.SizeOf<KsProperty>(), 0, 0, out _) >= 0;
                         }
                         break;
@@ -87,7 +85,6 @@ internal sealed partial class SystemControlAudio
                 var active = states.Any(state => state is not null && (state.Value & 1) != 0);
                 if (connect ? active : states.All(state => state is not null) && !active) return true;
                 if (elapsed.Elapsed >= TimeSpan.FromSeconds(15)) return false;
-                // Bounded operation-only confirmation, never an idle polling loop.
                 if (cancel.WaitHandle.WaitOne(200)) cancel.ThrowIfCancellationRequested();
             }
         }

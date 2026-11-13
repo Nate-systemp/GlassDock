@@ -1,6 +1,5 @@
 namespace GlassDock.Windows.Settings;
 
-/// <summary>Physical-file exclusion works across packaged and ordinary object namespaces.</summary>
 public sealed class DokyInstanceLease : IDisposable
 {
     private readonly FileStream stream;
@@ -16,6 +15,5 @@ public sealed class DokyInstanceLease : IDisposable
         }
         catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { return null; }
     }
-    // Keep the empty lock file: deleting it introduces a release/acquire race.
     public void Dispose() => stream.Dispose();
 }

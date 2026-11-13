@@ -14,11 +14,6 @@ public readonly record struct DesktopMonitor(
     public string Key => $"0x{Handle.ToInt64():X}";
 }
 
-/// <summary>
-/// Small monitor-topology service used by the multi-monitor dock coordinator.
-/// It never owns windows and can be queried whenever WM_DISPLAYCHANGE/topology
-/// changes need to be reconciled.
-/// </summary>
 public static class WindowsMonitorService
 {
     public static nint ForegroundMonitorHandle() => NativeMethods.MonitorFromWindow(NativeMethods.GetForegroundWindow(), 2);
@@ -36,7 +31,7 @@ public static class WindowsMonitorService
 
     public static void BringWindowToFront(nint window)
     {
-        NativeMethods.ShowWindow(window, 9); // SW_RESTORE also handles a minimized Settings window.
+        NativeMethods.ShowWindow(window, 9);
         GlassDock.Windows.Applications.ApplicationNative.SetForegroundWindow(window);
     }
 

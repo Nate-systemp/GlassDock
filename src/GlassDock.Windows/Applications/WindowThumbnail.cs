@@ -5,10 +5,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>
-/// A DWM-managed live relationship.
-/// No capture buffers or background frame loop.
-/// </summary>
 public sealed class WindowThumbnail : IDisposable
 {
     private nint thumbnail;
@@ -121,12 +117,6 @@ public sealed class WindowThumbnail : IDisposable
         var properties =
             new Properties
             {
-                //
-                // DWM_TNP_RECTDESTINATION
-                // DWM_TNP_OPACITY
-                // DWM_TNP_VISIBLE
-                // DWM_TNP_SOURCECLIENTAREAONLY
-                //
                 Flags =
                     1 |
                     4 |
@@ -169,17 +159,6 @@ public sealed class WindowThumbnail : IDisposable
             ref properties) >= 0;
     }
 
-    /// <summary>
-    /// Full-size desktop mirror.
-    ///
-    /// Normal windows:
-    /// trims invisible resize margins.
-    ///
-    /// Minimized windows:
-    /// can disable source cropping so compositor-heavy
-    /// apps such as Edge/OBS can use their complete DWM
-    /// thumbnail surface.
-    /// </summary>
     public bool UpdateDesktop(
         PreviewRect frame,
         PreviewRect windowBounds,
@@ -207,27 +186,16 @@ public sealed class WindowThumbnail : IDisposable
             return false;
         }
 
-        //
-        // MINIMIZED WINDOW PATH
-        //
-        // Do NOT force a source crop.
-        //
-        // Edge/Chromium and apps such as OBS may expose
-        // a DWM thumbnail surface whose dimensions do not
-        // correspond exactly to the restored HWND bounds.
-        //
-        // Let DWM use the entire source surface.
-        //
         if (!cropSource)
         {
             var minimizedProperties =
                 new Properties
                 {
                     Flags =
-                        1 |     // DWM_TNP_RECTDESTINATION
-                        4 |     // DWM_TNP_OPACITY
-                        8 |     // DWM_TNP_VISIBLE
-                        16,     // DWM_TNP_SOURCECLIENTAREAONLY
+                        1 |
+                        4 |
+                        8 |
+                        16,
 
                     Opacity = 255,
                     Visible = 1,
@@ -258,11 +226,6 @@ public sealed class WindowThumbnail : IDisposable
                 ref minimizedProperties) >= 0;
         }
 
-        //
-        // NORMAL WINDOW PATH
-        //
-        // Crop invisible DWM resize margins.
-        //
         var source =
             new NativeMethods.Rect
             {
@@ -338,11 +301,11 @@ public sealed class WindowThumbnail : IDisposable
             new Properties
             {
                 Flags =
-                    1 |     // RECTDESTINATION
-                    2 |     // RECTSOURCE
-                    4 |     // OPACITY
-                    8 |     // VISIBLE
-                    16,     // SOURCECLIENTAREAONLY
+                    1 |
+                    2 |
+                    4 |
+                    8 |
+                    16,
 
                 Opacity = 255,
                 Visible = 1,

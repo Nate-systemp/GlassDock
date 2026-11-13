@@ -4,11 +4,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>
-/// Gives a normal interactive WinUI window the same native transparent
-/// DWM client treatment used by GlassDock's desktop overlay, without
-/// turning the window into WS_EX_NOACTIVATE.
-/// </summary>
 public sealed class InteractiveGlassWindowHost : IDisposable
 {
     private const nuint SubclassId = 3;
@@ -17,22 +12,13 @@ public sealed class InteractiveGlassWindowHost : IDisposable
     private readonly NativeMethods.SubclassProc callback;
 
     private bool configured;
-    // Optional transparent travel space below a preview popup. The dock belongs
-    // to the same UI thread, so HTTRANSPARENT forwards clicks to its controls.
     public int? InputHeightPixels { get; set; }
-    // Set by popup windows before Configure(). Glass Home retains its
-    // native transparency behavior without a host brush opt-in.
     public bool EnableHostBackdropBrush { get; set; }
-    // Popup windows use the same layered DWM client as the main dock.
-    // Configure before the XAML SystemBackdrop makes its first connection.
     public bool UseDockLayeredTransparency { get; set; }
-    // Settings uses the same desktop client with a normal resizable window frame.
     public bool PreserveWindowChrome { get; set; }
     public int MinimumWidthDips { get; set; }
     public int MinimumHeightDips { get; set; }
     public bool HostBackdropAvailable { get; private set; }
-    // Explicit user-invoked menus need actual foreground ownership: Window.Activate
-    // alone may only show a tool window opened from a non-activating dock.
     public bool ActivateForUserInput() => !disposed && SetForegroundWindow(hwnd);
     public bool HasForegroundOrOwner(nint owner) => !disposed && (GetForegroundWindow() == hwnd || GetForegroundWindow() == owner);
     public bool IsScreenshotForeground() => !disposed && IsScreenshotWindow(GetForegroundWindow());
@@ -82,11 +68,6 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         if (configured)
             return;
 
-        //
-        // Keep this an interactive tool window:
-        // - hide it from Alt+Tab / normal app-window treatment
-        // - DO NOT use WS_EX_NOACTIVATE
-        //
         var exStyle =
             NativeMethods
                 .GetWindowLongPtr(hwnd, -20)
@@ -94,12 +75,12 @@ public sealed class InteractiveGlassWindowHost : IDisposable
 
         if (!PreserveWindowChrome)
         {
-            exStyle |= 0x00000080L;   // WS_EX_TOOLWINDOW
-            exStyle &= ~0x00040000L;  // WS_EX_APPWINDOW
+            exStyle |= 0x00000080L;
+            exStyle &= ~0x00040000L;
         }
-        exStyle &= ~0x08000000L;  // WS_EX_NOACTIVATE (must stay OFF)
+        exStyle &= ~0x08000000L;
         if (UseDockLayeredTransparency)
-            exStyle |= 0x00080000L; // WS_EX_LAYERED, as on the main dock
+            exStyle |= 0x00080000L;
 
         NativeMethods.SetWindowLongPtr(hwnd, -20, (nint)exStyle);
         if (UseDockLayeredTransparency &&
@@ -112,9 +93,6 @@ public sealed class InteractiveGlassWindowHost : IDisposable
             ? "[PopupBackdrop] Dock-matched layered desktop client enabled"
             : "[PopupBackdrop] Existing non-layered window client preserved");
 
-        //
-        // Remove the ordinary native frame.
-        //
         var style =
             NativeMethods
                 .GetWindowLongPtr(hwnd, -16)
@@ -125,9 +103,6 @@ public sealed class InteractiveGlassWindowHost : IDisposable
             -16,
             (nint)(style & ~0x00CF0000L));
 
-        //
-        // WinUI / GlassSurface owns the rounded shape.
-        //
         var noCorner = 1;
 
         if (!PreserveWindowChrome) NativeMethods.DwmSetWindowAttribute(
@@ -150,11 +125,6 @@ public sealed class InteractiveGlassWindowHost : IDisposable
 
         configured = true;
 
-        //
-        // Same important native client clear used by the dock.
-        // Under the DWM glass frame, black client pixels become the
-        // transparent composition base instead of an opaque WinUI surface.
-        //
         var dc =
             NativeMethods.GetDC(hwnd);
 
@@ -169,10 +139,6 @@ public sealed class InteractiveGlassWindowHost : IDisposable
                 dc);
         }
 
-        //
-        // Make the non-client/client style update take effect without
-        // moving, resizing, or activating the window.
-        //
         NativeMethods.SetWindowPos(
             hwnd,
             0,
@@ -180,18 +146,15 @@ public sealed class InteractiveGlassWindowHost : IDisposable
             0,
             0,
             0,
-            0x0001 | // SWP_NOSIZE
-            0x0002 | // SWP_NOMOVE
-            0x0004 | // SWP_NOZORDER
-            0x0010 | // SWP_NOACTIVATE
-            0x0020); // SWP_FRAMECHANGED
+            0x0001 |
+            0x0002 |
+            0x0004 |
+            0x0010 |
+            0x0020);
     }
 
     private void ConfigureTransparency()
     {
-        // Required by DWM for CreateHostBackdropBrush on a desktop HWND.
-        // Set before WinUI's SystemBackdrop connects and repeat after DWM
-        // composition resets. Ignored on Windows versions lacking this flag.
         if (EnableHostBackdropBrush && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
             const uint DWMWA_USE_HOSTBACKDROPBRUSH = 17;
@@ -203,13 +166,8 @@ public sealed class InteractiveGlassWindowHost : IDisposable
                 ? "[PopupBackdrop] DWM host backdrop sampling enabled"
                 : $"[PopupBackdrop] DWM host backdrop unavailable (0x{result:X8})");
         }
-        // Win11's DWM outline surrounds the rectangular HWND, outside our rounded glass mask.
-        // Suppress only this window's outline; unsupported Windows versions simply ignore it.
-        var noBorder = unchecked((int)0xFFFFFFFE); // DWMWA_COLOR_NONE
-        NativeMethods.DwmSetWindowAttribute(hwnd, 34, ref noBorder, sizeof(int)); // DWMWA_BORDER_COLOR
-        //
-        // Mirror the native transparency path used by WindowsOverlayManager.
-        //
+        var noBorder = unchecked((int)0xFFFFFFFE);
+        NativeMethods.DwmSetWindowAttribute(hwnd, 34, ref noBorder, sizeof(int));
         var margins =
             new NativeMethods.Margins();
 
@@ -276,7 +234,7 @@ public sealed class InteractiveGlassWindowHost : IDisposable
         nuint id,
         nuint data)
     {
-        if (message == 0x0024 && (MinimumWidthDips > 0 || MinimumHeightDips > 0)) // WM_GETMINMAXINFO
+        if (message == 0x0024 && (MinimumWidthDips > 0 || MinimumHeightDips > 0))
         {
             var result = NativeMethods.DefSubclassProc(window, message, wParam, lParam);
             var limits = Marshal.PtrToStructure<WindowSizeLimits>(lParam);
@@ -290,23 +248,14 @@ public sealed class InteractiveGlassWindowHost : IDisposable
             NativeMethods.GetWindowRect(hwnd, out var bounds))
         {
             var screenY = (short)((lParam.ToInt64() >> 16) & 0xffff);
-            if (screenY - bounds.Top >= height) return -1; // HTTRANSPARENT
+            if (screenY - bounds.Top >= height) return -1;
         }
-        //
-        // WM_ERASEBKGND:
-        // prevent the default opaque WinUI/native client background
-        // from becoming the visible base behind the system backdrop.
-        //
         if (message == 0x0014 &&
             ClearBackground((nint)wParam))
         {
             return 1;
         }
 
-        //
-        // WM_DWMCOMPOSITIONCHANGED:
-        // reapply native glass if DWM recreates composition state.
-        //
         if (message == 0x031E)
         {
             ConfigureTransparency();

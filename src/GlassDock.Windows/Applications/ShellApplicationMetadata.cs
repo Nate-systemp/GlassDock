@@ -7,7 +7,6 @@ namespace GlassDock.Windows.Applications;
 
 internal static class ShellApplicationMetadata
 {
-    /// <summary>Enumerate the Shell's installed-app namespace, then application shortcuts in both Start menus.</summary>
     internal static void ReadAvailable(Action<GlassSearchResult> add, Func<bool> stopping, Action<string> warn)
     {
         object? shell = null, folder = null, items = null;
@@ -60,7 +59,6 @@ internal static class ShellApplicationMetadata
                     try
                     {
                         var link = ResolveLink(shortcut);
-                        // Exclude document and website shortcuts; retain virtual Shell/packaged links.
                         if (!string.IsNullOrWhiteSpace(link.Path) && !link.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
                             && !link.Path.StartsWith("::", StringComparison.Ordinal) && !link.Path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) continue;
                         add(ReadAvailableEntry(Path.GetFileNameWithoutExtension(shortcut), shortcut));
@@ -182,7 +180,7 @@ internal static class ShellApplicationMetadata
                 if (status != 0 || fetched != 1) break;
                 try
                 {
-                    var parsing = Name(pidl, 0x80028000); // SIGDN_DESKTOPABSOLUTEPARSING
+                    var parsing = Name(pidl, 0x80028000);
                     if (string.IsNullOrWhiteSpace(parsing)) continue;
                     string? appId = null, target = null;
                     var iid = typeof(ApplicationNative.IPropertyStore).GUID;

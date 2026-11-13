@@ -80,7 +80,6 @@ internal sealed class DndNative : IDisposable
 
     internal static void SetProfile(bool on, CancellationToken cancellation)
     {
-        // ABI and profile strings verified against YASB's QuietHoursSettings bindings.
         Marshal.ThrowExceptionForHR(CoInitializeEx(0, 2));
         IQuietHoursSettings? settings = null;
         try

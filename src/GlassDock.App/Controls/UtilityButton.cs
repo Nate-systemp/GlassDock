@@ -74,7 +74,6 @@ internal sealed class UtilityButton : Button, IDisposable
     public UtilityDefinition Definition { get; }
     internal global::Windows.Foundation.Rect GlassPresentationBounds()
     {
-        // Use the assigned slot, not an arrange pass that can lag a moving dock.
         var bounds = Glass.Bounds;
         var pivot = face.RenderTransformOrigin;
         return new(bounds.X + bounds.Z * pivot.X * (1 - morphScale.ScaleX),
@@ -95,6 +94,27 @@ internal sealed class UtilityButton : Button, IDisposable
     private bool AlwaysFilled => Definition.Kind is UtilityKind.AirplaneMode or UtilityKind.NightLight or UtilityKind.BatterySaver or UtilityKind.Focus;
     private bool active, available = true, hover, pressed;
     private bool soundMuted;
+    internal bool FloatingPresentation { get; private set; }
+    private bool sourceHighlighted;
+
+    internal void SetFloatingPresentation(bool floating)
+    {
+        FloatingPresentation = floating;
+        if (floating)
+        {
+            morphRevision++; morph?.Stop(); IsMorphing = false; detailsOpen = false;
+            morphScale.ScaleX = morphScale.ScaleY = 1; icon.Opacity = 1; settingsSymbols.Opacity = 0;
+            TrackPresentation(false); hold.Stop(); gesture.Cancel(); pressed = false;
+            IsExpanded = false; expansion?.Stop();
+            if (diameter > 0) Width = diameter;
+            captionArea.Visibility = Visibility.Collapsed;
+            Glass.Element.Visibility = Visibility.Visible;
+        }
+        sourceHighlighted = false;
+        Render();
+    }
+
+    internal void HighlightSource(bool highlighted) { sourceHighlighted = highlighted; Render(); }
     private UtilityTheme theme;
     public UtilityButton(UtilityDefinition definition)
     {
@@ -127,16 +147,15 @@ internal sealed class UtilityButton : Button, IDisposable
         UseLayoutRounding = true;
         Loaded += (_, _) => GeometryChanged?.Invoke(this, EventArgs.Empty);
         SizeChanged += (_, _) => { UpdateExpansionContent(); GeometryChanged?.Invoke(this, EventArgs.Empty); };
-        // Updating clips from LayoutUpdated can continuously invalidate the same layout pass.
         captionArea.SizeChanged += (_, _) => UpdateCaptionEffect();
         caption.SizeChanged += (_, _) => UpdateCaptionEffect();
-        IsHoldingEnabled = false; // The bounded hold timer owns touch and mouse holds alike.
+        IsHoldingEnabled = false;
         hold = DispatcherQueue.CreateTimer(); hold.Interval = TimeSpan.FromMilliseconds(550); hold.IsRepeating = false;
         hold.Tick += (_, _) =>
         {
             if (!gesture.Hold()) return;
             pressed = false; Render();
-            if (Definition.Kind == UtilityKind.Wifi)
+            if (Definition.Kind == UtilityKind.Wifi && !FloatingPresentation)
             {
                 IsExpanded = !IsExpanded; UpdateExpansionTarget(); ExpansionChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -180,8 +199,6 @@ internal sealed class UtilityButton : Button, IDisposable
         void Release()
         {
             hold.Stop(); pressed = false; gesture.Release(); Render();
-            // Keep suppression through the current release's Click, then restore keyboard activation.
-            // Gesture suppression is reset by the next press or an explicit keyboard action.
         }
         AddHandler(PointerReleasedEvent, new PointerEventHandler((_, e) =>
         {
@@ -256,7 +273,6 @@ internal sealed class UtilityButton : Button, IDisposable
         var available = new global::Windows.Foundation.Size(Math.Max(0, MaximumExpandedWidth - diameter - CaptionRightPadding), diameter);
         captionTitle.Measure(available);
         captionNetwork.Measure(available);
-        // Collapsed layout can zero DesiredSize, so retain the independently measured reveal threshold.
         captionTitleWidth = captionTitle.DesiredSize.Width;
         captionWidth = Math.Max(captionTitleWidth, captionNetwork.DesiredSize.Width);
     }
@@ -427,12 +443,12 @@ internal sealed class UtilityButton : Button, IDisposable
 
     public async Task SetDetailsOpenAsync(bool open)
     {
+        if (FloatingPresentation) { HighlightSource(open); return; }
         if (disposed || !HasDetails || detailsOpen == open) return;
         detailsOpen = open;
         IsMorphing = true;
         var revision = ++morphRevision;
         Render();
-        // Decode all vectors before crossfading, including the first opening.
         await Task.WhenAll(icon.SetAsync(Definition.Icon, DisplayOn && !RadioUtility, IconColor()),
             settingsIcon.SetAsync("gear-six", DisplayOn, IconColor()), settingsBadge.SetAsync(Definition.Icon, false, IconColor()));
         if (disposed || revision != morphRevision) return;
@@ -472,7 +488,10 @@ internal sealed class UtilityButton : Button, IDisposable
         if (disposed) return;
         var sharedGlass = dockMode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
         var displayOn = DisplayOn;
-        Glass.UseDockMaterial = !displayOn && (sharedGlass || RadioUtility);
+        Glass.UseDockMaterial = !FloatingPresentation && !displayOn && (sharedGlass || RadioUtility);
+        tint.BorderThickness = new(sourceHighlighted ? 1.5 : 0);
+        tint.BorderBrush = sourceHighlighted ? new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
+            (byte)(Definition.Accent >> 16), (byte)(Definition.Accent >> 8), (byte)Definition.Accent)) : null;
         if (!IsMorphing || !sharedGlass || displayOn) TrackPresentation(false);
         var items = Definition.Kind == UtilityKind.Bluetooth ? "paired devices" : "networks";
         AutomationProperties.SetName(this, detailsOpen ? Definition.Name + " Settings" : Definition.Name);

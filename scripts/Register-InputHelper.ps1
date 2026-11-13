@@ -1,5 +1,5 @@
-# Register only the protected helper. NEVER register an elevated on-demand task
-# against user-writable source, Debug, publish or Velopack current folders.
+
+
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$HelperPath)
@@ -28,7 +28,7 @@ if ($old -and $old.State -eq 'Running') {
 $action = New-ScheduledTaskAction -Execute $helper.FullName -WorkingDirectory $helper.DirectoryName
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-# On-demand only. The normal Doky application runs the task after opening its pipe.
+
 Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 $check = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 if (-not [string]::Equals($check.Actions[0].Execute.Trim('"'), $helper.FullName,

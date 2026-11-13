@@ -9,8 +9,6 @@ public sealed class MonitorRelocationLifetimeTests
     [Fact]
     public void Settings_monitor_mode_changes_defer_native_positioning_to_relocation_timer()
     {
-        // The direct settings event previously invoked SetWindowPos before the
-        // guarded monitor-change path could discard Clear's previous frame.
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "GlassDock.sln")))
             root = root.Parent;

@@ -39,8 +39,8 @@ public sealed class VirtualDesktopQueryTests
     }
 
     [Theory]
-    [InlineData(unchecked((int)0x80010108))] // RPC_E_DISCONNECTED
-    [InlineData(unchecked((int)0x80004005))] // E_FAIL
+    [InlineData(unchecked((int)0x80010108))]
+    [InlineData(unchecked((int)0x80004005))]
     public void Com_failure_falls_back_and_next_query_can_recover(int hr)
     {
         Assert.Null(WindowsVirtualDesktopQuery.QuerySafely(() => throw new COMException("test", hr)));

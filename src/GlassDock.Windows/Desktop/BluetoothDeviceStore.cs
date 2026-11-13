@@ -2,7 +2,6 @@ using GlassDock.Core.Desktop;
 
 namespace GlassDock.Windows.Desktop;
 
-// The service lock owns this state, including operation generations and insertion order.
 internal sealed class BluetoothDeviceStore
 {
     private readonly Dictionary<string, BluetoothDeviceInfo> devices = new(StringComparer.Ordinal);

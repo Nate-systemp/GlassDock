@@ -4,8 +4,6 @@ namespace GlassDock.Windows.Applications;
 
 internal static class PinTargetProbe
 {
-    // A missing path is not proof of uninstall: updates, offline drives and
-    // restored shortcuts reuse the same pin. Never use this probe to delete data.
     internal static PinTargetAvailability Check(string target, ApplicationIdentity identity)
         => Check(target, identity, 0);
 
@@ -20,8 +18,6 @@ internal static class PinTargetProbe
             var drive = new DriveInfo(Path.GetPathRoot(target)!);
             if (drive.DriveType != DriveType.Fixed || !drive.IsReady) return PinTargetAvailability.Unknown;
             File.GetAttributes(target);
-            // Resolve .lnk targets only on the existing discovery STA. Shell or
-            // packaged identities remain opaque; URL shortcuts retain their URL.
             if (target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
             {
                 var resolved = ShellApplicationMetadata.ResolveLink(target);

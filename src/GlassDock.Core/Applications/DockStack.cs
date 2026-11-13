@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>Global organization referencing the existing persisted application identities.</summary>
 public sealed record DockStack(string Id, string Name, IReadOnlyList<string> ApplicationIds)
 {
     public const int MaximumApps = 9;
@@ -9,7 +8,6 @@ public sealed record DockStack(string Id, string Name, IReadOnlyList<string> App
 
 public enum DockDragMode { None, Reorder, StackCandidate, StackMerge, ExternalFiles }
 
-/// <summary>One monotonic dwell decision; moving off the target cancels the candidate.</summary>
 public sealed class DockStackDrag
 {
     public const int DwellMilliseconds = 450;

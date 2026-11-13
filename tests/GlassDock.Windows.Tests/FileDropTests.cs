@@ -34,7 +34,6 @@ public sealed class FileDropTests
                 Assert.Equal(exe, launch.Target);
                 Assert.Equal(root, launch.WorkingDirectory);
                 Assert.Equal("--profile personal " + WindowsApplicationLauncher.QuoteArgument(file), launch.Arguments);
-                // A document shortcut is not an application and must never execute its document.
                 ((dynamic)shortcut).TargetPath = file;
                 ((dynamic)shortcut).Save();
                 Assert.Null(WindowsApplicationLauncher.PrepareFileLaunch(app, [file]));

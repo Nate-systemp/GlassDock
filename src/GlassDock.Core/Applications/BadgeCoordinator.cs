@@ -7,10 +7,6 @@ public enum BadgeKind
     Count
 }
 
-/// <summary>
-/// Provider-owned badge signal keyed by canonical AppUserModelId. A signal never contains
-/// notification text or other notification content.
-/// </summary>
 public readonly record struct BadgeSignal(BadgeKind Kind, int Count, DateTimeOffset UpdatedAt)
 {
     public bool IsVisible => Kind != BadgeKind.None;
@@ -24,7 +20,6 @@ public readonly record struct BadgeSignal(BadgeKind Kind, int Count, DateTimeOff
             : new(BadgeKind.None, 0, updatedAt ?? DateTimeOffset.UtcNow);
 }
 
-/// <summary>The single presentation consumed by Doky's icon UI after provider arbitration.</summary>
 public readonly record struct BadgeDisplayState(
     BadgeKind Kind,
     int Count,
@@ -60,10 +55,6 @@ public readonly record struct BadgeDisplayState(
         new(BadgeKind.Activity, 0, sourceId, sourcePriority, updatedAt ?? DateTimeOffset.UtcNow);
 }
 
-/// <summary>
-/// Badge providers expose only app identity metadata plus a dot/count signal. They must not
-/// expose notification body text through this contract.
-/// </summary>
 public interface IBadgeProvider : IDisposable
 {
     string Id { get; }
@@ -79,7 +70,6 @@ public interface IBadgeProvider : IDisposable
 
 public static class BadgeProviderPriority
 {
-    // Future providers with a trustworthy native unread count should use a higher priority.
     public const int WindowsToast = 100;
     public const int ReliableNative = 300;
 }
@@ -101,11 +91,6 @@ public sealed record BadgeApplicationDiagnosticEntry(
     int SelectedSourcePriority,
     DateTimeOffset UpdatedAt);
 
-/// <summary>
-/// Single source of truth for badge presentation. Providers are never summed: for a given
-/// canonical AppUserModelId the strongest trustworthy provider wins, preventing duplicate
-/// sources from double-counting the same unread state.
-/// </summary>
 public sealed class BadgeCoordinator : IDisposable
 {
     private readonly IReadOnlyList<IBadgeProvider> providers;
@@ -193,7 +178,6 @@ public sealed class BadgeCoordinator : IDisposable
             provider.Stop();
     }
 
-    /// <summary>Metadata-only raw provider snapshot for diagnostics. No toast content is included.</summary>
     public IReadOnlyList<BadgeProviderDiagnosticEntry> GetProviderDiagnostics() =>
         providers
             .SelectMany(provider => provider.Snapshot.Select(pair => new BadgeProviderDiagnosticEntry(
@@ -207,7 +191,6 @@ public sealed class BadgeCoordinator : IDisposable
             .ThenBy(entry => entry.AppUserModelId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    /// <summary>Metadata-only selected badge state for known Doky applications.</summary>
     public IReadOnlyList<BadgeApplicationDiagnosticEntry> GetApplicationDiagnostics(
         IEnumerable<ApplicationIdentity> identities)
     {
@@ -230,16 +213,12 @@ public sealed class BadgeCoordinator : IDisposable
     {
         if (!current.IsVisible) return true;
 
-        // A trustworthy exact count carries more information than activity-only state.
-        // Provider priority arbitrates between signals of the same kind; it never turns a
-        // known count into a less-informative dot.
         if (candidate.Kind != current.Kind)
             return candidate.Kind == BadgeKind.Count;
 
         if (candidate.SourcePriority != current.SourcePriority)
             return candidate.SourcePriority > current.SourcePriority;
 
-        // Stable deterministic tie-breaker. Never add counts from multiple sources.
         return candidate.UpdatedAt > current.UpdatedAt;
     }
 

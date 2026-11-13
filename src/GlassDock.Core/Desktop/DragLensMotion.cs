@@ -2,7 +2,6 @@ using System.Numerics;
 
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Bounded visual following only; never chooses an insertion slot or stack target.</summary>
 public sealed class DragLensMotion
 {
     public Vector2 Position { get; private set; }
@@ -14,7 +13,6 @@ public sealed class DragLensMotion
     private Vector2 releaseStart;
     private Vector2? releaseDestination;
 
-    /// <summary>Keep the same point inside the icon under the cursor, in root DIPs.</summary>
     public static Vector2 GrabOffset(Vector2 buttonSize, Vector2 pressInButton) =>
         buttonSize / 2 - pressInButton;
 
@@ -40,13 +38,8 @@ public sealed class DragLensMotion
         seconds = double.IsFinite(seconds) ? Math.Clamp(seconds, 0, .05) : 0;
         elapsed += seconds;
         var follow = animate ? (float)(1 - Math.Exp(-seconds / .022)) : 1;
-        // Closing is a finite settle, not a second follower chasing a FLIP
-        // animation. Reach the exact slot before returning content to its button.
         var settle = animate ? (float)Math.Clamp(elapsed / .16, 0, 1) : 1;
         var eased = 1 - MathF.Pow(1 - settle, 3);
-        // Never smooth the icon itself while the mouse owns it: that creates
-        // a distance-dependent grab offset on fast/long drags. The glass lens
-        // bounds can still ease independently.
         var previousPosition = Position;
         Position = closing
             ? Vector2.Lerp(releaseStart, releaseDestination ?? target, eased)

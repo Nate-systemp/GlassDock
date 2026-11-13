@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>One button-edge latch shared by pressed/moved/released routing.</summary>
 public sealed class DockDragIntent
 {
     public bool StackMode { get; private set; }

@@ -34,7 +34,6 @@ inline thread_local bool observing = false;
 inline ShowFn forwardShow = nullptr;
 inline PositionFn forwardPosition = nullptr;
 
-// Build number alone is insufficient: this observed OS ships an older Explorer file build.
 inline bool VerifiedExplorerVersion() noexcept {
     wchar_t path[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr, path, MAX_PATH)) return false;
@@ -53,7 +52,6 @@ inline void Stop() noexcept { deadline.store(0); }
 inline bool Start(DWORD seconds) noexcept {
     Stop();
     if (!seconds || seconds > maxCaptureSeconds) return false;
-    // Start/reset only before hook installation; settings changes never re-arm.
     count = 0; dropped = 0;
     deadline = GetTickCount64() + seconds * 1000ULL;
     return true;
@@ -76,7 +74,6 @@ inline void Observe(HWND target, unsigned api, int command, UINT flags,
     if (observing || !until || GetTickCount64() >= until) return;
     observing = true;
     DWORD pid{}; wchar_t name[80]{};
-    // Candidate only, never a content classifier. Record all matching hosts, including decoys.
     HWND host = target;
     bool candidate = false;
     for (unsigned depth = 0; host && depth < nodeLimit; ++depth) {
@@ -99,7 +96,6 @@ inline void Observe(HWND target, unsigned api, int command, UINT flags,
                 record.target = target; record.api = api; record.command = command; record.flags = flags;
                 record.x = x; record.y = y; record.cx = cx; record.cy = cy;
                 Snapshot(record.nodes[record.nodeCount++], host);
-                // Bounded breadth-first child/sibling walk; no messages, COM, UIA or text reads.
                 for (unsigned parent = 0; parent < record.nodeCount && record.nodeCount < nodeLimit; ++parent) {
                     HWND child = GetWindow(record.nodes[parent].window, GW_CHILD);
                     while (child && record.nodeCount < nodeLimit) {
@@ -126,4 +122,4 @@ inline BOOL WINAPI Position(HWND window, HWND after, int x, int y, int cx, int c
     SetLastError(error);
     return forwardPosition(window, after, x, y, cx, cy, flags);
 }
-} // namespace osd_observe
+}

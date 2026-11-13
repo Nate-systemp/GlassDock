@@ -170,7 +170,6 @@ public sealed class NotificationBadgeTests
         public void Stop() { }
         public void Dispose() { }
 
-        // Keep events real so interface regressions remain compile-time visible.
         public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
         public void RequestRefresh() => RefreshRequested?.Invoke(this, EventArgs.Empty);
     }

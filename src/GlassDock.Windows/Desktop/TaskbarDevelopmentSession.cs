@@ -2,7 +2,6 @@ using System.Diagnostics;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>A bounded child-owned visibility lease; the UI never performs the hide operation.</summary>
 public sealed class TaskbarDevelopmentSession : IAsyncDisposable
 {
     private readonly Process process;
@@ -43,7 +42,7 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
         {
             try
             {
-                child.StandardInput.Close(); // EOF tells the child to restore even after a lost acknowledgement.
+                child.StandardInput.Close();
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(7));
             }
             finally
@@ -92,7 +91,6 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
         finally
         {
             IsActive = false;
-            // Independent fallback if the helper died before its finally block.
             if (!status.StartsWith("RESTORED", StringComparison.Ordinal))
                 status = TaskbarRecovery.RestoreNow()
                     ? "RESTORED: recovery helper ended unexpectedly."

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using GlassDock.Core.Desktop;
 using GlassDock.Windows.Desktop;
 
-// This helper does not restart any process. Its only mutation is reversible taskbar visibility.
 if (args is ["--status"])
 {
     var status = new WindowsTaskbarController().Inspect();
@@ -74,19 +73,10 @@ try
             }
             else
             {
-                // A shell/foreground transition is NOT a reason to terminate the
-                // safety lease. Terminating here immediately runs Restore() and is
-                // exactly what makes the Windows taskbar reappear when Task Manager
-                // or another shell transition temporarily defeats one maintenance
-                // pass. Keep the watchdog alive and retry on the normal 250 ms
-                // cadence; parent death, heartbeat expiry, emergency restore, EOF,
-                // or explicit RESTORE still end the lease normally.
                 consecutiveMaintenanceFailures++;
             }
         }
 
-        // Pump the WinEvent hooks while waiting. This remains the same 250 ms
-        // maintenance cadence and adds no extra worker thread.
         controller.WaitAndPumpEvents(250);
     }
 }

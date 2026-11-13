@@ -5,10 +5,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>
-/// Watchdog-owned taskbar visibility/input and recoverable auto-hide suspension.
-/// Supports the primary Explorer taskbar plus any secondary-monitor taskbars.
-/// </summary>
 public sealed class WindowsTaskbarController : ITaskbarController
 {
     private sealed record OwnedTaskbar(bool WasVisible);
@@ -16,8 +12,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
     private readonly Dictionary<nint, OwnedTaskbar> ownedWindows = new();
     private uint ownerProcess;
 
-    // Low-overhead shell event guard. The watchdog's existing thread pumps these
-    // WinEvent callbacks; no extra thread or higher-frequency polling loop is used.
     private NativeMethods.WinEventProc? shellEventCallback;
     private nint foregroundHook;
     private nint showHook;
@@ -114,10 +108,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
             if (!NativeMethods.IsWindow(hwnd))
                 throw new InvalidOperationException("A taskbar window disappeared during initialization.");
 
-            // An interrupted/older lease can leave Explorer's taskbar disabled while
-            // no watchdog process owns it. Normalize that recoverable partial state
-            // instead of refusing to start a new lease. TaskbarAutoHide.Suspend below
-            // restores any stale journal before recording the new session state.
             if (!NativeMethods.IsWindowEnabled(hwnd))
                 NativeMethods.EnableWindow(hwnd, true);
 
@@ -137,8 +127,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         ownerProcess = explorerProcess!.Value;
 
-        // ABM_SETSTATE is a shell-wide taskbar setting. One valid Explorer
-        // taskbar HWND is enough for the recoverable auto-hide journal.
         var journalWindow = windows[0];
 
         try
@@ -174,9 +162,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
         if (current.Count == 0)
             return false;
 
-        // Validate the current taskbars as one Explorer-owned set. Explorer can
-        // recreate its taskbar HWNDs (or restart) during shell transitions; that
-        // should not destroy the active GlassDock lease.
         uint? currentExplorer = null;
         foreach (var hwnd in current)
         {
@@ -201,18 +186,12 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         if (currentExplorer.Value != ownerProcess)
         {
-            // Explorer restarted. Re-acquire its new taskbar windows while keeping
-            // the same watchdog lease. New Explorer taskbars are normally visible,
-            // so restore should show them when GlassDock eventually releases them.
             ownedWindows.Clear();
             ownerProcess = currentExplorer.Value;
             foreach (var hwnd in current)
                 ownedWindows[hwnd] = new OwnedTaskbar(true);
         }
 
-        // A secondary taskbar can be created after a monitor/display change.
-        // Adopt it into this lease immediately so bottom-edge hover cannot
-        // reveal it on the newly active display.
         foreach (var hwnd in current)
         {
             if (!ownedWindows.ContainsKey(hwnd))
@@ -222,7 +201,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
             }
         }
 
-        // Forget taskbar HWNDs that disappeared because a display was removed.
         foreach (var hwnd in ownedWindows.Keys
                      .Where(hwnd => !NativeMethods.IsWindow(hwnd))
                      .ToArray())
@@ -232,8 +210,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         var journalWindow = current[0];
 
-        // Hide first. A transient auto-hide journal/shell failure must not leave
-        // the visible taskbar on screen while the watchdog waits to retry.
         foreach (var hwnd in current)
             HideWindow(hwnd);
 
@@ -245,8 +221,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         if (!hidden)
         {
-            // One immediate retry closes the short Explorer race without increasing
-            // the watchdog's normal maintenance frequency.
             foreach (var hwnd in current)
                 HideWindow(hwnd);
 
@@ -285,7 +259,7 @@ public sealed class WindowsTaskbarController : ITaskbarController
             NativeMethods.EnableWindow(window, true);
 
             if (state.WasVisible)
-                NativeMethods.ShowWindow(window, 8); // SW_SHOWNA: do not activate Explorer.
+                NativeMethods.ShowWindow(window, 8);
 
             validWindows.Add(window);
         }
@@ -325,7 +299,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
 
         shellEventCallback = OnShellEvent;
 
-        // EVENT_OBJECT_SHOW catches Explorer making the taskbar visible.
         showHook = NativeMethods.SetWinEventHook(
             EventObjectShow,
             EventObjectShow,
@@ -335,8 +308,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
             0,
             WinEventOutOfContext | WinEventSkipOwnProcess);
 
-        // Foreground changes (Task Manager is a reliable reproducer) trigger one
-        // cheap proactive reassertion before Explorer can leave the taskbar up.
         foregroundHook = NativeMethods.SetWinEventHook(
             EventSystemForeground,
             EventSystemForeground,
@@ -387,8 +358,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
             if (GetOwnerProcess(hwnd) != ownerProcess)
                 return;
 
-            // Preserve the original visible state before hiding a newly-created
-            // secondary taskbar so normal restore semantics remain correct.
             if (!ownedWindows.ContainsKey(hwnd))
                 ownedWindows[hwnd] = new OwnedTaskbar(NativeMethods.IsWindowVisible(hwnd));
 
@@ -399,8 +368,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
         if (eventType != EventSystemForeground)
             return;
 
-        // Foreground events are infrequent compared with rendering frames and are
-        // the exact transition that currently reproduces the Task Manager bug.
         foreach (var taskbar in FindTaskbars())
         {
             if (GetOwnerProcess(taskbar) != ownerProcess)
@@ -413,11 +380,6 @@ public sealed class WindowsTaskbarController : ITaskbarController
         }
     }
 
-    /// <summary>
-    /// Waits efficiently for shell/WinEvent work while pumping the watchdog
-    /// thread's message queue. This replaces Thread.Sleep; it does not add a
-    /// faster polling loop or another thread.
-    /// </summary>
     public void WaitAndPumpEvents(int milliseconds)
     {
         const uint QsAllInput = 0x04FF;

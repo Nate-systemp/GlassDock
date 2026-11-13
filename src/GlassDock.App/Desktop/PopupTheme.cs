@@ -6,7 +6,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>Retained brushes derived from the dock's own interaction palette.</summary>
 internal sealed class PopupTheme
 {
     public SolidColorBrush Primary { get; } = new();
@@ -27,8 +26,6 @@ internal sealed class PopupTheme
     {
         var surfaceMode = materialMode ?? Mode;
         var alpha = GlassDock.Core.Materials.PopupMaterial.DashboardContrast(surfaceMode, opacity);
-        // Dark glass already gets tint from the native dock graph. Stacking a
-        // charcoal XAML wash and a black shadow over that graph muddies it.
         ReadingSurface.Color = DockControlPalette.SolidSurface(Mode) with
         { A = surfaceMode.GlassStyle() is null ? (byte)255 :
             Mode == DockAppearanceMode.Light ? (byte)Math.Round(alpha * 255) : (byte)0 };
@@ -58,8 +55,6 @@ internal sealed class PopupTheme
         Hover.Color = DockControlPalette.Hover(mode, true);
         Pressed.Color = DockControlPalette.Pressed(mode, true);
         Divider.Color = foreground with { A = 48 };
-        // No second material scrim above native glass. Solid modes use the
-        // same neutral finishes as the main dock.
         Overlay.Color = mode switch
         {
             DockAppearanceMode.Light or DockAppearanceMode.Dark => DockControlPalette.SolidSurface(mode),

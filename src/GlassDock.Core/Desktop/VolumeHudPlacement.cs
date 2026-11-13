@@ -2,7 +2,6 @@ using GlassDock.Core.Applications;
 
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Physical-pixel placement of the expanded envelope; phase never affects window position.</summary>
 public static class VolumeHudPlacement
 {
     public const double Width = 200, ExpandedHeight = 36, CompactHeight = 6, Padding = 20;

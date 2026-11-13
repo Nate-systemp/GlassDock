@@ -26,7 +26,8 @@ public sealed class DockStackWiringTests
         Assert.Contains("PopupStyle.Apply", popup);
         Assert.Contains("revision != generation", popup);
         Assert.Contains("!stackWindow.IsClosing", wiring);
-        Assert.Contains("applicationService.LaunchOrActivate(app)", wiring);
+        Assert.Contains("app => applicationService.LaunchOrActivate(app,", wiring);
+        Assert.Contains("WinRT.Interop.WindowNative.GetWindowHandle(this)),", wiring);
         Assert.Contains("badges.ForApplication", wiring);
         Assert.Contains("\"Rename\"", wiring);
         Assert.Contains("\"Unstack all apps\"", wiring);

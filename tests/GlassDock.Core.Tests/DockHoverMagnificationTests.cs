@@ -5,6 +5,28 @@ namespace GlassDock.Core.Tests;
 
 public sealed class DockHoverMagnificationTests
 {
+    [Fact]
+    public void Stepping_reuses_temporary_state_without_mutating_returned_frames()
+    {
+        var row = Row(20);
+        var hover = new DockHoverMagnification<object>();
+        hover.SetPointer(164, 20);
+        var original = hover.Step(row, 0, false);
+        var saved = original.ToArray();
+        for (var i = 0; i < 100; i++) hover.Step(row, i * 16, true);
+
+        var start = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            hover.SetPointer(i % 960, 20);
+            hover.Step(row, i * 16, true);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - start;
+
+        Assert.Equal(saved, original);
+        Assert.InRange(allocated, 0, 1024 * 1000);
+    }
+
     private static DockHoverMagnification<object>.Item[] Row(int count = 7) => Enumerable.Range(0, count)
         .Select(i => new DockHoverMagnification<object>.Item(new object(), i * 48, 0, 40, 40)).ToArray();
 
@@ -177,7 +199,7 @@ public sealed class DockHoverMagnificationTests
         Assert.Equal(1, frames[^1].Scale);
         AssertFixedPositions(row, frames);
         Assert.Equal(456, hover.ContentWidth);
-        hover.SetPointer(400, 20); // Pointer outside the app row cannot magnify an app.
+        hover.SetPointer(400, 20);
         frames = Settle(hover, row);
         Assert.All(frames, frame => Assert.Equal(1, frame.Scale));
         var remaining = row[..3];

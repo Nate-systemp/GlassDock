@@ -8,6 +8,33 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class IconAlphaTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BitmapConversionPreservesRowOrderForEitherNativeOrientation(bool bottomUp)
+    {
+        var dc = ApplicationNative.CreateCompatibleDC(0);
+        var info = new ApplicationNative.BitmapInfo { Size = 40, Width = 2, Height = bottomUp ? 2 : -2, Planes = 1, Bits = 32 };
+        var bitmap = ApplicationNative.CreateDIBSection(dc, ref info, 0, out var bits, 0, 0);
+        byte[] top = [10, 20, 30, 255, 40, 50, 60, 255];
+        byte[] bottom = [70, 80, 90, 255, 100, 110, 120, 255];
+        try
+        {
+            Assert.NotEqual(0, bitmap);
+            byte[] native = bottomUp ? [.. bottom, .. top] : [.. top, .. bottom];
+            Marshal.Copy(native, 0, bits, 16);
+            var convert = typeof(WindowsApplicationIconService).GetMethod("FromHBitmap", BindingFlags.NonPublic | BindingFlags.Static)!;
+            var image = Assert.IsType<ApplicationIcon>(convert.Invoke(null, [bitmap, false]));
+            byte[] expected = [.. top, .. bottom];
+            Assert.Equal(expected, image.Pixels);
+        }
+        finally
+        {
+            if (bitmap != 0) ApplicationNative.DeleteObject(bitmap);
+            ApplicationNative.DeleteDC(dc);
+        }
+    }
+
     [Fact]
     public void TransparentRgbDoesNotCausePremultipliedEdgesToBeMultipliedAgain()
     {

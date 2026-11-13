@@ -1,7 +1,6 @@
 using System.Xml.Linq;
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Personal/open WLAN profiles; secrets never enter Doky settings or logs.</summary>
 public static class WifiProfile
 {
     public static bool Supports(uint authentication, uint cipher) =>

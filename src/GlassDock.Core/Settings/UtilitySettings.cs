@@ -2,6 +2,7 @@ namespace GlassDock.Core.Settings;
 
 public enum UtilityKind { Wifi, Bluetooth, AirplaneMode, Volume, Brightness, Battery, BatterySaver, Focus, NightLight }
 public enum UtilityTheme { Dark, Light }
+public enum UtilityDisplayMode { Individual, Grid }
 public sealed record UtilityDefinition(UtilityKind Kind, string Name, string Icon, uint Accent, bool Available = false)
 {
     public static IReadOnlyList<UtilityDefinition> All { get; } = Array.AsReadOnly(new[]

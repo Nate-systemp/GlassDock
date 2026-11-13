@@ -22,7 +22,6 @@ namespace GlassDock.App.Desktop;
 
 internal readonly record struct UtilityHudAnchor(nint Window, PreviewRect Dock, IReadOnlyList<PreviewRect> Utilities, PreviewRect? Button);
 
-/// <summary>One retained non-activating capsule; its host never resizes during a burst.</summary>
 internal sealed class UtilityHudWindow : Window, IDisposable
 {
     private const double CapsuleWidth = VolumeHudPlacement.Width, ExpandedHeight = VolumeHudPlacement.ExpandedHeight,

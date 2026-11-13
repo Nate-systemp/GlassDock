@@ -4,7 +4,6 @@ namespace GlassDock.Core.Materials;
 
 public static class DockSpecularLighting
 {
-    /// <summary>Rotate opposing catches in normalized dock space, independent of aspect ratio and DPI.</summary>
     public static (Vector2 Start, Vector2 End) Gradient(double width, double height, double degrees)
     {
         width = Math.Max(1, width); height = Math.Max(1, height);

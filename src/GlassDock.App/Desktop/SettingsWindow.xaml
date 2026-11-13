@@ -98,6 +98,9 @@
         <StackPanel x:Name="UtilitiesPage" Spacing="20" Visibility="Collapsed">
           <TextBlock Text="Add Utilities" FontSize="28" FontWeight="SemiBold" />
           <TextBlock Text="Choose independent circles beside your dock. Nothing is added until you select it." TextWrapping="Wrap" />
+          <ComboBox x:Name="UtilityDisplayModeBox" Header="Utility display mode" SelectionChanged="UtilityDisplayModeChanged">
+            <ComboBoxItem Content="Individual" /><ComboBoxItem Content="Grid" />
+          </ComboBox>
           <ComboBox x:Name="UtilityThemeBox" Header="Settings and utility appearance" SelectionChanged="UtilityThemeChanged">
             <ComboBoxItem Content="Dark" /><ComboBoxItem Content="Light" />
           </ComboBox>

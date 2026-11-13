@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Hosting;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Transparent XAML child output; inherits its popup's existing animation.</summary>
 internal sealed class LiquidGlassDrawingTarget : IDisposable
 {
     public Grid Element { get; } = new() { IsHitTestVisible = false,

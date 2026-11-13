@@ -1,4 +1,4 @@
-# Regenerate Windows branding from the transparent master, without changing its artwork.
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $root = Split-Path $PSScriptRoot -Parent

@@ -10,7 +10,6 @@ public enum GlassMaterialMode
     Clear
 }
 
-/// <summary>Named main-dock material styles for the existing glass pipeline.</summary>
 public static class DockMaterialStylePresets
 {
     public static GlassMaterial Create(GlassMaterialMode mode) => Normalize(mode) switch

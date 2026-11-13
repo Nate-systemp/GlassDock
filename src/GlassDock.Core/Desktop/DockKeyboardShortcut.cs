@@ -1,17 +1,15 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Win+1–9 selects a dock position; Win+T starts keyboard navigation.</summary>
 public static class DockKeyboardShortcut
 {
     public const int Navigate = 0;
     public static int FromVirtualKey(int key) => key switch
     {
-        0x54 => Navigate, // T
+        0x54 => Navigate,
         >= 0x31 and <= 0x39 => key - 0x30,
         _ => -1
     };
 
-    /// <summary>Read one helper shortcut using the existing helper event sequence.</summary>
     public static (int Index, uint Revision)? Read(string? line, ref long sequence, long now)
     {
         if (string.IsNullOrEmpty(line)) return null;

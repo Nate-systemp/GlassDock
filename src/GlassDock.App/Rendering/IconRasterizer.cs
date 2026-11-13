@@ -2,7 +2,6 @@ using GlassDock.Core.Applications;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Area-filter native premultiplied BGRA pixels before large display reductions.</summary>
 internal static class IconRasterizer
 {
     public static ApplicationIcon Downsample(ApplicationIcon source, int width, int height)
@@ -34,7 +33,6 @@ internal static class IconRasterizer
                 alpha += source.Pixels[input + 3] * weight;
             }
             var output = (y * width + x) * 4;
-            // Filter color and coverage together in premultiplied space: no dark halos.
             pixels[output] = (byte)Math.Clamp(Math.Round(blue / area), 0, 255);
             pixels[output + 1] = (byte)Math.Clamp(Math.Round(green / area), 0, 255);
             pixels[output + 2] = (byte)Math.Clamp(Math.Round(red / area), 0, 255);

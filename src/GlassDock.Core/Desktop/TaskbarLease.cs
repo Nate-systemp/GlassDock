@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>A renewable liveness deadline, with an additional cap for manual tests.</summary>
 public sealed class TaskbarLease(bool whileAppActive)
 {
     private TimeSpan lastHeartbeat;

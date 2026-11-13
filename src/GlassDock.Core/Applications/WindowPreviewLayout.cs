@@ -3,8 +3,6 @@ namespace GlassDock.Core.Applications;
 public readonly record struct PreviewRect(double X, double Y, double Width, double Height);
 public sealed record WindowPreviewLayout(double Width, double Height, int Capacity, IReadOnlyList<PreviewRect> Cards)
 {
-    /// <summary>Convert dock-relative DIPs once, then clamp physical bounds.
-    /// A pinned dock's reserved work area naturally ends at the dock's top.</summary>
     public static PreviewRect Position(PreviewRect workArea, PreviewRect dock,
         double dpi, double anchorX, double dockTop, double width, double height)
     {
@@ -18,8 +16,6 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
         return new(Math.Floor(x), Math.Floor(y), pixelWidth, pixelHeight);
     }
 
-    /// <summary>Coalesce identical pixel-aligned preview positions to avoid
-    /// redundant SetWindowPos calls and the recursive size/layout work they cause.</summary>
     public static bool NeedsNativeMove(PreviewRect? previous, PreviewRect next) =>
         previous is null || previous.Value != next;
 
@@ -32,8 +28,6 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
         var cardWidth = Math.Max(40, Math.Min(count == 1 ? 232 : 176, availableWidth - 50));
         var cardHeight = Math.Max(40, Math.Min(count == 1 ? 155 : 137, availableHeight - 64));
         var columns = Math.Max(1, (int)((availableWidth - 16 + 12) / (cardWidth + 12)));
-        // Use a second row before paginating, while keeping every card inside
-        // the current monitor's work area (values here are already DIPs).
         var rows = count > columns && availableHeight >= 64 + cardHeight * 2 + 12 ? 2 : 1;
         var capacity = columns * rows;
         var visible = Math.Min(count, capacity);
@@ -48,8 +42,6 @@ public sealed record WindowPreviewLayout(double Width, double Height, int Capaci
                 top + index / columns * (cardHeight + 12), cardWidth, cardHeight)
             : new PreviewRect(8 + Math.Min(index, 2) * 16, top - Math.Min(index, 2) * 8,
                 cardWidth * (1 - Math.Min(index, 2) * .06), cardHeight * (1 - Math.Min(index, 2) * .06))).ToArray();
-        // Eight DIP body padding plus the existing 12 DIP transparent travel gap.
-        // Only paginated groups need the additional button row.
         var footer = count > capacity || reservePager ? 30 : 0;
         return new(width, (expanded ? usedRows * cardHeight + (usedRows - 1) * 12 : cardHeight)
             + top + 20 + footer, capacity, cards);

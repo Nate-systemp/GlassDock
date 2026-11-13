@@ -2,7 +2,6 @@ using GlassDock.Core.Materials;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Isolates the unsupported optical stage from the working blur/color pipeline.</summary>
 internal static class RefractionLayer
 {
     public const bool IsSupported = false;

@@ -41,11 +41,10 @@ internal sealed class EnergySaverNative : IDisposable
     {
         if (value > 2) throw new ArgumentOutOfRangeException(nameof(value));
         if (ReadOverride() != expected) throw new InvalidOperationException("Windows changed Energy Saver concurrently; request canceled.");
-        // Match the verified Shell publisher: state name, NULL type, DWORD*, 4, NULL scope.
         Check(RtlPublishWnfStateData(OverrideName, 0, in value, sizeof(uint), 0));
         var actual = ReadOverride();
         if (actual.Value != value) throw new InvalidOperationException("Windows replaced the Energy Saver override.");
-        return actual; // Publication is not confirmation of effective power state.
+        return actual;
     }
 
     internal async Task<uint> ReadStatusAsync(CancellationToken cancellation)
@@ -132,7 +131,7 @@ internal sealed class EnergySaverStatusSubscription : IDisposable
         {
             try
             {
-                if (kind != 0x8013 || data == 0) return 0; // PBT_POWERSETTINGCHANGE
+                if (kind != 0x8013 || data == 0) return 0;
                 var header = Marshal.PtrToStructure<PowerSettingHeader>(data);
                 if (header.Id != StatusGuid) return 0;
                 var next = ParseStatus(header.Id, header.Length,

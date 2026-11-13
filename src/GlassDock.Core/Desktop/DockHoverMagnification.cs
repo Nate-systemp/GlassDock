@@ -1,10 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>
-/// A local, spring-smoothed icon hover: the focused icon and its two immediate
-/// neighbors scale in place. Unlike a macOS reflow, no button, running indicator,
-/// changes its allocated position, and the glass wave is independent.
-/// </summary>
 public sealed class DockHoverMagnification<T> where T : class
 {
     public const double HoverScale = 1.50;
@@ -13,8 +8,6 @@ public sealed class DockHoverMagnification<T> where T : class
     public readonly record struct Item(T Id, double Left, double Top, double Width, double Height,
         bool Magnifiable = true, double ArtworkWidth = 0)
     {
-        // Retained for callers that measure icon artwork. It does NOT drive
-        // hover layout: button positions and spacing must remain unchanged.
         public double Footprint => !Magnifiable ? Width : Math.Max(
             ArtworkWidth > 0 && double.IsFinite(ArtworkWidth) ? ArtworkWidth : Width,
             Math.Min(Width, Height) * .70);
@@ -23,6 +16,7 @@ public sealed class DockHoverMagnification<T> where T : class
     public readonly record struct Frame(T Id, double Scale, double OffsetX);
     private sealed class Motion { public double Scale = 1; public double Velocity; }
     private readonly Dictionary<T, Motion> motions = new();
+    private readonly HashSet<T> liveItems = new(ReferenceEqualityComparer.Instance);
     private double? pointerX, lastTime;
     private double pointerY;
     private bool paused;
@@ -64,9 +58,6 @@ public sealed class DockHoverMagnification<T> where T : class
         lastTime = now;
     }
 
-    // Only the focused icon and directly adjacent icons are magnified.
-    // Smooth interpolation is kept for tests/future callers; the active focus
-    // always uses the exact integer distances 0, 1, 2, ... .
     public static double ScaleAtDistance(double distance)
     {
         distance = Math.Abs(distance);
@@ -80,40 +71,54 @@ public sealed class DockHoverMagnification<T> where T : class
 
     public IReadOnlyList<Frame> Step(IReadOnlyList<Item> items, double now, bool animationsEnabled)
     {
-        foreach (var id in motions.Keys.Where(id => !items.Any(item => ReferenceEquals(item.Id, id))).ToArray())
-            motions.Remove(id);
-        foreach (var item in items)
-            if (!motions.ContainsKey(item.Id)) motions.Add(item.Id, new Motion());
+        for (var i = 0; i < items.Count; i++) liveItems.Add(items[i].Id);
+        foreach (var id in motions.Keys)
+            if (!liveItems.Contains(id)) motions.Remove(id);
+        liveItems.Clear();
+        for (var i = 0; i < items.Count; i++)
+            if (!motions.ContainsKey(items[i].Id)) motions.Add(items[i].Id, new Motion());
 
         ContentWidth = items.Count == 0 ? 0 : Math.Max(0, items[^1].Left + items[^1].Width - items[0].Left);
         var seconds = lastTime is { } previous ? Math.Clamp((now - previous) / 1000, 0, .1) : 0;
         lastTime = now;
         if (paused) return Layout(items);
 
-        // Acquire hover from ORIGINAL button slots, never a magnified/reflowed
-        // position. This prevents drift and sudden row movement at the edges.
-        var apps = items.Where(item => item.Magnifiable && item.Width > 0 && item.Height > 0).ToArray();
+        var appCount = 0;
+        double firstLeft = 0, lastRight = 0;
+        var minimumTop = double.PositiveInfinity;
+        var maximumBottom = double.NegativeInfinity;
+        var nearestDistance = double.PositiveInfinity;
         int? focus = null;
-        if (pointerX is { } x && apps.Length > 0 &&
-            x >= apps[0].Left && x <= apps[^1].Left + apps[^1].Width &&
-            pointerY >= apps.Min(item => item.Top - item.Height * .5) &&
-            pointerY <= apps.Max(item => item.Top + item.Height))
+        for (var i = 0; i < items.Count; i++)
         {
-            var nearestDistance = double.PositiveInfinity;
-            for (var i = 0; i < apps.Length; i++)
+            var item = items[i];
+            if (!item.Magnifiable || !(item.Width > 0 && item.Height > 0)) continue;
+            if (appCount == 0) firstLeft = item.Left;
+            lastRight = item.Left + item.Width;
+            minimumTop = Math.Min(minimumTop, item.Top - item.Height * .5);
+            var bottom = item.Top + item.Height;
+            if (appCount == 0 || bottom > maximumBottom || double.IsNaN(maximumBottom)) maximumBottom = bottom;
+            if (pointerX is { } x)
             {
-                var center = apps[i].Left + apps[i].Width / 2;
+                var center = item.Left + item.Width / 2;
                 var distance = Math.Abs(x - center);
-                if (distance >= nearestDistance) continue;
-                nearestDistance = distance;
-                focus = i;
+                if (!(distance >= nearestDistance))
+                {
+                    nearestDistance = distance;
+                    focus = appCount;
+                }
             }
+            appCount++;
         }
+        if (pointerX is not { } pointer || appCount == 0 ||
+            !(pointer >= firstLeft && pointer <= lastRight &&
+              pointerY >= minimumTop && pointerY <= maximumBottom)) focus = null;
 
         IsAnimating = false;
         var appIndex = 0;
-        foreach (var item in items)
+        for (var i = 0; i < items.Count; i++)
         {
+            var item = items[i];
             var isApp = item.Magnifiable && item.Width > 0 && item.Height > 0;
             var target = isApp && focus is { } focused
                 ? ScaleAtDistance(appIndex - focused)
@@ -133,8 +138,6 @@ public sealed class DockHoverMagnification<T> where T : class
             return false;
         }
 
-        // Critically damped spring, roughly 300ms to settle, with no bounce or
-        // animation restart when pointer movement retargets a different icon.
         const double frequency = 24;
         var displacement = motion.Scale - target;
         var coefficient = motion.Velocity + frequency * displacement;
@@ -157,8 +160,10 @@ public sealed class DockHoverMagnification<T> where T : class
 
     private IReadOnlyList<Frame> Layout(IReadOnlyList<Item> items)
     {
-        // OffsetX is always zero. Only the artwork is scaled by the UI layer;
-        // buttons, badges, indicators, and dock glass stay exactly in place.
-        return items.Select(item => new Frame(item.Id, motions[item.Id].Scale, 0)).ToArray();
+        if (items.Count == 0) return Array.Empty<Frame>();
+        var frames = new Frame[items.Count];
+        for (var i = 0; i < items.Count; i++)
+            frames[i] = new Frame(items[i].Id, motions[items[i].Id].Scale, 0);
+        return frames;
     }
 }

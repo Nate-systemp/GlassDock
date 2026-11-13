@@ -62,7 +62,6 @@ static bool OpenDiagnosticFile() {
     return true;
 }
 
-// Drain only from framework lifecycle callbacks, never from a hooked API.
 static void DumpObservations() {
     osd_observe::Stop();
     AcquireSRWLockExclusive(&osd_observe::bufferLock);
@@ -80,7 +79,6 @@ static void DumpObservations() {
                    n.bounds.left, n.bounds.top, n.bounds.right, n.bounds.bottom);
         }
         for (unsigned j = 0; j < r.frameCount; ++j) {
-            // Raw addresses are historical; module mapping below is resolved at drain time.
             HMODULE module{}; wchar_t path[MAX_PATH]{};
             if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                    reinterpret_cast<LPCWSTR>(r.frames[j]), &module))
@@ -94,7 +92,6 @@ static void DumpObservations() {
     ReleaseSRWLockExclusive(&osd_observe::bufferLock);
 }
 
-// An in-process future adapter contract only; no pipe, injector or production caller is provided.
 struct NativeLeaseRequestV1 {
     DWORD size, version;
     ProcessRef bridge, doky, shell;
@@ -106,8 +103,6 @@ extern "C" __declspec(dllexport) DWORD WINAPI DokyOsdPrototypeArmV1(const Native
     if (!request || request->size != sizeof(NativeLeaseRequestV1) || request->version != 1) return ERROR_REVISION_MISMATCH;
     if (!Wh_GetIntSetting(L"enablePrototype") || CurrentShellPid() != shellIdentity.pid ||
         request->shell.pid != shellIdentity.pid || request->shell.created != shellIdentity.created) return ERROR_ACCESS_DENIED;
-    // Hard capability barrier. A verified exact native-content intent provider and
-    // authenticated readiness/lease transport are absent; never claim a successful arm.
     return ERROR_NOT_SUPPORTED;
 }
 extern "C" __declspec(dllexport) void WINAPI DokyOsdPrototypeDisable() { Disable(); }
@@ -122,13 +117,9 @@ BOOL Wh_ModInit() {
     HMODULE user = GetModuleHandleW(L"user32.dll");
     void* show = std::bit_cast<void*>(GetProcAddress(user, "ShowWindow"));
     void* position = std::bit_cast<void*>(GetProcAddress(user, "SetWindowPos"));
-    // Windhawk retains these output addresses and updates them when queued hooks
-    // apply. They must be the persistent pointers used by callbacks, never locals.
     if (!show || !position ||
         !Wh_SetFunctionHook(show, std::bit_cast<void*>(&osd_observe::Show), reinterpret_cast<void**>(&osd_observe::forwardShow)) ||
         !Wh_SetFunctionHook(position, std::bit_cast<void*>(&osd_observe::Position), reinterpret_cast<void**>(&osd_observe::forwardPosition))) return FALSE;
-    // No Arm call exists here. Even when explicitly opted in, unknown native
-    // intent/readiness leaves every show request with the original Windows API.
     const bool ready = osd_observe::forwardShow && osd_observe::forwardPosition && osd_observe::Start(osd_observe::maxCaptureSeconds);
     if (ready) DiagnosticLog(L"READ_ONLY_START tick=%llu durationSeconds=%u capacity=128 suppression=false", GetTickCount64(), osd_observe::maxCaptureSeconds);
     return ready;
@@ -136,6 +127,6 @@ BOOL Wh_ModInit() {
 void Wh_ModSettingsChanged() { Disable(); DumpObservations(); }
 void Wh_ModUninit() {
     DumpObservations();
-    Disable(); // Framework hook removal/quiescence must finish before DLL unload.
+    Disable();
     if (diagnosticFile != INVALID_HANDLE_VALUE) { CloseHandle(diagnosticFile); diagnosticFile = INVALID_HANDLE_VALUE; }
 }

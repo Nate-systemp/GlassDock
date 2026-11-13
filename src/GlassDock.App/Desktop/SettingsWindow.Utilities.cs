@@ -24,6 +24,7 @@ public sealed partial class SettingsWindow
     {
         UtilitiesGrid.Children.Clear();
         var current = settingsSession.Current;
+        UtilityDisplayModeBox.SelectedIndex = (int)current.UtilityDisplayMode;
         UtilityThemeBox.SelectedIndex = (int)current.UtilityTheme;
         for (var i = 0; i < UtilityDefinition.All.Count; i++)
         {
@@ -58,6 +59,15 @@ public sealed partial class SettingsWindow
         var theme = (UtilityTheme)UtilityThemeBox.SelectedIndex;
         if (settingsSession.Current.UtilityTheme == theme) return;
         await SaveRecoverySettingsAsync(settingsSession.Current with { UtilityTheme = theme }, "Settings and utility theme saved.");
+        RefreshUtilitiesPage();
+    }
+
+    private async void UtilityDisplayModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (populating || !shellReady || saving || closed || UtilityDisplayModeBox.SelectedIndex < 0) return;
+        var mode = (UtilityDisplayMode)UtilityDisplayModeBox.SelectedIndex;
+        if (settingsSession.Current.UtilityDisplayMode == mode) return;
+        await SaveRecoverySettingsAsync(settingsSession.Current with { UtilityDisplayMode = mode }, "Utility display mode saved.");
         RefreshUtilitiesPage();
     }
 }

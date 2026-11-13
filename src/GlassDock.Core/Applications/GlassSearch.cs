@@ -6,7 +6,6 @@ public sealed record GlassSearchResult(string StableId, string Title, string Sub
     IReadOnlyList<string> Keywords, GlassSearchResultType ResultType, string LaunchTarget,
     ApplicationIcon? Icon = null);
 
-/// <summary>Pure cached-list matching; no filesystem, UI, or asynchronous work.</summary>
 public static class GlassSearch
 {
     public static IReadOnlyList<GlassSearchResult> Find(IEnumerable<GlassSearchResult> entries, string query)
@@ -14,9 +13,6 @@ public static class GlassSearch
         query = query.Trim();
         if (query.Length == 0) return [];
 
-        // Rank first, then collapse duplicate visible applications.
-        // This is a second safety net in case multiple discovery sources
-        // still produce different StableIds for the same app.
         return entries
             .Select(entry => (Entry: entry, Rank: Rank(entry, query)))
             .Where(item => item.Rank < int.MaxValue)
@@ -35,8 +31,6 @@ public static class GlassSearch
     private static string ResultIdentity(
         GlassSearchResult entry)
     {
-        // Settings should remain distinct by StableId. Applications with
-        // the same normalized visible title are presented as one app.
         if (entry.ResultType == GlassSearchResultType.Setting)
             return "setting|" + entry.StableId;
 

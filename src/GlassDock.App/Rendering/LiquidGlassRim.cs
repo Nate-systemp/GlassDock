@@ -6,7 +6,6 @@ using Microsoft.Graphics.Canvas.Geometry;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Antialiased optical catches stroked on the actual retained clipping contour.</summary>
 internal sealed class LiquidGlassRim : IDisposable
 {
     private CanvasLinearGradientBrush? brush;
@@ -40,8 +39,6 @@ internal sealed class LiquidGlassRim : IDisposable
         brush.Opacity = Math.Clamp(material.SpecularIntensity * 2.4f, 0, 1);
         drawing.Antialiasing = CanvasAntialiasing.Antialiased;
         DrawDockLight(drawing, geometry, bounds, scale, material);
-        // The body's exact vector clip retains the inner half of a 1.4-DIP stroke.
-        // Coverage is resolved by Direct2D, not a subpixel exponential sampled once per pixel.
         if (dockSurface) brush.Opacity *= .55f;
         brush.Opacity *= material.SurfaceOpacity;
         if (material.InnerGlint > 0)
@@ -61,9 +58,6 @@ internal sealed class LiquidGlassRim : IDisposable
 
     private CanvasLinearGradientBrush? glow;
 
-    // Clear main dock only: soft internal glow without a continuous white border.
-    // Both are vertical (shape-following) and drawn inside the existing clip,
-    // so the hover wave contour is respected automatically.
     private void DrawDockLight(CanvasDrawingSession drawing, CanvasGeometry geometry, Vector4 bounds, float scale, LiquidGlassMaterial material)
     {
         static CanvasGradientStop Stop(float at, byte alpha) =>
@@ -71,8 +65,6 @@ internal sealed class LiquidGlassRim : IDisposable
         byte Alpha(float value) => (byte)Math.Clamp(value * material.InnerShine * material.SpecularIntensity / .16f * material.SurfaceOpacity, 0, 255);
         glow ??= new(drawing.Device, new[] { Stop(0, Alpha(34 * material.TopLight)), Stop(.18f, Alpha(16 * material.TopLight)),
             Stop(.5f, Alpha(3)), Stop(.82f, 0), Stop(1, Alpha(12 * material.BottomLight)) });
-        // Wave rise extends above Dock.Y; start the gradient a little higher so
-        // the raised crest is lit like the resting top edge.
         var top = new Vector2(0, (bounds.Y - bounds.W * .25f) * scale);
         var bottom = new Vector2(0, (bounds.Y + bounds.W) * scale);
         glow.StartPoint = top;

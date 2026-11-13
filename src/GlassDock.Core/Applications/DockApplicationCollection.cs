@@ -22,7 +22,6 @@ public static class DockApplicationCollection
             {
                 var candidates = pins.Where(pin => !string.IsNullOrEmpty(pin.Identity.ExecutablePath) &&
                     ApplicationIdentity.NormalizePath(pin.Identity.ExecutablePath) == ApplicationIdentity.NormalizePath(window.Identity.ExecutablePath)).ToArray();
-                // Never collapse two explicit, different app IDs or guess between browser profiles.
                 if (candidates.Length == 1 && (appIds?.Length ?? 0) <= 1 && (string.IsNullOrEmpty(window.Identity.AppUserModelId) ||
                     string.IsNullOrEmpty(candidates[0].Identity.AppUserModelId))) match = candidates[0];
             }

@@ -1,13 +1,11 @@
 namespace GlassDock.Core.Materials;
 
-/// <summary>Optics in DIPs; independent of capture, HWNDs and the UI theme.</summary>
 public sealed record LiquidGlassMaterial
 {
     public float RefractionStrength { get; init; } = 8;
     public float RefractionFalloff { get; init; } = 2;
     public float EdgeThickness { get; init; } = 13;
     public float DiffusionAmount { get; init; } = .65f;
-    // Maximum per-channel rim offset in DIPs; zero preserves neutral refraction.
     public float ChromaticDispersion { get; init; } = .65f;
     public float TintOpacity { get; init; } = .045f;
     public float SpecularIntensity { get; init; } = .16f;

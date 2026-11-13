@@ -3,8 +3,6 @@ using Microsoft.Win32;
 
 namespace GlassDock.Windows.Applications;
 
-// Owned by one enumeration on its calling apartment. Recreating on the next
-// reconciliation also recovers from Explorer/COM server replacement.
 internal sealed class WindowsVirtualDesktopQuery : IDisposable
 {
     private IVirtualDesktopManager? manager;
@@ -21,8 +19,6 @@ internal sealed class WindowsVirtualDesktopQuery : IDisposable
 
     public bool? IsCurrent(nint window)
     {
-        // Some Shell versions report current=true for an invalid HWND. A window
-        // may disappear between enumeration and the COM call.
         if (!ApplicationNative.IsWindow(window)) return null;
         return QuerySafely(() =>
         {
@@ -44,8 +40,6 @@ internal sealed class WindowsVirtualDesktopQuery : IDisposable
 
     public static bool ShowAllWindows()
     {
-        // Explorer preference, read-only and best effort; not a documented API.
-        // Missing/unrecognized values safely default to current desktop only.
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");

@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>Missing artwork must never become an invisible, still-interactive dock slot.</summary>
 public static class ApplicationIconFallback
 {
     private static readonly ApplicationIcon fallback = Create();
@@ -18,8 +17,6 @@ public static class ApplicationIconFallback
 
     private static ApplicationIcon Create()
     {
-        // Neutral application tile, with a high-contrast question mark. This is
-        // shared artwork, not evidence that an offline pin was uninstalled.
         const int size = 64;
         var pixels = new byte[size * size * 4];
         for (var y = 4; y < 60; y++)

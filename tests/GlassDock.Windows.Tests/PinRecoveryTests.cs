@@ -51,7 +51,7 @@ public sealed class PinRecoveryTests
     {
         var drives = DriveInfo.GetDrives().Select(d => d.Name[0]).ToHashSet();
         var letter = Enumerable.Range('D', 'Z' - 'D' + 1).Select(value => (char)value).FirstOrDefault(c => !drives.Contains(c));
-        if (letter == default) return; // No unused drive letter on this host.
+        if (letter == default) return;
         Assert.Equal(PinTargetAvailability.Unknown, PinTargetProbe.Check($"{letter}:\\offline\\app.exe", new(null, null)));
     }
 

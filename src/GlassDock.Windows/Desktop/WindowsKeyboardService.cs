@@ -31,9 +31,6 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private const uint DisplayStateOn = 1;
     private static readonly Guid ConsoleDisplayState = new("6fe69556-704a-47a0-8f24-c28d936fda47");
 
-    // Retained for existing Glass Home visibility callers. Physical Win-down
-    // must now be withheld even while Home is hidden; visibility no longer
-    // decides whether keyboard input is captured.
     public bool CaptureBareWindowsKey
     {
         get => captureBareWindowsKey;
@@ -95,11 +92,6 @@ public sealed class WindowsKeyboardService : IKeyboardService
 
     private void UpdateState()
     {
-        // Always withhold physical Win-down while dock shortcuts are active.
-        // Explorer can open Start on the initial Win-down, *before* we know
-        // whether the gesture is bare Win or a Win+key shortcut. Capturing
-        // only while Home is visible leaks Windows Start when Home is hidden.
-        // WindowsKeyHook replays a tagged Win-down for genuine shortcuts.
         var captureWinDown = dockShortcutsEnabled;
         hook?.UpdateState(suppressDockToggle, captureWinDown, revision);
         elevatedHelper?.UpdateState(suppressDockToggle, captureWinDown, revision);
@@ -154,22 +146,16 @@ public sealed class WindowsKeyboardService : IKeyboardService
         signals.Clear();
         UpdateState();
 
-        // The fallback hook is owned by this window's UI/message thread. Re-arm
-        // it synchronously before any new input can be accepted. The elevated
-        // hook is revalidated through the existing IPC connection below.
         if (hook is not null)
         {
             try { hook.RecoverAfterResume(); }
             catch (Exception error) when (error is InvalidOperationException or Win32Exception)
             {
-                // RecoverAfterResume retains the previous hook when a fresh
-                // registration fails. Do not dispose that remaining protection.
                 Debug.WriteLine($"Doky fallback hook recovery deferred (previous hook retained): {error.Message}");
             }
         }
         else if (elevatedHelper is null)
         {
-            // No helper exists to own interception: restore the fallback.
             try { StartFallback(); }
             catch (Exception fallbackError) when (fallbackError is InvalidOperationException or Win32Exception)
             { Debug.WriteLine($"Doky fallback hook start failed: {fallbackError.Message}"); }
@@ -197,8 +183,6 @@ public sealed class WindowsKeyboardService : IKeyboardService
         if (lParam == 0) return true;
         try
         {
-            // POWERBROADCAST_SETTING is GUID + DataLength + data bytes. The
-            // registered GUID means no second GUID comparison is necessary.
             return Marshal.ReadInt32(lParam, 20) == DisplayStateOn;
         }
         catch (AccessViolationException) { return true; }
@@ -257,7 +241,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 SnippingCanceled?.Invoke(this, EventArgs.Empty);
             return 0;
         }
-        if (message == 0x031D) // WM_CLIPBOARDUPDATE
+        if (message == 0x031D)
         {
             if (!disposed) ClipboardChanged?.Invoke(this, EventArgs.Empty);
             return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
@@ -270,9 +254,9 @@ public sealed class WindowsKeyboardService : IKeyboardService
                 {
                     hook?.Dispose(); hook = null;
                     signals.Clear();
-                    elevatedHelper.AllowHelper(); // GO is sent only after the local hook is removed.
+                    elevatedHelper.AllowHelper();
                 }
-                else StartFallback(); // helper process has exited and its hook is gone
+                else StartFallback();
             }
             return 0;
         }

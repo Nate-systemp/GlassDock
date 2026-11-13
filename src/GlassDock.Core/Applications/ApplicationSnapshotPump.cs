@@ -1,7 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>Serializes UI application, retaining only the latest discovery snapshot.
-/// enqueue must post asynchronously to the owning UI thread.</summary>
 public sealed class ApplicationSnapshotPump(Func<Action, bool> enqueue, Action<ApplicationSnapshot> apply) : IDisposable
 {
     private readonly object gate = new();
@@ -48,8 +46,6 @@ public sealed class ApplicationSnapshotPump(Func<Action, bool> enqueue, Action<A
         {
             lock (gate)
             {
-                // Keep scheduled=true throughout apply: nested Windows/XAML
-                // message pumping must not enter another collection mutation.
                 scheduled = false;
                 Schedule();
             }

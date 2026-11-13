@@ -31,7 +31,6 @@ public sealed class WifiUtilityService : IDisposable
         lock (networksLock)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            // Closing one panel cancels its wait, not another monitor's shared scan.
             work = scan && pendingScan is { IsCompleted: false } running ? running : ReadAndCacheAsync(scan, networkEpoch);
             if (scan) pendingScan = work;
         }
@@ -66,7 +65,6 @@ public sealed class WifiUtilityService : IDisposable
             try { await ReadNetworksAsync(false); }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
-                // Prefetch is optional; opening the panel retries and reports actual access errors.
                 System.Diagnostics.Debug.WriteLine(WifiNetworkControl.ErrorMessage(error));
             }
         }

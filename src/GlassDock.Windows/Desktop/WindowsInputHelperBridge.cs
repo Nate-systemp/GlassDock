@@ -12,8 +12,6 @@ using System.Runtime.InteropServices;
 
 namespace GlassDock.Windows.Desktop;
 
-// Persistent connection. UI only posts ownership changes and replaces the latest state.
-// No pipe operations run on a keyboard callback or the UI thread.
 internal sealed class WindowsInputHelperBridge : IDisposable
 {
     private readonly string helperPath;
@@ -59,8 +57,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
                 catch (TimeoutException) { Log("Resume: helper recovery acknowledgement timed out."); }
                 finally { Volatile.Write(ref recoveryPending, null); }
             }
-            // Old/unresponsive/disconnected helper: EOF releases its hook. Never
-            // install a competing hook or launch another helper until it exits.
             attempt?.Cancel();
             await runTask.WaitAsync(TimeSpan.FromSeconds(8), lifetime.Token);
             if (lifetime.IsCancellationRequested) return;
@@ -80,7 +76,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         if (pid == 0 || lifetime.IsCancellationRequested) return false;
         var request = new RestorePending(Guid.NewGuid().ToString("N"),
             new(TaskCreationOptions.RunContinuationsAsynchronously));
-        // One in-flight user activation, never an accumulating click queue.
         if (Interlocked.CompareExchange(ref restorePending, request, null) is not null) return false;
         try
         {
@@ -122,9 +117,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
     private async Task RunAsync(CancellationToken token)
     {
-        // One bounded, asynchronous attempt per app start. If the installed
-        // scheduled task is missing or points to an old helper, keep fallback
-        // active and write a useful diagnostic instead of waiting forever.
         if (token.IsCancellationRequested) return;
 
         Process? helper = null;
@@ -139,8 +131,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
         try
         {
-            // Begin listening BEFORE launching the scheduled task. No pipe
-            // activity or process launch occurs in the low-level keyboard hook.
             var pendingConnection = server.WaitForConnectionAsync(startup.Token);
             var launchResult = await RunRegisteredTaskAsync(startup.Token);
             if (launchResult != 0)
@@ -171,7 +161,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
 
             var permission = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Volatile.Write(ref grant, permission);
-            ownership(true); // Main window removes fallback hook first.
+            ownership(true);
             handedOff = true;
             await permission.Task.WaitAsync(startup.Token);
             await writer.WriteLineAsync(Volatile.Read(ref state).AsMemory(), startup.Token);
@@ -183,7 +173,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             }
 
             stateWriter = WriteStatesAsync(writer, connection.Token);
-            states.Writer.TryWrite(Volatile.Read(ref state)); // Send volume readiness after every connection.
+            states.Writer.TryWrite(Volatile.Read(ref state));
             long sequence = 0;
             while (await reader.ReadLineAsync(token) is { } line)
             {
@@ -230,7 +220,7 @@ internal sealed class WindowsInputHelperBridge : IDisposable
             Volatile.Write(ref restoreHelperPid, 0);
             Volatile.Read(ref restorePending)?.Completion.TrySetResult(false);
             connection.Cancel();
-            server.Dispose(); // Helper releases its hook on disconnect before exiting.
+            server.Dispose();
             if (stateWriter is not null)
             {
                 try { await stateWriter; }
@@ -302,9 +292,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
         }
     }
 
-    // QueryFullProcessImageName and the task action can spell a path differently
-    // when a junction is present. Compare the final on-disk targets rather than
-    // silently rejecting a legitimate, protected helper.
     private static bool IsExpectedExecutable(string? actual, string expected)
     {
         if (actual is null) return false;
@@ -337,7 +324,6 @@ internal sealed class WindowsInputHelperBridge : IDisposable
     private static extern uint GetFinalPathNameByHandleW(
         SafeFileHandle handle, StringBuilder buffer, uint bufferLength, uint flags);
 
-    // Startup/connection diagnostics ONLY; no disk operations in keyboard hooks.
     private static void Log(string message)
     {
         Debug.WriteLine($"Doky input helper: {message}");

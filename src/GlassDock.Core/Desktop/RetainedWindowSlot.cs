@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Keeps one live window-like instance and rejects stale close callbacks.</summary>
 public sealed class RetainedWindowSlot<T> where T : class
 {
     public T? Current { get; private set; }

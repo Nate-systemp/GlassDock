@@ -8,7 +8,6 @@ public sealed record ApplicationIdentity(string? AppUserModelId, string? Executa
     public static string NormalizePath(string path) => path.Replace('/', '\\').TrimEnd('\\').ToUpperInvariant();
 }
 
-/// <summary>Premultiplied BGRA pixels supplied by the OS icon service, independent of UI frameworks.</summary>
 public sealed record ApplicationIcon(int Width, int Height, byte[] Pixels);
 public enum PinTargetAvailability { Unknown, Available, Unavailable }
 public sealed record PinnedApplication(ApplicationIdentity Identity, string Name, string LaunchTarget, ApplicationIcon? Icon)

@@ -16,7 +16,6 @@ using Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>One retained Home HWND, dashboard, material and search index for the dock's lifetime.</summary>
 internal sealed partial class GlassHomeWindow : Window
 {
     private static readonly FontFamily UiFont = new("Segoe UI Variable Text");
@@ -73,7 +72,6 @@ internal sealed partial class GlassHomeWindow : Window
         Title = "Doky Home";
         WindowBranding.Apply(this);
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        // Configure the desktop client before connecting the backdrop.
         host = new(hwnd) { UseDockLayeredTransparency = true };
         host.Configure();
         var presenter = (OverlappedPresenter)AppWindow.Presenter;
@@ -164,7 +162,6 @@ internal sealed partial class GlassHomeWindow : Window
         if (closed) return;
         var displayChanged = lastDisplayMode != e.Settings.DockDisplayMode;
         lastDisplayMode = e.Settings.DockDisplayMode;
-        // Recolor retained brushes/surfaces, never create another window or UI tree.
         ApplyAppearance();
         if (IsVisible) ConfigurePlacement(resolveMonitor: displayChanged);
     }

@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Exact cubic subcurves from the shared upper outline, for the existing partial rim.</summary>
 public static class DockEdgeSlice
 {
     public static DockWaveGeometry.Outline Upper(DockWaveGeometry.Outline outline, double left, double right)
@@ -10,7 +9,6 @@ public static class DockEdgeSlice
         var first = start;
         foreach (var segment in outline.Segments)
         {
-            // The upper edge ends where the right vertical side starts.
             if (segment.IsLine) break;
             if (segment.End.X > left && start.X < right)
             {

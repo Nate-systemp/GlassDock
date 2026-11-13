@@ -22,7 +22,6 @@ public sealed class EnergySaverUtilityService : IDisposable
     private async Task ExecuteAsync(bool toggle, Func<Task>? finishTransition)
     {
         lock (sync) { if (disposed || disabled || toggle && state.Busy) return; }
-        // A hover refresh may own the gate when the click arrives. Queue the click.
         if (!await gate.WaitAsync(toggle ? Timeout.Infinite : 0, lifetime.Token).ConfigureAwait(false)) return;
         using var changing = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         changing.CancelAfter(TimeSpan.FromSeconds(10));
@@ -115,6 +114,5 @@ public sealed class EnergySaverUtilityService : IDisposable
         EnergySaverNative? backend;
         lock (sync) { if (disposed) return; disposed = true; backend = native; native = null; }
         lifetime.Cancel(); backend?.Dispose();
-        // No implicit radio/power changes when the utility or Doky is removed.
     }
 }

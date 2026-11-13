@@ -2,7 +2,6 @@ namespace GlassDock.Core.Desktop;
 
 public sealed record InputSignal(bool Launcher, uint Revision, long Timestamp);
 
-/// <summary>One wakeup per gesture. Transport only: callers retarget immediately, never await animations.</summary>
 public sealed class InputSignalMailbox
 {
     private readonly object gate = new();
@@ -11,7 +10,6 @@ public sealed class InputSignalMailbox
     {
         lock (gate)
         {
-            // Bound stale transport data, without coalescing distinct recent key releases.
             while (pending.TryPeek(out var old) && signal.Timestamp - old.Timestamp > 500) pending.Dequeue();
             pending.Enqueue(signal);
             return true;

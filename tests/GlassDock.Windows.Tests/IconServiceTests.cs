@@ -54,7 +54,6 @@ public sealed class IconServiceTests(Xunit.Abstractions.ITestOutputHelper output
 
         service.Retain(["other:key"]);
 
-        // Since test:evict_cmd was evicted, a new icon should be extracted on next request
         var second = service.FromShell("test:evict_cmd", cmdPath);
         Assert.NotNull(second);
         Assert.NotSame(first, second);
@@ -102,7 +101,6 @@ public sealed class IconServiceTests(Xunit.Abstractions.ITestOutputHelper output
             Assert.True(fullAlpha > 0, $"Expected {pin.Name} to have opaque pixels, but fullAlpha was 0");
         }
 
-        // Test Visual Studio high-res extraction
         var vsPath = @"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\IDE\devenv.exe";
         if (File.Exists(vsPath))
         {
@@ -113,7 +111,6 @@ public sealed class IconServiceTests(Xunit.Abstractions.ITestOutputHelper output
             output.WriteLine($"  [VS] {vsIcon.Width}x{vsIcon.Height} extracted successfully");
         }
 
-        // Test Edge high-res extraction
         var edgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
         if (File.Exists(edgePath))
         {

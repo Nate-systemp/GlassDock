@@ -41,7 +41,6 @@ public sealed partial class SettingsWindow
         settingsHost.Configure();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(SettingsTitleBar);
-        // Native client must be configured before the retained backdrop connects.
         SystemBackdrop = settingsBackdrop;
         SettingsRoot.SizeChanged += (_, _) => UpdateSettingsBounds();
         SettingsRoot.Loaded += (_, _) =>
@@ -72,7 +71,6 @@ public sealed partial class SettingsWindow
         settingsSession.Changed += SettingsSessionChanged;
         ApplySettingsAppearance();
         ShowSettingsPage(selectedPage);
-        // User edits reuse the existing transactional save path and normalization.
         foreach (var box in new[] { IconSizeBox, MagnificationScaleBox, IconSpacingBox, BottomMarginBox,
             AutoHideDelayBox, PeekDelayBox })
             box.ValueChanged += (_, _) => SaveEditedControl();
@@ -168,7 +166,6 @@ public sealed partial class SettingsWindow
         Brush("CardBrush").Color = light ? Color.FromArgb(115,255,255,255) : Color.FromArgb(65,53,68,89);
         Brush("DividerBrush").Color = DockControlPalette.Surface(mode, light ? (byte)38 : (byte)32);
         Brush("SelectionBrush").Color = light ? Color.FromArgb(65,85,126,180) : Color.FromArgb(95,52,100,161);
-        // Settings follows its independent Light/Dark theme; the dock keeps its material.
         var (shellMode, shellAppearance) = SettingsShellAppearance.Resolve(mode, settingsSession.Appearance);
         if (mode == DockAppearanceMode.Clear) Brush("ShellBrush").Color = Color.FromArgb(145,19,27,39);
         PopupStyle.Apply(settingsGlass, settingsBackdrop, shellAppearance, shellMode);

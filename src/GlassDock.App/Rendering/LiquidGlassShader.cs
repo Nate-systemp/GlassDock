@@ -4,7 +4,6 @@ using Microsoft.Graphics.Canvas.Effects;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>The dock and settings preview use identical optical constants and shader bytecode.</summary>
 internal static class LiquidGlassShader
 {
     public static void Configure(PixelShaderEffect effect, LiquidGlassMaterial m, float scale,
@@ -21,7 +20,6 @@ internal static class LiquidGlassShader
         };
         var changes = next.ChangesFrom(previous);
         GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordShaderChanges(changes);
-        // Write exact changed values, including subpixel motion, without per-frame boxing of unchanged constants.
         if ((changes & 1) != 0) effect.Properties["Dock"] = next.Dock;
         if ((changes & 2) != 0) effect.Properties["Wave"] = next.Wave;
         if ((changes & 4) != 0) effect.Properties["Optics"] = next.Optics;

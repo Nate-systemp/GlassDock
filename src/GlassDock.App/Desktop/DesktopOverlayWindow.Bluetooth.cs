@@ -38,8 +38,8 @@ public sealed partial class DesktopOverlayWindow
     {
         var bluetooth = utilityBluetooth;
         if (bluetooth is null || closing || button.IsMorphing || button.IsToggling || bluetooth.State.Busy) return;
-        if (ReferenceEquals(bluetoothSettingsOnly, button) ||
-            bluetoothWindow is { IsDetailsOpen: true })
+        if (!GridUtilities && (ReferenceEquals(bluetoothSettingsOnly, button) ||
+            bluetoothWindow is { IsDetailsOpen: true }))
             await new GlassDock.Windows.Applications.WindowsApplicationLauncher().LaunchTargetAsync("ms-settings:bluetooth");
         else await RunUtilityToggleAsync(button, bluetooth.ToggleAsync, () =>
         {
@@ -60,9 +60,10 @@ public sealed partial class DesktopOverlayWindow
     private void ShowBluetoothDevices(UtilityButton button)
     {
         if (utilityBluetooth is null || closing) return;
+        if (GridUtilities && !PrepareQuickSettingsList(UtilityKind.Bluetooth)) return;
         root.ContextFlyout?.Hide();
         wifiWindow?.Hide(immediate: true); DismissWifiSettingsOnly();
-        if (!utilityBluetooth.State.On)
+        if (!utilityBluetooth.State.On && !GridUtilities)
         {
             if (ReferenceEquals(bluetoothSettingsOnly, button)) DismissBluetoothSettingsOnly();
             else
@@ -83,6 +84,13 @@ public sealed partial class DesktopOverlayWindow
             settingsSession.Current.UtilityTheme, "Bluetooth")
         { ScreenshotRequested = () => ScreenshotRequested?.Invoke() };
         bluetoothWindow = window;
+        if (GridUtilities)
+        {
+            window.LeftOfColumn = quickSettingsPanel?.ColumnBounds;
+            window.UseQuickSettingsMotion = true;
+            window.RelatedWindowHasForeground = () => quickSettingsWindow?.HasForeground == true;
+            window.Hiding += (_, _) => { if (!switchingQuickSettingsList && quickSettingsList == UtilityKind.Bluetooth) quickSettingsButton?.SetOpen(false); };
+        }
         window.DetailsVisibilityChanged += (_, _) => _ = button.SetDetailsOpenAsync(
             ReferenceEquals(bluetoothSettingsOnly, button) || window.IsDetailsOpen);
         window.ApplyAppearance(settingsSession.Current.DockAppearanceMode, liquidGlass.BackdropMaterial, liquidGlass.Material,
@@ -98,6 +106,7 @@ public sealed partial class DesktopOverlayWindow
         {
             if (ReferenceEquals(bluetoothWindow, window)) bluetoothWindow = null;
             UpdateUtilitySurfaces(); previews.EndContextMenu(window);
+            QuickSettingsListHidden(UtilityKind.Bluetooth);
         };
         previews.BeginContextMenu(window);
         try { window.Show(button.Glass.Bounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }

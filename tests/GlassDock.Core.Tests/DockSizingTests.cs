@@ -28,7 +28,6 @@ public sealed class DockSizingTests
         var pixels = DockSizing.AdditionalReservationPixels(geometry.ReservedHeight, dpi, 10);
         Assert.True(pixels + 10 >= geometry.ReservedHeight * dpi);
         Assert.True(pixels + 10 < geometry.ReservedHeight * dpi + 1);
-        // Top reservation is deliberately not an input to bottom reservation.
         Assert.Equal(pixels + 10, DockSizing.AdditionalReservationPixels(geometry.ReservedHeight, dpi, 0));
     }
 

@@ -2,7 +2,6 @@ using GlassDock.Core.Materials;
 
 namespace GlassDock.Core.Settings;
 
-/// <summary>A visual snapshot. No colors, shadows, layout, or interaction preferences.</summary>
 public sealed record GlassVisualProfile
 {
     public DockAppearanceMode Mode { get; init; } = DockAppearanceMode.Clear;

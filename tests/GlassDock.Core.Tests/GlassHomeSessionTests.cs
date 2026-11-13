@@ -62,7 +62,7 @@ public sealed class GlassHomeSessionTests
             Assert.Equal(GlassHomeState.Compact, home.State);
             home.Observe(new(i * 100 + 35, 0, 0, true));
             Assert.Equal(GlassHomeState.Expanded, home.State);
-            home.Hide(); // Same session exit used by Escape and shortcut toggle.
+            home.Hide();
             Assert.NotEqual(revision, home.Revision);
             home.Observe(new(9999, 0, 0, true));
             Assert.Equal(GlassHomeState.Hidden, home.State);
@@ -74,7 +74,7 @@ public sealed class GlassHomeSessionTests
     {
         var home = new GlassHomeSession();
         home.Open(null);
-        home.Observe(new(-2000, 300, 1, false)); // Baseline a button already held when sampling recovers.
+        home.Observe(new(-2000, 300, 1, false));
         Assert.Equal(GlassHomeState.Compact, home.State);
         home.Observe(new(-2005, 300, 0, true));
         Assert.Equal(GlassHomeState.Compact, home.State);

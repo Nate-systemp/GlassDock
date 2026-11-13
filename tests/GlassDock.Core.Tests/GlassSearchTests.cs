@@ -52,7 +52,7 @@ public sealed class GlassSearchTests
         foreach (var query in new[] { "a", "app", "app 0", "app 01", "", "unknown" })
         {
             GlassSearch.Find(entries, query);
-            home.Observe(new(100, 100, 0, true)); // Window grew around the stationary pointer.
+            home.Observe(new(100, 100, 0, true));
             Assert.Equal(GlassHomeState.Compact, home.State);
         }
         home.Observe(new(129, 100, 0, true)); Assert.Equal(GlassHomeState.Compact, home.State);

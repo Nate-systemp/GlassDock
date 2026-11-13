@@ -2,7 +2,6 @@ using GlassDock.Core.Materials;
 
 namespace GlassDock.App.ViewModels;
 
-/// <summary>Session-only laboratory state. No persistence or product settings.</summary>
 public sealed class GlassLabViewModel
 {
     public GlassMaterial Material { get; private set; } = GlassMaterialPresets.Create(GlassMaterialPreset.Frosted);

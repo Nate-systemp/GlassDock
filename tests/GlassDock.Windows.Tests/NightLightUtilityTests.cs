@@ -5,7 +5,6 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class NightLightUtilityTests
 {
-    // Read-only test vectors adapted from win-nightlight-lib fixtures (MIT); never used by production writes.
     private static byte[] Off() => Convert.FromHexString(
         "434201000A0201002A068995FCBE062A2B0E1343420100D00A02C614A9F6E2D3EFEAE6ED0100000000");
     private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1800000000);
@@ -30,7 +29,7 @@ public sealed class NightLightUtilityTests
         Assert.Equal(on.Modified + 52, off.Modified);
         Assert.Equal(4, Markers(offBytes));
         Assert.Equal(original, bytes);
-        Assert.Equal(bytes[..8], onBytes[..8]); // Original envelope metadata remains byte-identical.
+        Assert.Equal(bytes[..8], onBytes[..8]);
     }
 
     private static int Markers(byte[] bytes) => Enumerable.Range(0, bytes.Length - 1)
@@ -45,7 +44,6 @@ public sealed class NightLightUtilityTests
         Assert.Throws<InvalidDataException>(() => new NightLightCloudStore([.. Off(), 0]));
         var uninitialized = Convert.FromHexString("434201000A0201002A068995FCBE062A2B0E054342010000000000");
         Assert.Throws<InvalidDataException>(() => new NightLightCloudStore(uninitialized));
-        // Two STATUS fields in one payload, rather than one well-defined ON state.
         var duplicate = Convert.FromHexString(
             "434201000A0201002A068995FCBE062A2B0E174342010010001000D00A02C614A9F6E2D3EFEAE6ED0100000000");
         Assert.Throws<InvalidDataException>(() => new NightLightCloudStore(duplicate));

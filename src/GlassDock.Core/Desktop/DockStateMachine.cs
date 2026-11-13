@@ -2,7 +2,6 @@ namespace GlassDock.Core.Desktop;
 
 public enum DockState { Hidden, Idle, Hovering, Expanding, Expanded, Collapsing }
 
-/// <summary>Deterministic transitions; timing belongs to the UI animation controller.</summary>
 public sealed class DockStateMachine
 {
     public DockState State { get; private set; } = DockState.Hidden;
@@ -39,11 +38,6 @@ public sealed class DockStateMachine
         return Revision;
     }
 
-    /// <summary>
-    /// Invalidates an in-flight visual transition while preserving its current
-    /// logical state. The desktop window can hold the rendered values under a
-    /// context menu without allowing a stale completion to change state.
-    /// </summary>
     public bool HoldTransition()
     {
         if (State is not (DockState.Expanding or DockState.Collapsing))
@@ -52,7 +46,6 @@ public sealed class DockStateMachine
         return true;
     }
 
-    /// <summary>Chooses the state from which normal interaction should resume.</summary>
     public void ResumeHeldTransition(bool pointerInside)
     {
         if (State is not (DockState.Expanding or DockState.Collapsing))

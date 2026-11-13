@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Serializes UI-thread relocation, including reentrant window messages.</summary>
 public sealed class DockRelocationGuard
 {
     private bool running;

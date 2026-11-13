@@ -2,7 +2,6 @@ namespace GlassDock.Core.Applications;
 
 public enum WindowPreviewState { Hidden, Waiting, Compact, Expanding, Expanded, WindowHovered, Collapsing, Activating }
 
-/// <summary>Ordering is chosen on entry, then preserved until this preview session ends.</summary>
 public sealed class WindowPreviewSession
 {
     public WindowPreviewState State { get; private set; }
@@ -41,7 +40,6 @@ public sealed class WindowPreviewSession
         State = WindowPreviewState.Collapsing;
     }
 
-    /// <summary>Called only after the corresponding animation geometry has been drawn.</summary>
     public bool CompleteTransition(double progress)
     {
         if (State == WindowPreviewState.Expanding && progress == 1)

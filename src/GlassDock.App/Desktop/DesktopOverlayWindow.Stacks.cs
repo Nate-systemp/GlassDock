@@ -126,7 +126,6 @@ public sealed partial class DesktopOverlayWindow
         reorderTargetIndex = dragPointerTarget.Mode == DockPointerMode.Reorder ? dragPointerTarget.Index : reorderSourceIndex;
         if (stackDrag.Mode == DockDragMode.None) stackDrag.Begin();
         var target = holdStackTarget ? VisibleDockApplications[dragPointerTarget.Index].Id : null;
-        // Preview is immediate; persistence happens only on pointer release.
         stackDrag.PreviewTarget(target);
         if (target is null) ClearMergeHighlight(); else ShowMergeReady();
     }
@@ -146,8 +145,6 @@ public sealed partial class DesktopOverlayWindow
                 Margin = new(-2), IsHitTestVisible = false, Child = mergeReadyMark };
             mergeReadyMark.Foreground = DockForegroundBrush();
             mergeCue.BorderBrush = DockForegroundBrush();
-            // Button pointer-over resources intentionally suppress its template border.
-            // Keep the cue inside the tile but above the dragged source (Z=100).
             content.Children.Add(mergeCue);
             Canvas.SetZIndex(button, 110);
             SetStatus("Hold to create a stack");

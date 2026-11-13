@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 namespace GlassDock.Windows.Desktop;
 
-// Retains the existing Core Audio endpoint/COM lifetime implementation.
 internal sealed partial class SystemControlAudio
 {
     private static readonly Type? MmDeviceEnumeratorType =

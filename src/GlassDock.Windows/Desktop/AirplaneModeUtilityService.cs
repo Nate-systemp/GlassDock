@@ -44,7 +44,6 @@ public sealed class AirplaneModeUtilityService : IDisposable
     private async Task ExecuteAsync(bool toggle, Func<Task>? finishTransition)
     {
         lock (sync) { if (disposed || disabled || toggle && state.Busy) return; }
-        // A hover refresh may own the gate when the click arrives. Queue the click.
         if (!await gate.WaitAsync(toggle ? Timeout.Infinite : 0, lifetime.Token).ConfigureAwait(false)) return;
         using var changing = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         changing.CancelAfter(TimeSpan.FromSeconds(10));
@@ -108,7 +107,6 @@ public sealed class AirplaneModeUtilityService : IDisposable
         _ => $"Experimental Airplane mode unavailable: {error.Message} (0x{error.HResult:X8})"
     };
 
-    // A private COM call cannot be forcibly stopped safely. Quarantine instead of starting more workers.
     private void Disable() { disabled = true; refreshTimer?.Dispose(); refreshTimer = null; }
     private void Notify() { lock (sync) { if (disposed) return; } Changed?.Invoke(this, EventArgs.Empty); }
 

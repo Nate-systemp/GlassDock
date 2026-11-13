@@ -2,8 +2,6 @@ using System.Runtime.InteropServices;
 
 namespace GlassDock.App.Rendering;
 
-// App-lifetime, UI-thread state. A failed optional native initialization is not retried
-// for each popup. Unrelated application errors still propagate normally.
 internal sealed class OptionalComposition(bool disabled)
 {
     internal bool Disabled { get; private set; } = disabled;

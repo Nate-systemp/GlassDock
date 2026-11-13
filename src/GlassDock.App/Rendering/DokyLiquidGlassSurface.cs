@@ -18,7 +18,6 @@ using WinRT;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>One retained GPU shader and swap chain per Clear dock. No CPU pixel readback.</summary>
 internal sealed class DokyLiquidGlassSurface : IDisposable
 {
     private readonly LiquidGlassDrawingTarget? popupTarget;
@@ -33,8 +32,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     public bool PreserveDockBackdrop { get; set; }
     public FrameworkElement Output => popupTarget?.Element ?? (FrameworkElement)Panel;
     public CanvasSwapChainPanel Panel { get; } = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
-    // SwapChainPanel punches through underlying XAML even at transparent pixels.
-    // A composition drawing surface blends with the live icons outside the lens.
     public Grid LensPanel { get; } = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     private CompositionGraphicsDevice? lensGraphicsDevice;
     private CompositionDrawingSurface? lensSurface;
@@ -81,8 +78,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private long queuedAt;
     private Vector4 dock, wave;
     private float scale = 1;
-    // Stronger Clear rim bending within the existing narrow edge band.
-    // The drag lens has its own material and retains its current optics.
     private LiquidGlassMaterial material = new() { RefractionStrength = 12 };
     public LiquidGlassMaterial Material { get => material; set { if (material != value) material = value.Normalize(); } }
 
@@ -136,8 +131,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         if (disposed) return;
         if (screenshotFrozen)
         {
-            // Screenshot uses the last clean presented frame; no new captures
-            // or shader draws while the HWND is temporarily screenshot-visible.
             if (!active && !UtilitiesActive) EndScreenshotMode();
             else return;
         }
@@ -164,8 +157,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         {
             var next = DesktopCaptureSource.Locate(hwnd);
             if (next.Width <= 0 || next.Height <= 0) return;
-            // A frame pool belongs to both a monitor and its physical dimensions.
-            // DPI/window movement alone must not restart monitor capture.
             var sourceChanged = !next.SameCaptureSource(placement);
             if (failed && !sourceChanged) return;
             if (sourceChanged)
@@ -197,8 +188,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     ? "Liquid awaiting GPU capture · borderless permission granted"
                     : "Liquid awaiting GPU capture · Windows capture indicator required");
             }
-            // Utility-only capture draws into its retained drawing targets; it
-            // must not churn an unused WinUI SwapChainPanel on every radio toggle.
             if (popupTarget is null && clearActive && swapChain is null)
             {
                 swapChain = new CanvasSwapChain(device!, next.Width, next.Height, 96);
@@ -206,7 +195,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             }
             if (swapChain is not null && (swapChain.Size.Width != next.Width || swapChain.Size.Height != next.Height))
                 swapChain.ResizeBuffers(next.Width, next.Height);
-            // The swap chain is physical pixels at 96 DPI; XAML lays out in DIPs.
             var panelWidth = next.Width / scale;
             var panelHeight = next.Height / scale;
             if (Math.Abs(Panel.Width - panelWidth) > 0.01 || Math.Abs(Panel.Height - panelHeight) > 0.01)
@@ -218,8 +206,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException) { Fail(error); }
     }
-    // Called on the UI thread. Re-present only our owned clean frame,
-    // never a monitor sample that might include this window recursively.
     public bool BeginScreenshotMode()
     {
         if (screenshotFrozen) return true;
@@ -228,8 +214,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         CanvasRenderTarget? snapshot = null;
         try
         {
-            // Own a clean GPU copy: affinity changes can invalidate presentation,
-            // and pooled WGC surfaces cannot outlive the stopped frame pool.
             snapshot = new CanvasRenderTarget(device!, bitmap.SizeInPixels.Width, bitmap.SizeInPixels.Height, 96);
             using (var drawing = snapshot.CreateDrawingSession()) drawing.DrawImage(bitmap);
             shader!.Source1 = null;
@@ -238,7 +222,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             if (lensBlur is not null) lensBlur.Source = null;
             bitmap.Dispose(); bitmap = snapshot; snapshot = null;
             currentFrame?.Dispose(); currentFrame = null;
-            screenshotFrozen = true; // stop queued sampling before toggling display affinity
+            screenshotFrozen = true;
             if (!capture.PauseForScreenshot())
             {
                 screenshotFrozen = false;
@@ -280,8 +264,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         {
             desktopRecoveryQueued = false;
             if (disposed || !enabled || screenshotFrozen || inputDesktop?.IsCurrent != true) return;
-            // Secure-desktop transitions can invalidate capture without closing its item.
-            // Keep this observer alive across Fail/Stop so recovery needs no click or snip.
             try
             {
                 Stop();
@@ -313,8 +295,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         try
         {
             var pending = frozenFrame ? null : capture.TakeFrame();
-            // A queued FrameArrived notification can outlive the frame it announced.
-            // Keep the already-presented output unless geometry/content changed.
             if (pending is null && !visualChanged)
             {
                 GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordEmptyCaptureDraw();
@@ -327,14 +307,10 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     pending.Dispose();
                     if (DesktopCaptureSource.Locate(hwnd).SameCaptureSource(placement))
                         throw new InvalidOperationException("Capture frame dimensions do not match the monitor; retaining native fallback.");
-                    // Display notifications and frames can race. Release the old
-                    // pool and re-query physical bounds; never render stretched pixels.
                     Stop();
                     Update(clearActive, Output.Opacity, scale, dock, wave);
                     return;
                 }
-                // Hold at most one of the two pooled GPU frames. It can be drawn
-                // again for hover motion when the desktop itself has not changed.
                 shader.Source1 = null;
                 if (popupCrop is not null) popupCrop.Source = null;
                 if (lensBackdrop is not null) lensBackdrop.Source1 = null;
@@ -350,7 +326,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
             shader.Source1 = bitmap;
             if (popupCrop is not null)
             {
-                // Restrict blur evaluation to this popup plus its sampling/blur halo.
                 var margin = (64 + Material.BlurAmount * 3) * scale;
                 var x = Math.Max(0, placement.X - margin);
                 var y = Math.Max(0, placement.Y - margin);
@@ -404,7 +379,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         }
     }
 
-    /// <summary>Stops the live desktop capture when the dock returns to its pill.</summary>
     public void DeactivateCapture()
     {
         if (disposed) return;
@@ -417,8 +391,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         Vector4 shape, Vector2 frame, Vector4 lens)
     {
         ref var previous = ref (ReferenceEquals(effect, shader) ? ref shaderState : ref lensShaderState);
-        // Property sets cross the WinRT boundary and box vectors. Retain identical
-        // constants, but write every changed bit exactly, including subpixel motion.
         LiquidGlassShader.Configure(effect, m, scale, bounds, shape, frame, lens, ref previous);
     }
 
@@ -516,8 +488,6 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
-        // Utility panels/buttons own their targets. A stopped monitor capture
-        // hides them without disposing visuals still referenced by WinUI.
         foreach (var utility in utilities) utility.Hide();
         screenshotFrozen = false;
         ReleaseLens();
@@ -532,11 +502,10 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         popupCrop?.Dispose(); popupCrop = null;
         bitmap?.Dispose(); bitmap = null;
         currentFrame?.Dispose(); currentFrame = null;
-        // Release all effect/bitmap references to the pooled surface BEFORE its pool.
         capture?.Dispose(); capture = null;
         Panel.SwapChain = null;
         swapChain?.Dispose(); swapChain = null;
-        device = null; // Shared Win2D device is borrowed, never disposed here.
+        device = null;
     }
     public void Dispose()
     {

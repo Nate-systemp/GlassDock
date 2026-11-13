@@ -12,7 +12,6 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PlatformTarget>x64</PlatformTarget>
 
-    <!-- User-facing branding only. Assembly/executable/package identity stays GlassDock. -->
     <Product>Doky</Product>
     <AssemblyTitle>Doky</AssemblyTitle>
     <Description>Doky desktop dock</Description>
@@ -29,8 +28,6 @@
     <Content Include="ThirdPartyNotices\win-nightlight-cli.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ThirdPartyNotices\Flylet.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Rendering\Shaders\LiquidGlass.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- Ship the one-time opt-in elevated-helper registration script. NEVER
-         run it automatically on every Doky launch (that would cause UAC). -->
     <Content Include="..\..\scripts\Register-InputHelper.ps1" Link="Register-InputHelper.ps1"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\Install-InputHelper.ps1" Link="Install-InputHelper.ps1"
@@ -70,8 +67,6 @@
   </Target>
 
   <Target Name="CopyBuiltRecoveryHelper" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
-    <!-- ProjectReference builds the helper, but does not copy an executable reference.
-         Resolve its real output path so VS/CLI launches cannot use an old Recovery payload. -->
     <MSBuild Projects="../GlassDock.Watchdog/GlassDock.Watchdog.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;SelfContained">
       <Output TaskParameter="TargetOutputs" ItemName="BuiltRecoveryTarget" />
     </MSBuild>
@@ -88,8 +83,6 @@
   </Target>
 
   <Target Name="PublishInputHelper" AfterTargets="Publish">
-    <!-- The elevated task must NEVER execute out of writable Velopack current.
-         Build a separate payload for one-time copying into protected Program Files. -->
     <PropertyGroup>
       <HelperPayloadDir>$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))HelperPayload/</HelperPayloadDir>
     </PropertyGroup>
@@ -98,8 +91,6 @@
              Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(HelperPayloadDir)" />
     <Error Condition="!Exists('$(HelperPayloadDir)GlassDock.InputHelper.exe')"
            Text="The separate protected-installation helper payload is missing." />
-    <!-- Preserve legacy package probes while the real scheduled task uses the
-         complete standalone payload installed under Program Files. -->
     <ItemGroup>
       <LegacyInputHelperFiles Include="$(HelperPayloadDir)GlassDock.InputHelper.exe;$(HelperPayloadDir)GlassDock.InputHelper.dll;$(HelperPayloadDir)GlassDock.InputHelper.deps.json;$(HelperPayloadDir)GlassDock.InputHelper.runtimeconfig.json" />
     </ItemGroup>

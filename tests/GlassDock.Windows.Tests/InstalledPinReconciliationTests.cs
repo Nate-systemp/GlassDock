@@ -28,9 +28,9 @@ public sealed class InstalledPinReconciliationTests : IDisposable
         var path = Path.Combine(folder, "pins.json");
         var store = new DockPinStore(path, Monitor());
         var icons = new WindowsApplicationIconService();
-        Assert.Single(store.Apply([pin], icons)); // imported pin's evidence is persisted too
+        Assert.Single(store.Apply([pin], icons));
         File.Delete(pin.LaunchTarget); snapshot = new(true, []); Advance();
-        store = new DockPinStore(path, Monitor()); // uninstall while Doky is stopped
+        store = new DockPinStore(path, Monitor());
         var pending = Assert.Single(store.Apply([pin], icons));
         Assert.NotSame(pin.Icon, pending.Icon);
         Advance(); Assert.Empty(store.Apply([pin], icons));
@@ -154,17 +154,15 @@ public sealed class InstalledPinReconciliationTests : IDisposable
                 Assert.Equal(PinTargetAvailability.Available, pinned.Availability);
                 Assert.Contains("qmk-registration", File.ReadAllText(saved));
 
-                // Windows Settings uninstall deletes the desktop link and the
-                // executable, and removes the registered uninstaller record.
                 File.Delete(link);
                 File.Delete(application.LaunchTarget);
                 snapshot = new(true, []);
                 Advance();
-                Assert.Empty(store.Apply([], icons)); // Hidden while removal is being confirmed.
+                Assert.Empty(store.Apply([], icons));
                 Assert.Single(store.GetRecoverablePins());
                 Advance();
                 Assert.Empty(store.Apply([], icons));
-                Assert.Empty(store.GetRecoverablePins()); // Confirmed uninstall is removed from saved pins.
+                Assert.Empty(store.GetRecoverablePins());
                 Assert.Empty(new DockPinStore(saved, Monitor()).Apply([], icons));
             }
             catch (Exception error) { failure = error; }
@@ -262,21 +260,17 @@ public sealed class InstalledPinReconciliationTests : IDisposable
                 var store = new DockPinStore(saved, Monitor());
                 Assert.True(store.AddExternalTarget(link));
                 var icons = new WindowsApplicationIconService();
-                Assert.Single(store.Apply([], icons)); // Remember the verified installer association.
+                Assert.Single(store.Apply([], icons));
 
-                // The shortcut disappears, but the executable survives: never
-                // unpin merely because a shortcut was deleted or the registry changed.
                 File.Delete(link);
                 snapshot = new(true, []);
                 Advance();
                 Assert.Empty(store.Apply([], icons));
-                Assert.Single(store.GetRecoverablePins()); // Still saved; executable survives.
+                Assert.Single(store.GetRecoverablePins());
                 Advance();
                 Assert.Empty(store.Apply([], icons));
                 Assert.Single(store.GetRecoverablePins());
 
-                // Once the executable is also missing, removal is confirmed from
-                // the original installer association even though the .lnk is gone.
                 File.Delete(application.LaunchTarget);
                 Advance();
                 Assert.Empty(store.Apply([], icons));
@@ -303,7 +297,6 @@ public sealed class InstalledPinReconciliationTests : IDisposable
             try
             {
                 var application = Pin("unknown-portable-app");
-                // No known installed-product registration was ever matched.
                 var link = CreateDesktopShortcut(Path.Combine(folder, "unknown-portable-app.lnk"), application.LaunchTarget);
                 var store = new DockPinStore(Path.Combine(folder, "unknown-portable-pins.json"), Monitor());
                 Assert.True(store.AddExternalTarget(link));
@@ -389,13 +382,13 @@ public sealed class InstalledPinReconciliationTests : IDisposable
                 var layout = store.ApplyStacks(visible);
                 Assert.Single(layout);
                 Assert.Equal(keep.Identity.Key, layout[0].Id);
-                Assert.Null(layout[0].Stack); // No blank card or ghost stack.
+                Assert.Null(layout[0].Stack);
                 Assert.Single(store.GetRecoverablePins());
 
                 CreateDesktopShortcut(link, hiddenApp.LaunchTarget);
                 var restored = DockApplicationCollection.Combine(store.Apply([], icons), []);
                 Assert.Equal(2, restored.Count);
-                Assert.Single(store.ApplyStacks(restored)); // Saved stack membership survives.
+                Assert.Single(store.ApplyStacks(restored));
                 Assert.Empty(store.GetRecoverablePins());
             }
             catch (Exception error) { failure = error; }
@@ -437,9 +430,9 @@ public sealed class InstalledPinReconciliationTests : IDisposable
 
                 Assert.True(store.SetMissingPinVisible(id, true));
                 Assert.False(Assert.Single(store.GetRecoverablePins()).Hidden);
-                Assert.Single(store.Apply([], icons)); // Deliberate show restores question-mark tile.
+                Assert.Single(store.Apply([], icons));
                 var restarted = new DockPinStore(saved, Monitor());
-                Assert.Single(restarted.Apply([], icons)); // Explicit preference survives restart.
+                Assert.Single(restarted.Apply([], icons));
 
                 Assert.True(store.SetMissingPinVisible(id, false));
                 Assert.Empty(store.Apply([], icons));
@@ -448,7 +441,7 @@ public sealed class InstalledPinReconciliationTests : IDisposable
                 Assert.Empty(store.GetRecoverablePins());
                 Assert.Empty(store.Apply([], icons));
                 Assert.Empty(new DockPinStore(saved, Monitor()).Apply([], icons));
-                Assert.False(File.Exists(link)); // Never changes the user's files.
+                Assert.False(File.Exists(link));
             }
             catch (Exception error) { failure = error; }
         });

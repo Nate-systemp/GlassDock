@@ -10,24 +10,8 @@ using Windows.Storage.Streams;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>
-/// Low-memory, bounded cache of the last visible window frames.
-///
-/// Visible windows use normal DWM thumbnails. This cache exists only so a
-/// minimized window can still be painted without restoring the real HWND.
-///
-/// RAM policy:
-/// - only one Windows.Graphics.Capture session may exist at a time;
-/// - a capture session is disposed immediately after one useful frame;
-/// - retained frames preserve native pixels up to 1920x1080 BGRA;
-/// - retained CPU pixels are capped at 24 MiB;
-/// - minimized frames are preferred during eviction because they cannot be
-///   recaptured until their real window is restored.
-/// </summary>
 public sealed class WindowFrameCache : IDisposable
 {
-    /// <summary>Read-only last-visible BGRA pixels, shared with preview cards.
-    /// Reading this view never starts a capture or restores a source window.</summary>
     public readonly record struct CachedWindowFrame(
         int Width, int Height, ReadOnlyMemory<byte> Pixels, DateTimeOffset CapturedAt);
 
@@ -77,14 +61,8 @@ public sealed class WindowFrameCache : IDisposable
     private long sessionsStarted;
     public long SessionsStarted => Interlocked.Read(ref sessionsStarted);
 
-    // Keeping this at one is deliberate. A WGC frame pool is full source
-    // resolution, so limiting concurrent pools saves much more RAM/GPU memory
-    // than merely lowering the number of cached byte arrays.
     private const int MaxConcurrentCaptures = 1;
 
-    // Retained preview frames are intentionally much smaller than a desktop
-    // source. Keep Full HD sources sharp when shown as desktop mirrors.
-    // The total retained budget remains 24 MiB; larger frames evict sooner.
     private const int MaxRetainedWidth = 1920;
     private const int MaxRetainedHeight = 1080;
 
@@ -141,13 +119,6 @@ public sealed class WindowFrameCache : IDisposable
             detail);
     }
 
-    /// <summary>
-    /// Updates the set of windows that may need a minimized fallback.
-    ///
-    /// This does NOT keep a capture session alive for every window. Visible
-    /// windows are primed once; minimized windows only retain
-    /// their last already-captured frame.
-    /// </summary>
     public void Track(
         IEnumerable<ApplicationWindow> windows)
     {
@@ -270,8 +241,6 @@ public sealed class WindowFrameCache : IDisposable
     private static void RememberVisibleGeometry(Entry entry)
     {
         var window = (nint)entry.Window.Handle;
-        // rcNormalPosition loses snapped/maximized/full-screen geometry on minimize.
-        // Retain the actual displayed physical bounds during existing reconciliation.
         var previousDpi = NativeMethods.SetThreadDpiAwarenessContext(-4);
         try
         {
@@ -288,7 +257,6 @@ public sealed class WindowFrameCache : IDisposable
         }
     }
 
-    /// <summary>Retry a missing frame on preview demand, only while the real window is visible.</summary>
     public void Request(IEnumerable<ApplicationWindow> windows)
     {
         lock (gate)
@@ -315,8 +283,6 @@ public sealed class WindowFrameCache : IDisposable
         var handle =
             (nint)window.Handle;
 
-        // A minimized source cannot be refreshed safely. Its last cached frame
-        // is exactly what we are preserving.
         if (NativeMethods.IsIconic(handle) ||
             !WindowsApplicationService.IsEligible(
                 window))
@@ -454,7 +420,6 @@ public sealed class WindowFrameCache : IDisposable
 
         if (job is null)
         {
-            // A failed source must not permanently block the rest of the queue.
             PumpCaptures();
             return;
         }
@@ -489,8 +454,6 @@ public sealed class WindowFrameCache : IDisposable
         bool accepted = false;
         ApplicationWindow window;
 
-        // Dispose the full-resolution WGC resources before we pump the next
-        // source. That keeps peak native/GPU memory bounded to one pool.
         job.Dispose();
 
         lock (gate)
@@ -605,8 +568,6 @@ public sealed class WindowFrameCache : IDisposable
             return;
         }
 
-        // First drop visible/inactive frames: those can be cheaply recaptured
-        // later. Minimized frames are kept as long as the budget allows.
         var victims =
             entries.Values
                 .Where(
@@ -660,8 +621,6 @@ public sealed class WindowFrameCache : IDisposable
 
             frames--;
 
-            // Eviction must not cause background recapture churn. Only an
-            // explicit preview request may recapture this still-visible source.
             victim.Queued = false;
         }
     }
@@ -753,7 +712,7 @@ public sealed class WindowFrameCache : IDisposable
                         device,
                         DirectXPixelFormat
                             .B8G8R8A8UIntNormalized,
-                        1, // One-shot capture consumes one frame; a second full-size GPU buffer is unnecessary.
+                        1,
                         item.Size);
 
             GraphicsCaptureSession? created =
@@ -1000,9 +959,6 @@ public sealed class WindowFrameCache : IDisposable
                 var hasColor =
                     false;
 
-                // Reject empty WGC surfaces. A genuinely all-black window
-                // conservatively keeps its previous cached frame, matching
-                // the existing GlassDock behavior.
                 for (
                     var i = 0;
                     i < pixels.Length;

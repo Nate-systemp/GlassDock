@@ -16,7 +16,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Real shader/effect graph over a retained sample scene. Never creates a desktop capture.</summary>
 internal sealed class GlassVisualPreview : Grid, IDisposable
 {
     private readonly CanvasControl canvas = new() { IsHitTestVisible = false };

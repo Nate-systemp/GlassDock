@@ -1,6 +1,5 @@
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Retains discovered WLAN entries and the single network exposing connection controls.</summary>
 public sealed class WifiNetworkSelection
 {
     public IReadOnlyList<WifiNetwork> Networks { get; private set; } = Array.Empty<WifiNetwork>();
@@ -11,7 +10,6 @@ public sealed class WifiNetworkSelection
         var discovered = available.Where(n => n.Ssid.Length > 0).GroupBy(n => n.Key)
             .Select(g => g.OrderByDescending(n => n.Connected).ThenByDescending(n => n.Signal).First())
             .OrderByDescending(n => n.Connected).ThenByDescending(n => n.Signal).ToArray();
-        // A background scan must not replace the selected form or its return ordering with a stronger fourth network.
         var retained = SelectedKey is not null && discovered.Any(n => n.Key == SelectedKey)
             ? Networks.Select(old => discovered.FirstOrDefault(n => n.Key == old.Key)).OfType<WifiNetwork>().ToArray()
             : Array.Empty<WifiNetwork>();

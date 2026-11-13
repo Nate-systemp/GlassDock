@@ -109,7 +109,6 @@ struct ReentrancyGuard {
     ReentrancyGuard() noexcept : previous(inHook) { inHook = true; }
     ~ReentrancyGuard() { inHook = previous; }
 };
-// Hook decision shape follows the inspected MIT Windhawk mod; see THIRD_PARTY_NOTICES.md.
 inline BOOL WINAPI ShowHook(HWND window, int command) noexcept {
     if (!originalShow) return FALSE;
     if (inHook) { ++reentrantPassed; return originalShow(window, command); }
@@ -120,7 +119,7 @@ inline BOOL WINAPI ShowHook(HWND window, int command) noexcept {
     if (reveal && MaySuppress(window)) {
         ++showBlocked;
         SetLastError(savedError);
-        return FALSE; // ShowWindow returns previous visibility, not a success HRESULT.
+        return FALSE;
     }
     SetLastError(savedError);
     return originalShow(window, command);
@@ -137,4 +136,4 @@ inline BOOL WINAPI PositionHook(HWND window, HWND after, int x, int y, int width
     SetLastError(savedError);
     return originalPosition(window, after, x, y, width, height, flags);
 }
-} // namespace osd_poc
+}

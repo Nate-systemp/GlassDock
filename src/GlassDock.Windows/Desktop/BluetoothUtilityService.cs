@@ -291,7 +291,6 @@ public sealed class BluetoothUtilityService : IDisposable
             }
             return audio.Value ? null : ConnectionFailed;
         }
-        // Classic HID/profile drivers own reconnection; SDP or a pairing request is not a connection.
         lock (sync)
             if (!entry.LowEnergy || store.Find(id)?.Kind is BluetoothDeviceKind.Headphones or BluetoothDeviceKind.Headset or BluetoothDeviceKind.Speaker)
                 return ConnectionFailed;
@@ -376,7 +375,6 @@ public sealed class BluetoothUtilityService : IDisposable
             if (!connections.ContainsKey(id)) return "Disconnection failed";
             ReleaseConnection(id);
         }
-        // Windows may retain another application's connection after our GATT session is released.
         await Task.Delay(TimeSpan.FromSeconds(2), cancel).ConfigureAwait(false);
         var latest = await DeviceInformation.CreateFromIdAsync(id, Properties, DeviceInformationKind.AssociationEndpoint).AsTask(cancel).ConfigureAwait(false);
         lock (sync)

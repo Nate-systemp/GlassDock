@@ -11,8 +11,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>GPU sampler of the existing dock artwork, indicators and badge labels.
-/// Uploads native icon pixels once per gesture; moving icons only change draw coordinates.</summary>
 internal sealed class DockDragLensScene : IDisposable
 {
     private sealed class Artwork(CanvasBitmap? bitmap, FrameworkElement element, Border tile)
@@ -94,8 +92,6 @@ internal sealed class DockDragLensScene : IDisposable
             var dx = translation?.X ?? 0; var dy = translation?.Y ?? 0;
             foreach (var art in item.Art)
             {
-                // Keep each card immediately behind its own artwork, in the
-                // same back-to-front order as XAML (not all cards, then icons).
                 if (art.Tile is { Visibility: Visibility.Visible, Background: SolidColorBrush tileBrush } tile)
                 {
                     var card = art.TileBounds; card.X += dx; card.Y += dy;

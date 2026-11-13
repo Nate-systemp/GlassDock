@@ -22,7 +22,7 @@ public sealed class ManualUpdateServiceTests
         var manager = new FakeManager();
         var service = new ManualUpdateService(manager);
         Assert.Equal("0.1.0", service.CurrentVersion);
-        Assert.Equal(0, manager.Checks); // Constructing Settings never checks the network.
+        Assert.Equal(0, manager.Checks);
         await service.CheckAsync(default);
         Assert.Equal("0.1.1", service.AvailableVersion);
         var progress = 0;

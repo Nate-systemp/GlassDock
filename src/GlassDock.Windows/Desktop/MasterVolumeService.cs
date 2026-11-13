@@ -50,7 +50,6 @@ public sealed class MasterVolumeService : IDisposable
         try { return work.TryAdd(action); } catch (InvalidOperationException) { return false; }
     }
 
-    // Called by the input hook: no COM, UI work or waiting on the hook thread.
     public bool TryHandleVolumeKey(uint key)
     {
         var current = State;
@@ -97,6 +96,6 @@ public sealed class MasterVolumeService : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-        work.CompleteAdding(); // The MTA worker releases/unregisters its own COM objects.
+        work.CompleteAdding();
     }
 }

@@ -5,7 +5,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>Bounded local metadata log; never writes captured pixels or window titles.</summary>
 internal sealed class PreviewDiagnostics
 {
     private readonly object gate = new();

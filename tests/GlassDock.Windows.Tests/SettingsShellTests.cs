@@ -42,7 +42,6 @@ public sealed class SettingsShellTests
     [Fact]
     public void WinUI_lifetime_uses_the_shared_session_and_confirms_resets()
     {
-        // WinUI is not loaded by this test project; only the UI-only wiring needs a source check.
         var shell = File.ReadAllText(Path.Combine(Root(), "src/GlassDock.App/Desktop/SettingsWindow.Shell.cs"));
         var code = File.ReadAllText(Path.Combine(Root(), "src/GlassDock.App/Desktop/SettingsWindow.xaml.cs"));
         Assert.Contains("settingsSession.Changed += SettingsSessionChanged", shell);

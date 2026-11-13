@@ -4,8 +4,6 @@ namespace GlassDock.App.Rendering;
 
 internal readonly record struct PopupCompositionFrame(Matrix4x4 Transform, float Opacity);
 
-// Two API projections own different compositors. Both consume the exact same
-// precomputed samples; interpolation runs entirely on the composition thread.
 internal sealed class PopupCompositionTrack : IDisposable
 {
     private readonly bool animateOpacity;
@@ -62,8 +60,6 @@ internal sealed class PopupCompositionTrack : IDisposable
         matrix.Dispose(); opacity.Dispose(); a.Dispose(); b.Dispose(); linear.Dispose(); values.Dispose();
     }
 }
-// Two API projections own different compositors. Both consume the exact same
-// precomputed samples; interpolation runs entirely on the composition thread.
 internal sealed class BackdropCompositionTrack : IDisposable
 {
     private readonly bool animateOpacity;

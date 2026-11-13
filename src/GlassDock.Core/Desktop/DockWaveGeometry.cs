@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Continuous DIP-space outline shared by glass, rim and native input.</summary>
 public static class DockWaveGeometry
 {
     public readonly record struct Point(double X, double Y);
@@ -26,8 +25,6 @@ public static class DockWaveGeometry
         {
             var u = (x - center) / halfWidth;
             if (Math.Abs(u) >= 1) return (top, 0);
-            // Compact C2 profile: height, slope and curvature meet the flat edge
-            // continuously. No edge-merge threshold or pixel snapping.
             var q = 1 - u * u;
             return (top - amplitude * q * q * q, 6 * amplitude * u * q * q / halfWidth);
         }
@@ -35,7 +32,6 @@ public static class DockWaveGeometry
         var start = new Point(left, top + radius);
         segments.Add(new(new(left, top + radius - tangent),
             new(startX - tangent, first.Y - first.Slope * tangent), new(startX, first.Y)));
-        // Only subdivide the wave footprint, not the long straight dock edges.
         var knots = new SortedSet<double> { startX, endX };
         for (var i = -4; i <= 4; i++)
             knots.Add(Math.Clamp(center + halfWidth * i / 4, startX, endX));

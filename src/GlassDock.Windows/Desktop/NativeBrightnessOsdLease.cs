@@ -5,7 +5,6 @@ using System.Security.Principal;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>UI-heartbeat lease for the separately opted-in native brightness bridge.</summary>
 public sealed class NativeBrightnessOsdLease : IDisposable
 {
     private nint mapping, view;
@@ -31,7 +30,7 @@ public sealed class NativeBrightnessOsdLease : IDisposable
             var security = new SecurityAttributes { Size = Marshal.SizeOf<SecurityAttributes>(), Descriptor = descriptor };
             mapping = CreateFileMappingW(-1, ref security, 4, 0, 128, $"Local\\Doky.BrightnessOsd.v1.{session}");
             var error = Marshal.GetLastWin32Error();
-            if (mapping == 0 || error == 183) throw new Win32Exception(error); // Never adopt another writer's mapping.
+            if (mapping == 0 || error == 183) throw new Win32Exception(error);
             view = MapViewOfFile(mapping, 6, 0, 0, 128);
             if (view == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             Marshal.WriteInt64(view, 0, 1);
@@ -54,12 +53,9 @@ public sealed class NativeBrightnessOsdLease : IDisposable
         finally { if (descriptor != 0) LocalFree(descriptor); }
     }
 
-    // Called only from the owning UI thread. A frozen UI expires within 3 seconds.
     public bool Pulse(bool replacementReady)
     {
         if (view == 0) return false;
-        // Identity is immutable after initialization. Aligned heartbeat writes
-        // never create a transient seqlock gap on the native first-show path.
         if (replacementReady)
         {
             Marshal.WriteInt64(view, 32, Environment.TickCount64 + 3000);

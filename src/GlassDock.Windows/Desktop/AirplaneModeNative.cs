@@ -4,7 +4,6 @@ namespace GlassDock.Windows.Desktop;
 
 internal sealed record AirplaneModeResult(bool? On, Exception? Error = null);
 
-// Private ABI, verified against RadioMan and SleepToAirPlane; never enumerate/set individual radios.
 internal static class AirplaneModeNative
 {
     private static readonly Guid ClassId = new("581333f6-28db-41be-bc7a-ff201f12f3f6");
@@ -20,7 +19,7 @@ internal static class AirplaneModeNative
 
     internal static AirplaneModeResult Run(bool toggle, CancellationToken cancel)
     {
-        Marshal.ThrowExceptionForHR(CoInitializeEx(0, 2)); // Dedicated STA; release on this same thread.
+        Marshal.ThrowExceptionForHR(CoInitializeEx(0, 2));
         IRadioManager? manager = null;
         bool? actual = null;
         try
@@ -40,7 +39,6 @@ internal static class AirplaneModeNative
                     cancel.ThrowIfCancellationRequested();
                     actual = Read(manager);
                     if (actual == desired) break;
-                    // Observe asynchronous Windows state changes, bounded by the operation token.
                     if (cancel.WaitHandle.WaitOne(100)) cancel.ThrowIfCancellationRequested();
                 }
             }
@@ -48,7 +46,6 @@ internal static class AirplaneModeNative
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            // A failed setter can still have changed Windows. Recover from the getter, never the request.
             actual = null;
             if (manager is not null && !cancel.IsCancellationRequested)
             {

@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>Retained icon presentation derived from the dock's animated geometry, with no clock of its own.</summary>
 internal sealed class DockIconTransition : IDisposable
 {
     private readonly Panel icons;

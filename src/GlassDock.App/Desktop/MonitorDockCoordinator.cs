@@ -6,10 +6,6 @@ using Microsoft.UI.Dispatching;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>
-/// Owns the set of monitor-specific dock windows while keeping process-wide
-/// discovery, badge, keyboard and taskbar services singular.
-/// </summary>
 internal sealed class MonitorDockCoordinator : IDisposable
 {
     private readonly GlassDockSettingsSession settingsSession;
@@ -40,6 +36,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private long lastBrightnessHudSignal;
 
     public DesktopOverlayWindow PrimaryWindow { get; }
+    private bool QuickSettingsOpen => secondaryDocks.Values.Prepend(PrimaryWindow).Any(window => window.IsQuickSettingsOpen);
 
     public MonitorDockCoordinator(
         GlassDockSettingsSession settingsSession,
@@ -94,7 +91,6 @@ internal sealed class MonitorDockCoordinator : IDisposable
         PrimaryWindow.KeyboardService.SnippingCanceled += SnippingCanceled;
         PrimaryWindow.KeyboardService.ClipboardChanged += ClipboardChanged;
         screenshotTimer = PrimaryWindow.DispatcherQueue.CreateTimer();
-        // Fallback when Snipping Tool is canceled and never updates clipboard.
         screenshotTimer.Interval = TimeSpan.FromSeconds(45);
         screenshotTimer.IsRepeating = false;
         screenshotTimer.Tick += (_, _) => EndScreenshotCapture();
@@ -145,6 +141,17 @@ internal sealed class MonitorDockCoordinator : IDisposable
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
         };
         window.SoundRequested += (_, _) => ShowVolume(window, explicitOpen: true);
+        window.ReadQuickSettingsBrightness = () => UtilityHudValue.Brightness(BrightnessFor(window),
+            BrightnessFor(window) is { } display && runtime.Brightness.IsPending(display.Id));
+        window.WriteQuickSettingsBrightness = level =>
+        {
+            if (BrightnessFor(window) is { Available: true } display) runtime.Brightness.SetBrightness(display.Id, level * 100);
+        };
+        window.QuickSettingsVisibilityChanged += (_, _) =>
+        {
+            if (!window.IsQuickSettingsOpen) return;
+            volumeHud?.Hide(true); brightnessHud?.Hide(true);
+        };
         window.BrightnessRequested += (_, _) => ShowBrightness(window, explicitOpen: true);
         window.BrightnessMonitorsRequested += (_, _) =>
         {
@@ -185,7 +192,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private bool ShowVolume(DesktopOverlayWindow source, bool explicitOpen)
     {
-        if (shuttingDown || disposed || screenshotActive || !runtime.Volume.State.Available) return false;
+        if (shuttingDown || disposed || screenshotActive || QuickSettingsOpen || !runtime.Volume.State.Available) return false;
         if (!explicitOpen && brightnessHud?.IsInteracting == true) return false;
         brightnessHud?.Hide(true);
         volumeHud ??= new(UtilityKind.Volume, () => UtilityHudValue.Volume(runtime.Volume.State), runtime.Volume.SetVolume);
@@ -223,8 +230,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         var display = runtime.Brightness.Displays.FirstOrDefault(d => d.Available && d.Backend == "WMI");
         var ready = !disposed && !shuttingDown && !safeMode && !inspection && !screenshotActive &&
             display is not null && volumeHud?.IsInteracting != true;
-        if (!nativeBrightnessOsd.Pulse(ready) || !ready || display is null || Environment.TickCount64 - lastBrightnessHudSignal < 100) return;
-        // Show unchanged 0/100% key requests too, without duplicating the WMI update's entrance.
+        if (!nativeBrightnessOsd.Pulse(ready) || !ready || QuickSettingsOpen || display is null || Environment.TickCount64 - lastBrightnessHudSignal < 100) return;
         lastBrightnessHudSignal = Environment.TickCount64;
         var source = secondaryDocks.Values.Prepend(PrimaryWindow).FirstOrDefault(d => d.SoundMonitor == display.Monitor) ?? PrimaryWindow;
         ShowBrightness(source, explicitOpen: false, display.Id);
@@ -232,7 +238,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private bool ShowBrightness(DesktopOverlayWindow source, bool explicitOpen, string? changedDisplay = null)
     {
-        if (shuttingDown || disposed || screenshotActive) return false;
+        if (shuttingDown || disposed || screenshotActive || QuickSettingsOpen) return false;
         var display = changedDisplay is null ? BrightnessFor(source) : runtime.Brightness.Displays.FirstOrDefault(d => d.Id == changedDisplay);
         if (display?.Available != true || !explicitOpen && volumeHud?.IsInteracting == true) return false;
         if (!explicitOpen && brightnessHud?.IsInteracting == true && brightnessTarget != display.Id) return false;
@@ -261,7 +267,6 @@ internal sealed class MonitorDockCoordinator : IDisposable
         if (screenshotActive) return;
         volumeHud?.BeginScreenshot();
         brightnessHud?.BeginScreenshot();
-        // Utilities share this capture even when the main dock is Frosted/Acrylic.
         PrimaryWindow.BeginSnippingCapture();
         foreach (var secondary in secondaryDocks.Values)
             secondary.BeginSnippingCapture();
@@ -274,8 +279,6 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private void ClipboardChanged(object? sender, EventArgs e)
     {
-        // A Snipping Tool capture normally updates the clipboard. Do not
-        // examine the clipboard contents or retain any user image data.
         if (screenshotActive) EndScreenshotCapture();
     }
 
@@ -338,8 +341,6 @@ internal sealed class MonitorDockCoordinator : IDisposable
             }
             catch
             {
-                // A display topology transition can temporarily fail while Windows is
-                // rebuilding monitor handles. Keep the current docks and retry next tick.
                 return;
             }
 

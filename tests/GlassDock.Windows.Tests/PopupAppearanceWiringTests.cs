@@ -2,8 +2,6 @@ using Xunit;
 
 namespace GlassDock.Windows.Tests;
 
-/// <summary>Guards the popup theme path from silently reverting to the old,
-/// separate Material-only setting when appearance modes are changed.</summary>
 public sealed class PopupAppearanceWiringTests
 {
     [Fact]
@@ -20,7 +18,6 @@ public sealed class PopupAppearanceWiringTests
         var backdrop = File.ReadAllText(Path.Combine(directory.FullName, "src",
             "GlassDock.App", "Rendering", "DesktopGlassBackdrop.cs"));
 
-        // The solid dock and popup surfaces share one palette.
         var palette = File.ReadAllText(Path.Combine(directory.FullName, "src",
             "GlassDock.App", "Desktop", "DockControlPalette.cs"));
         Assert.Contains("DockControlPalette.SolidSurface(mode)", theme, StringComparison.Ordinal);

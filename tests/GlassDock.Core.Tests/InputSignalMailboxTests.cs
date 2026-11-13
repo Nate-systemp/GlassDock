@@ -84,7 +84,7 @@ public sealed class InputSignalMailboxTests
     {
         var gesture = new WindowsKeyGesture();
         gesture.Process(0x5B, true);
-        gesture.Process(0x45, true); // Win+E disqualifies the gesture.
+        gesture.Process(0x45, true);
         gesture.Reset();
 
         gesture.Process(0x5B, true);
@@ -98,7 +98,7 @@ public sealed class InputSignalMailboxTests
         var gate = new InputLifecycleRecoveryGate();
         gate.MarkBoundary();
         Assert.True(gate.RequestRecovery());
-        Assert.False(gate.RequestRecovery()); // paired resume notification
+        Assert.False(gate.RequestRecovery());
 
         gate.MarkBoundary();
         Assert.True(gate.RequestRecovery());
@@ -108,9 +108,9 @@ public sealed class InputSignalMailboxTests
     public void Lock_unlock_and_display_wake_share_the_same_recovery_boundary()
     {
         var gate = new InputLifecycleRecoveryGate();
-        gate.MarkBoundary(); // lock or display off
-        Assert.True(gate.RequestRecovery()); // unlock or display on
-        Assert.False(gate.RequestRecovery()); // second resume broadcast
+        gate.MarkBoundary();
+        Assert.True(gate.RequestRecovery());
+        Assert.False(gate.RequestRecovery());
     }
 
     [Fact]

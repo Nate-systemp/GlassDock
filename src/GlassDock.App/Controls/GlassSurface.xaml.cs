@@ -11,7 +11,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Controls;
 
-/// <summary>A reusable UI surface; no window or shell behavior is owned here.</summary>
 public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserControl
 {
     private readonly GlassCompositionBrush brush = new();
@@ -64,8 +63,6 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         }
         if (UsePlainSurface)
         {
-            // The solid SystemBackdrop is below XAML. A filled XAML shadow
-            // mask would darken its interior; the plain dock needs no overlay.
             MaterialShape.Fill = new SolidColorBrush(Colors.Transparent);
             ApplyPlain(plainAppearance, plainOpacity, plainCornerRadius);
             return;
@@ -75,7 +72,6 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         else brush.Connect(compositor);
         shadow = compositor.CreateDropShadow();
         shadow.Color = Colors.Black;
-        // Independent opaque geometry avoids redirecting a backdrop-sampling XAML shape.
         shadowGeometry = compositor.CreateRoundedRectangleGeometry();
         maskShape = compositor.CreateSpriteShape(shadowGeometry);
         maskFill = compositor.CreateColorBrush(Colors.White);
@@ -102,7 +98,6 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         Rim.CornerRadius = new CornerRadius(material.CornerRadius);
         Rim.BorderThickness = new Thickness(material.BorderThickness);
         Rim.Opacity = material.BorderOpacity;
-        // A restrained top reflection and cool lower edge: lighting, not pixel displacement.
         LightingShape.Fill = new LinearGradientBrush
         {
             StartPoint = new global::Windows.Foundation.Point(0, 0),
@@ -123,10 +118,6 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         ResizeShadow();
     }
 
-    /// <summary>
-    /// Configures the main dock's plain surface and layout. Popup surfaces continue to use
-    /// <see cref="Apply(GlassMaterial, bool)"/> and the glass graph.
-    /// </summary>
     public void ApplyPlain(
         DockAppearanceMode appearance,
         double opacity = 1,

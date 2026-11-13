@@ -107,8 +107,6 @@ public sealed partial class SettingsWindow : Window
 
     private void ConfigureNumberFormatting()
     {
-        // Format text only: NumberBox.Value and persisted doubles retain precision.
-        // A rounder is needed because FractionDigits alone is a minimum, not a cap.
         SetNumberFormat(IconSizeBox, 0);
         SetNumberFormat(IconSpacingBox, 0);
         SetNumberFormat(BottomMarginBox, 0);

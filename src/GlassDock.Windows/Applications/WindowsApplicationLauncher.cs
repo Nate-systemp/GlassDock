@@ -56,7 +56,6 @@ public sealed class WindowsApplicationLauncher
             ? application.Identity.Arguments : null, owner: owner);
     }
 
-    // Cheap metadata-only admission check; shortcut COM resolution happens only on drop.
     public static bool CanOpenWith(DockApplication application)
     {
         var target = Target(application);
@@ -85,7 +84,6 @@ public sealed class WindowsApplicationLauncher
             arguments = link.Arguments;
             directory = string.IsNullOrWhiteSpace(link.WorkingDirectory) ? null : link.WorkingDirectory;
         }
-        // Never ShellExecute a document, URL, AppsFolder item or unresolved shortcut as the target.
         if (!IsLaunchableExecutable(target)) return null;
         var files = string.Join(" ", existing.Select(QuoteArgument));
         return new(target, string.IsNullOrWhiteSpace(arguments) ? files : arguments + " " + files, directory);
@@ -169,16 +167,13 @@ public sealed class WindowsApplicationLauncher
     public bool LaunchTarget(string? target, string? arguments = null, string? verb = null, string? workingDirectory = null, nint owner = 0)
     {
         if (string.IsNullOrWhiteSpace(target)) return false;
-        // Hand off this user-initiated launch before Shell can request elevation.
         if (owner != 0) ApplicationNative.SetForegroundWindow(owner);
         var info = new ApplicationNative.ShellExecuteInfo
         {
-            // Complete the owned launch before its short-lived STA can exit.
             Size = (uint)Marshal.SizeOf<ApplicationNative.ShellExecuteInfo>(), Mask = 0x400 | (owner != 0 ? 0x100u : 0u),
             Window = owner,
             Verb = verb, File = target, Parameters = arguments, Directory = workingDirectory, Show = 1
         };
-        // Preserve the exact shortcut or AppsFolder item, including its launch arguments.
         return ApplicationNative.ShellExecuteEx(ref info);
     }
 

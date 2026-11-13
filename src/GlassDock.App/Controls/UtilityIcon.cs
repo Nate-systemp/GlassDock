@@ -47,7 +47,6 @@ internal sealed class UtilityIcon : Grid
     }
     private void SizeSource(SvgImageSource source)
     {
-        // SVG pixels follow the arranged DIPs and monitor DPI, including the icon's hover scale.
         var pixels = Math.Ceiling(Math.Max(1, ActualWidth > 0 ? ActualWidth : double.IsFinite(Width) ? Width : 28)
             * (XamlRoot?.RasterizationScale ?? 1) * 1.03);
         if (source.RasterizePixelWidth == pixels && source.RasterizePixelHeight == pixels) return;
@@ -86,7 +85,6 @@ internal sealed class UtilityIcon : Grid
                     previousImage = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
                     Children.Insert(0, previousImage);
                 }
-                // Keep the old color opaque underneath so recoloring never fades the glyph away.
                 previousImage.Source = oldSource; previousImage.Visibility = Visibility.Visible;
                 image.Opacity = 0;
                 var animation = new DoubleAnimation { From = 0, To = 1, Duration = new Duration(duration),

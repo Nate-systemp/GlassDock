@@ -87,7 +87,7 @@ public sealed class WindowsApplicationService : IApplicationService
                 if (!ApplicationNative.IsWindowVisible(window))
                     return;
                 var style = ApplicationNative.GetWindowLongPtr(window, -16).ToInt64();
-                if ((style & 0x40000000L) != 0) // WS_CHILD
+                if ((style & 0x40000000L) != 0)
                     return;
             }
             RequestRefresh();
@@ -100,10 +100,9 @@ public sealed class WindowsApplicationService : IApplicationService
     public void Start()
     {
         if (worker is not null || stopping) return;
-        // Register on the caller's UI thread, which already pumps messages.
         foreach (var (first, last) in new (uint, uint)[] { (3, 3), (0x0020, 0x0020), (0x8000, 0x8003), (0x800C, 0x800C), (0x8017, 0x8018) })
         {
-            var hook = NativeMethods.SetWinEventHook(first, last, 0, callback, 0, 0, 2); // OUTOFCONTEXT | SKIPOWNPROCESS
+            var hook = NativeMethods.SetWinEventHook(first, last, 0, callback, 0, 0, 2);
             if (hook != 0) hooks.Add(hook);
         }
         worker = new Thread(Reconcile) { IsBackground = true, Name = "GlassDock application discovery" };
@@ -130,8 +129,6 @@ public sealed class WindowsApplicationService : IApplicationService
             {
                 try
                 {
-                    // Pin order has no supported notification API. Reconcile periodically,
-                    // and immediately after GlassDock changes pin/order preferences.
                     var revision = Volatile.Read(ref pinRevision);
                     if (revision != lastPinRevision ||
                         DateTime.UtcNow - lastPins > TimeSpan.FromSeconds(3))
@@ -151,8 +148,6 @@ public sealed class WindowsApplicationService : IApplicationService
                     }
                     var activationRequests = pendingActivations.ToArray();
                     var windows = ReadWindows(icons);
-                    // Click-time discovery stays on this worker's apartment too.
-                    // Keep each identity pending through processing to coalesce rapid clicks.
                     foreach (var request in activationRequests)
                     {
                         if (stopping) break;
@@ -175,12 +170,10 @@ public sealed class WindowsApplicationService : IApplicationService
                 }
                 catch (Exception error) when (error is COMException or Win32Exception or InvalidOperationException)
                 {
-                    // A disappearing window should not take down the dock or its recovery heartbeat.
                     Debug.WriteLine($"Application reconciliation deferred: {error.Message}");
                 }
                 refresh.WaitOne(TimeSpan.FromSeconds(3));
-                if (!stopping) Thread.Sleep(150); // Coalesce show/name/foreground bursts.
-                // Do not erase a switch/close signal received during coalescing.
+                if (!stopping) Thread.Sleep(150);
             }
         }
         finally { refresh.Dispose(); }
@@ -304,15 +297,10 @@ public sealed class WindowsApplicationService : IApplicationService
                                 appId = text.ToString();
                         }
                     }
-                    // Explorer folder windows often omit their Shell-assigned taskbar identity.
                     if (string.IsNullOrWhiteSpace(appId) && classNameText == "CabinetWClass" &&
                         Path.GetFileName(path).Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
                         appId = "Microsoft.Windows.Explorer";
 
-                    // Electron/Squirrel and other Win32 applications can deliberately expose no
-                    // process/window AUMID even though their Start Menu shortcut has the canonical
-                    // identity used by Windows Notification Center. Resolve that identity from Shell
-                    // metadata so running windows, pins and notification badges share one key.
                     if (string.IsNullOrWhiteSpace(appId))
                         appId = identityResolver.Resolve(path);
 
@@ -362,23 +350,19 @@ public sealed class WindowsApplicationService : IApplicationService
         if (stopping || worker is null) return false;
         pendingActivations.TryAdd(application.Id, (application, owner));
         RequestRefresh();
-        return true; // Accepted for fresh enumeration; never block the UI on Shell COM.
+        return true;
     }
 
     private bool LaunchOrActivateFromSnapshot(DockApplication application, IReadOnlyList<ApplicationWindow> windows, nint owner)
     {
-        // Recheck before launching: an app can open between reconciliation and the user's click.
         var current = DockApplicationCollection.Combine(Volatile.Read(ref currentPins), windows)
             .FirstOrDefault(item => item.Id == application.Id);
         if (current is not null) application = current;
-        // A pin removed since the snapshot must not be launched as a stale pinned item.
         else if (application.IsPinned) { RequestRefresh(); return false; }
         var target = DockWindowClick.SelectWindow(application.Windows, IsEligible,
             window => ApplicationNative.GetForegroundWindow() == (nint)window.Handle);
         if (target is not null)
-            return ActivateWindow(target); // Never relaunch because Windows denied foreground focus.
-        // A known running window may be inaccessible (for example privilege or
-        // identity validation failure). Do not reinterpret that as a closed app.
+            return ActivateWindow(target);
         if (application.Windows.Count > 0) { RequestRefresh(); return false; }
         if (!application.IsPinned) return false;
         var launched = launcher.Launch(application, owner);
@@ -469,7 +453,6 @@ public sealed class WindowsApplicationService : IApplicationService
     }
     public bool ReorderApplications(IReadOnlyList<string> orderedIds)
     {
-        // Another monitor may have saved an order before reconciliation publishes its snapshot.
         var ids = pinStore.ApplyStacks(Volatile.Read(ref currentApplications)).Select(app => app.Id).ToArray();
         var mergedOrder = MergeRequestedOrder(ids, orderedIds);
         if (mergedOrder is null || !pinStore.Reorder(ids, mergedOrder))
@@ -503,9 +486,6 @@ public sealed class WindowsApplicationService : IApplicationService
             requested.Add(id);
         }
 
-        // A monitor-local dock only sees its own running applications plus the
-        // globally pinned applications. Preserve applications hidden by that monitor
-        // filter in their existing global slots while applying the visible order.
         var queue = new Queue<string>(requested);
         var merged = new string[currentIds.Count];
 
@@ -579,7 +559,6 @@ public sealed class WindowsApplicationService : IApplicationService
     public bool CloseWindow(ApplicationWindow existing)
     {
         if (!IsEligible(existing)) { RequestRefresh(); return false; }
-        // The application handles WM_CLOSE, including any unsaved-document confirmation.
         var sent = NativeMethods.PostMessageW((nint)existing.Handle, 0x0010, 0, 0);
         RequestRefresh();
         return sent;
@@ -593,7 +572,6 @@ public sealed class WindowsApplicationService : IApplicationService
         hooks.Clear();
         refresh.Set();
         if (worker is null) refresh.Dispose();
-        // Do not block the UI/recovery heartbeat on a slow Shell extension.
         GC.KeepAlive(callback);
     }
 }

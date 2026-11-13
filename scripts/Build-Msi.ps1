@@ -30,7 +30,7 @@ function Clear-OutputDirectory([string]$Path) {
 if (Get-Process GlassDock.App,GlassDock.InputHelper,GlassDock.Watchdog -ErrorAction SilentlyContinue) {
     throw 'Exit Doky normally before building the installer.'
 }
-# Remove only this build's outputs, not unrelated distribution artifacts.
+
 Clear-OutputDirectory $PublishDir
 Clear-OutputDirectory (Join-Path $Root 'installer\wix\obj')
 Clear-OutputDirectory (Join-Path $Root 'installer\wix\bin')
@@ -42,8 +42,8 @@ Run-Step 'Validate solution (locked restore, Release build, both test projects)'
 Run-Step 'Publish self-contained x64 application' {
     dotnet publish (Join-Path $Root 'src\GlassDock.App\GlassDock.App.csproj') -c Release -r win-x64 --self-contained true -p:NuGetLockFilePath=obj/packages.publish.lock.json -o $PublishDir
 }
-# RID-specific restore has its own obj lock file; never rewrite solution lock files.
-# Publish the recovery executable itself: a build output is not a deployment payload.
+
+
 Clear-OutputDirectory (Join-Path $PublishDir 'Recovery')
 Run-Step 'Publish self-contained x64 watchdog' {
     dotnet publish (Join-Path $Root 'src\GlassDock.Watchdog\GlassDock.Watchdog.csproj') -c Release -r win-x64 --self-contained true -p:NuGetLockFilePath=obj/packages.publish.lock.json -o (Join-Path $PublishDir 'Recovery')
@@ -58,7 +58,7 @@ Run-Step 'Build fresh x64 MSI' {
 $builtMsi = Join-Path $Root 'installer\wix\bin\x64\Release\GlassDock-Setup-x64.msi'
 if (-not (Test-Path -LiteralPath $builtMsi)) { throw "Missing expected MSI: $builtMsi" }
 Copy-Item -LiteralPath $builtMsi -Destination $FinalMsi -Force
-# This manifest lets deployment verification compare EVERY installed byte to this publish.
+
 $manifest = @(Get-ChildItem -LiteralPath $PublishDir -File -Recurse | Sort-Object FullName | ForEach-Object {
     [pscustomobject]@{ Path=$_.FullName.Substring($PublishDir.Length + 1); SHA256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
 })

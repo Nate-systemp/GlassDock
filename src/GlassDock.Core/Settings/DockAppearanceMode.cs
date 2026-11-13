@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Settings;
 
-/// <summary>Persistent main-dock surface selection.</summary>
 public enum DockAppearanceMode
 {
     Dark = 0,

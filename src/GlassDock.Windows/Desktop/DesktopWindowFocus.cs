@@ -226,10 +226,6 @@ public sealed class DesktopWindowFocus : IDisposable
                     mirror,
                     window);
 
-            //
-            // Force the newly-created DWM thumbnail
-            // to receive its source and destination.
-            //
             hasLastPosition = false;
             lastFrame = default;
             lastBounds = default;
@@ -261,13 +257,6 @@ public sealed class DesktopWindowFocus : IDisposable
     private static bool Eligible(
         ApplicationWindow window)
     {
-        //
-        // IMPORTANT:
-        //
-        // Do NOT reject minimized windows.
-        // The real HWND stays minimized.
-        // We only display a DWM mirror.
-        //
         return WindowsApplicationService
             .IsEligible(window);
     }
@@ -342,10 +331,6 @@ public sealed class DesktopWindowFocus : IDisposable
         bounds = default;
         placementDetails = null;
 
-        //
-        // Normal / visible window:
-        // use its current real position.
-        //
         if (!NativeMethods.IsIconic(window))
         {
             return NativeMethods.GetWindowRect(
@@ -353,16 +338,6 @@ public sealed class DesktopWindowFocus : IDisposable
                 out bounds);
         }
 
-        //
-        // Minimized window:
-        //
-        // GetWindowRect() can report its iconic/minimized
-        // coordinates instead of the position where it
-        // would normally appear.
-        //
-        // GetWindowPlacement gives us NormalPosition,
-        // which represents the restored window position.
-        //
         var placement =
             new WindowPlacement
             {
@@ -381,17 +356,10 @@ public sealed class DesktopWindowFocus : IDisposable
         bounds =
             placement.NormalPosition;
 
-        //
-        // WINDOWPLACEMENT uses workspace coordinates
-        // for normal top-level windows.
-        //
-        // Convert that into desktop/screen coordinates
-        // so our mirror appears in the correct location.
-        //
         var monitor =
             MonitorFromWindow(
                 window,
-                2); // MONITOR_DEFAULTTONEAREST
+                2);
 
         var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
         if (monitor == 0 || !GetMonitorInfo(monitor, ref info)) return false;
@@ -424,8 +392,6 @@ public sealed class DesktopWindowFocus : IDisposable
 
     private static PreviewRect WorkspaceToScreen(PreviewRect normal, PreviewRect monitor, PreviewRect work, bool toolWindow)
     {
-        // rcNormalPosition is not monitor-local. Add only the work-area inset, never the monitor origin.
-        // Placement, monitor bounds and SetWindowPos share the caller's PMv2 physical coordinate context.
         if (toolWindow) return normal;
         return normal with { X = normal.X + work.X - monitor.X, Y = normal.Y + work.Y - monitor.Y };
     }
@@ -462,21 +428,11 @@ public sealed class DesktopWindowFocus : IDisposable
 
         if (NativeMethods.IsIconic(window) && frameCache?.GetLastVisibleGeometry(target) is { } geometry)
         {
-            // Match the last displayed snapped/maximized surface, not the normal
-            // restored rectangle that WINDOWPLACEMENT reports while minimized.
             bounds = geometry.Bounds;
             frame = geometry.Frame;
             placementDetails = new { coordinateSpace = "last-visible-physical-screen-pixels", bounds = ToPreviewRect(bounds) };
         }
 
-        //
-        // Extended frame bounds are safe/useful
-        // while the real source window is visible.
-        //
-        // Do NOT use DWM extended bounds while
-        // minimized because they may represent
-        // the minimized/iconic state.
-        //
         if (!NativeMethods.IsIconic(window) &&
             NativeMethods.DwmGetFrameBounds(
                 window,
@@ -517,10 +473,6 @@ public sealed class DesktopWindowFocus : IDisposable
             return;
         }
 
-        //
-        // Don't constantly reconfigure the DWM
-        // thumbnail if the window has not moved.
-        //
        if (boundsChanged && cachedFrame is null)
 {
     var minimized =
@@ -608,7 +560,6 @@ public sealed class DesktopWindowFocus : IDisposable
 
         if (cachedFrame is not null)
         {
-            // Paint the replacement before removing DWM content. Only our mirror is touched.
             if (boundsChanged && !PaintCachedFrame())
             {
                 frameCache?.Report(target, "cached-draw-failed");
@@ -683,7 +634,6 @@ public sealed class DesktopWindowFocus : IDisposable
 
         mirrorShown =
             false;
-        // Release compositor content only after the host is invisible.
         thumbnail?.Dispose();
         thumbnail = null;
         cachedFrame = null;
@@ -726,14 +676,12 @@ public sealed class DesktopWindowFocus : IDisposable
             var ratio = Math.Min((double)width / frame.Width, (double)height / frame.Height);
             var drawWidth = Math.Max(1, (int)Math.Round(frame.Width * ratio));
             var drawHeight = Math.Max(1, (int)Math.Round(frame.Height * ratio));
-            // Top-down BGRA DIB; aspect fit avoids distorting cached frames after a DPI/size change.
             var info = new BitmapInfo { Size = 40, Width = frame.Width, Height = -frame.Height, Planes = 1, Bits = 32 };
             NativeMethods.FillRect(buffer, ref rect, NativeMethods.GetStockObject(4));
-            SetStretchBltMode(buffer, 4); // HALFTONE
+            SetStretchBltMode(buffer, 4);
             var copied = StretchDIBits(buffer, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight,
                 0, 0, frame.Width, frame.Height, frame.Pixels, ref info, 0, 0x00CC0020);
             if (copied == 0 || copied == -1) return false;
-            // Present the completed bitmap in one copy, never an intermediate black clear.
             return BitBlt(dc, 0, 0, width, height, buffer, 0, 0, 0x00CC0020);
         }
         finally

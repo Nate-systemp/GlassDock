@@ -24,8 +24,6 @@ public readonly record struct DockPointerTarget(DockPointerMode Mode, int Index)
     {
         var none = new DockPointerTarget(DockPointerMode.Outside, -1);
         if (!double.IsFinite(x) || !double.IsFinite(y) || bounds.Count == 0) return none;
-        // Retain a target only within its real hitbox (including overlapping
-        // magnification bounds). Never extend stack hysteresis into an empty gap.
         if (previousStack >= 0 && previousStack < bounds.Count && previousStack != source &&
             bounds[previousStack].Contains(x, y) && canStack(previousStack))
             return new(DockPointerMode.Stack, previousStack);
@@ -39,7 +37,6 @@ public readonly record struct DockPointerTarget(DockPointerMode Mode, int Index)
             if (x > a.Right && x < b.Left && y >= Math.Max(a.Top, b.Top) && y <= Math.Min(a.Bottom, b.Bottom))
                 return new(DockPointerMode.Reorder, i + (source > i ? 1 : 0));
         }
-        // Bounded end gaps, not infinite horizontal slots.
         var first = bounds[0]; var last = bounds[^1];
         const double endGap = 18;
         if (x >= first.Left - endGap && x < first.Left && y >= first.Top && y <= first.Bottom)

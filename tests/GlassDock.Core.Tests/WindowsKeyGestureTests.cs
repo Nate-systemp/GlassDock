@@ -18,13 +18,13 @@ public sealed class WindowsKeyGestureTests
     }
 
     [Theory]
-    [InlineData(0x52)] // R
-    [InlineData(0x45)] // E
-    [InlineData(0x4C)] // L
-    [InlineData(0x44)] // D
-    [InlineData(0x09)] // Tab
-    [InlineData(0x20)] // Space must not also trigger the bare-Win toggle.
-    [InlineData(0xA2)] // Ctrl
+    [InlineData(0x52)]
+    [InlineData(0x45)]
+    [InlineData(0x4C)]
+    [InlineData(0x44)]
+    [InlineData(0x09)]
+    [InlineData(0x20)]
+    [InlineData(0xA2)]
     public void Windows_shortcuts_never_request_dock(int key)
     {
         var gesture = new WindowsKeyGesture();

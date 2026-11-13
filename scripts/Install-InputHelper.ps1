@@ -1,8 +1,8 @@
-# One-time admin operation (also repeat after a release changes helper code).
-# Publish the standalone helper into the HelperPayload subfolder first.
-# WARNING: An elevated scheduled task must not run EXEs from per-user writable
-# LocalAppData or a development directory. Copy the standalone runtime into
-# protected Program Files, then register only THAT executable.
+
+
+
+
+
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
@@ -35,8 +35,8 @@ $task = Get-ScheduledTask -TaskName 'Doky Input Helper' -ErrorAction SilentlyCon
 if ($task -and $task.State -eq 'Running') {
     Stop-ScheduledTask -TaskName 'Doky Input Helper' -ErrorAction Stop
 }
-# A previous release may have registered this HIGH-PRIVILEGE task against a
-# user-writable EXE. Remove that unsafe task even if later installation fails.
+
+
 $protectedExe = Join-Path $destination 'GlassDock.InputHelper.exe'
 if ($task -and -not [string]::Equals($task.Actions[0].Execute.Trim('"'), $protectedExe,
         [StringComparison]::OrdinalIgnoreCase)) {
@@ -49,16 +49,16 @@ if (Get-Process 'GlassDock.InputHelper' -ErrorAction SilentlyContinue) {
     throw 'Close every Doky instance and stop the old helper before installing.'
 }
 
-# We never overwrite an active protected payload in place. Rename it so a
-# failed copy/registration can restore the earlier installed helper.
+
+
 New-Item -Path $parent -ItemType Directory -Force | Out-Null
 if (Test-Path -LiteralPath $destination) {
     Move-Item -LiteralPath $destination -Destination $backup -ErrorAction Stop
 }
 try {
     New-Item -Path $destination -ItemType Directory -Force | Out-Null
-    # Well-known SIDs: SYSTEM/Administrators full, Users read+execute only.
-    # This also removes any unsafe inheritable write access on the new folder.
+
+
     & icacls.exe $destination /inheritance:r /grant:r `
         '*S-1-5-18:(OI)(CI)F' `
         '*S-1-5-32-544:(OI)(CI)F' `
@@ -68,8 +68,8 @@ try {
     Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force -ErrorAction Stop
     }
-    # Verify the running binary really is what the admin selected before
-    # granting a persistent elevated task. Directory ACLs block later edits.
+
+
     $sourceHash = (Get-FileHash -LiteralPath (Join-Path $source 'GlassDock.InputHelper.exe') -Algorithm SHA256).Hash
     $installedHash = (Get-FileHash -LiteralPath (Join-Path $destination 'GlassDock.InputHelper.exe') -Algorithm SHA256).Hash
     if ($sourceHash -ne $installedHash) { throw 'Helper copy verification failed.' }

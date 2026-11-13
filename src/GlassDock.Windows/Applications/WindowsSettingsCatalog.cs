@@ -10,7 +10,6 @@ public sealed record WindowsSettingEntry(string Name, string Description, IReadO
 
 public static class WindowsSettingsCatalog
 {
-    // https://learn.microsoft.com/windows/apps/develop/launch/launch-settings
     public static IReadOnlyList<WindowsSettingEntry> Entries { get; } = Array.AsReadOnly<WindowsSettingEntry>([
         new("Bluetooth & devices", "Settings · Bluetooth and connected devices", ["bluetooth", "devices", "pair"], "ms-settings:bluetooth"),
         new("Display settings", "Settings · Screen resolution and brightness", ["display", "screen", "monitor", "brightness"], "ms-settings:display"),

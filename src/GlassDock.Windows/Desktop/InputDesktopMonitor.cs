@@ -5,7 +5,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Notifies the owning UI thread when its desktop becomes interactive again.</summary>
 public sealed class InputDesktopMonitor : IDisposable
 {
     private readonly NativeMethods.WinEventProc callback;
@@ -15,7 +14,7 @@ public sealed class InputDesktopMonitor : IDisposable
     public InputDesktopMonitor()
     {
         callback = (_, _, _, _, _, _, _) => { if (IsCurrent) Restored?.Invoke(this, EventArgs.Empty); };
-        hook = NativeMethods.SetWinEventHook(0x0020, 0x0020, 0, callback, 0, 0, 0); // EVENT_SYSTEM_DESKTOPSWITCH, OUTOFCONTEXT
+        hook = NativeMethods.SetWinEventHook(0x0020, 0x0020, 0, callback, 0, 0, 0);
         if (hook == 0) throw new Win32Exception("Cannot monitor input desktop restoration.");
     }
 
@@ -23,7 +22,7 @@ public sealed class InputDesktopMonitor : IDisposable
 
     internal static bool IsCallingDesktopCurrent()
     {
-        var input = OpenInputDesktop(0, false, 1); // DESKTOP_READOBJECTS only
+        var input = OpenInputDesktop(0, false, 1);
         if (input == 0) return false;
         try
         {

@@ -9,7 +9,6 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class DesktopOverlayWindow
 {
-    // Visual rounding never changes the native hit region, reserved taskbar space, or animation endpoints.
     private double VisualDockCornerRadius => (settingsSession.Current.GlassVisuals?.DockMaterial.CornerRadius * DockScale) ?? ExpandedDockCornerRadius;
 
     private void ApplyButtonVisual(string id, Button button)
@@ -20,13 +19,13 @@ public sealed partial class DesktopOverlayWindow
         if (value is null)
         {
             if (layer is not null) content.Children.Remove(layer);
-            return; // The unduplicated dock material remains visible through the button.
+            return;
         }
         if (layer is null)
         {
             layer = new GlassSurface { IsHitTestVisible = false };
             Canvas.SetZIndex(layer, -1);
-            content.Children.Add(layer); // Keep the icon at index zero for existing interaction code.
+            content.Children.Add(layer);
         }
         layer.Opacity = value.SurfaceOpacity;
         layer.Apply(ComponentMaterial(value, settingsSession.Current.DockAppearanceMode, DockScale));

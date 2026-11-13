@@ -79,7 +79,6 @@ internal static class ApplicationNative
         [MarshalAs(UnmanagedType.LPWStr)] public string? Directory;
         public int Show; public nint Instance, IdList, Class; public nint ClassKey; public uint HotKey; public nint Icon, Process;
     }
-    // Only the enumeration slot is declared: this adapter cannot mutate the pinned list.
     [ComImport, Guid("0DD79AE2-D156-45D4-9EEB-3B549769E940"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IPinnedList { [PreserveSig] int EnumObjects(out IEnumFullIdList items); }
     [ComImport, Guid("d0191542-7954-4908-bc06-b2360bbe45ba"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

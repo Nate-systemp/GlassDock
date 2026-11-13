@@ -7,7 +7,6 @@ public sealed class BrightnessChangedEventArgs(BrightnessDisplay? display, bool 
     public bool External { get; } = external;
 }
 
-/// <summary>Serializes WMI/DDC hardware work; UI sees only immutable readback snapshots.</summary>
 public sealed class BrightnessService : IDisposable
 {
     private readonly AutoResetEvent wake = new(false);
@@ -81,7 +80,6 @@ public sealed class BrightnessService : IDisposable
                                 writes.Keep(ids);
                                 foreach (var id in pendingRevisions.Keys.Where(id => !ids.Contains(id)).ToArray()) pendingRevisions.Remove(id);
                             }
-                            // Retain identity-matched old values only until each fresh hardware read below.
                             Volatile.Write(ref displays, Volatile.Read(ref displays).Where(d => ids.Contains(d.Id)).ToArray());
                         }
                         foreach (var target in hardware.Targets)
@@ -113,7 +111,7 @@ public sealed class BrightnessService : IDisposable
                     lock (writeLock)
                         if (pendingRevisions.GetValueOrDefault(request.Id) == request.Revision) pendingRevisions.Remove(request.Id);
                     Notify(Displays.FirstOrDefault(d => d.Id == request.Id), false);
-                    nextWrite = Environment.TickCount64 + 120; // Coalesce drag writes: at most ~8 operations/sec.
+                    nextWrite = Environment.TickCount64 + 120;
                 }
                 bool pending;
                 lock (writeLock) pending = writes.HasPending;
@@ -161,7 +159,6 @@ public sealed class BrightnessService : IDisposable
         {
             try { wake.Set(); } catch (ObjectDisposedException) { }
         }
-        // Do not join a worker blocked in a monitor driver; it releases its own handles on return.
     }
 }
 

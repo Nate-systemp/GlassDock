@@ -5,7 +5,6 @@ using Windows.Security.Authorization.AppCapabilityAccess;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Windows owns consent. Capture creation never prompts or assumes a setter grants it.</summary>
 public static class CaptureBorderPermission
 {
     public static bool IsSupported => ApiInformation.IsMethodPresent(

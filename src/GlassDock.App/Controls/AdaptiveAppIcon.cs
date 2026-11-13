@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace GlassDock.App.Controls;
 
-/// <summary>Padded glass tile with an unmasked, native-resolution icon above it.</summary>
 internal sealed class AdaptiveAppIcon : Grid
 {
     private readonly Image image = new()
@@ -26,9 +25,6 @@ internal sealed class AdaptiveAppIcon : Grid
     };
     private readonly Canvas artwork = new() { IsHitTestVisible = false };
     private double FittedArtworkScale => sourceWidth > 0 && double.IsFinite(image.Width) ? image.Width / sourceWidth : 0;
-    // Reserve the whole icon slot for hover spacing. Alpha-trimmed artwork may be
-    // only a few pixels wide (e.g. slim logos) and must not collapse other apps
-    // into an unreadable cluster when they are scaled to 75%.
     internal double HoverArtworkWidth => Width;
     internal double HoverArtworkBaseline => stackPreview is null && FittedArtworkScale > 0 ? (ActualHeight + pixelHeight * FittedArtworkScale) / 2 : ActualHeight;
     private double maximumHoverScale;
@@ -67,8 +63,6 @@ internal sealed class AdaptiveAppIcon : Grid
                 ((AdaptiveAppIcon)child).SetDockAppearance(mode);
     }
 
-    // Supplies the same native artwork and fitted Image to the GPU drag-lens scene.
-    // Called once per drag, not once per frame; no UI screenshot/readback is needed.
     internal void VisitLensArtwork(Action<ApplicationIcon?, FrameworkElement, Border> visit)
     {
         if (stackPreview is not null)
@@ -80,9 +74,6 @@ internal sealed class AdaptiveAppIcon : Grid
     }
 
     internal NotificationBadge? LensBadge => badge;
-    // A foreground badge follows the same magnification anchor as its icon.
-    // Keep the original display state so it can be faithfully reproduced above
-    // the glass without reparenting the real badge out of its button.
     internal BadgeDisplayState? HoverBadgeState { get; private set; }
     internal long HoverBadgeRevision { get; private set; }
     internal event EventHandler? HoverBadgeChanged;
@@ -101,8 +92,6 @@ internal sealed class AdaptiveAppIcon : Grid
         {
             stackPreview.Children.Clear();
             stackIcons = new ApplicationIcon?[count];
-            // Paint back to front. The same order is visited by the drag-lens
-            // sampler, so overlap agrees between XAML and the refracted artwork.
             for (var depth = count - 1; depth >= 0; depth--)
             {
                 var layer = new AdaptiveAppIcon(Width * .46,
@@ -125,8 +114,6 @@ internal sealed class AdaptiveAppIcon : Grid
     private void UpdateStackCard()
     {
         if (!isStackLayer) return;
-        // ActualTheme only distinguishes Light/Dark; it cannot represent glass.
-        // Use the selected dock appearance explicitly, including after reparenting.
         var color = stackAppearance switch
         {
             GlassDock.Core.Settings.DockAppearanceMode.Light or GlassDock.Core.Settings.DockAppearanceMode.Dark
@@ -144,7 +131,6 @@ internal sealed class AdaptiveAppIcon : Grid
     private void LayoutStackLayers()
     {
         if (stackPreview is null) return;
-        // Four equal tiles stay within the fixed dock slot, with an 8% center gap.
         var gap = Width * .08;
         var size = (Width - gap) / 2;
         for (var index = 0; index < stackPreview.Children.Count; index++)
@@ -175,8 +161,6 @@ internal sealed class AdaptiveAppIcon : Grid
             };
             Children.Add(badge);
             SetDockScale(dockScale);
-            // Multi-digit counts can change the badge's measured width while
-            // hovering. Re-align its foreground mirror after layout catches up.
             badge.SizeChanged += (_, _) => HoverBadgeChanged?.Invoke(this, EventArgs.Empty);
         }
         badge.SetBadge(display);
@@ -197,7 +181,6 @@ internal sealed class AdaptiveAppIcon : Grid
         VerticalAlignment = VerticalAlignment.Center;
         tile.Visibility = showTile ? Visibility.Visible : Visibility.Collapsed;
         Children.Add(tile);
-        // Siblings: the rounded tile never clips or masks the image's alpha edges.
         Children.Add(artwork);
         artwork.Children.Add(image);
         SetIcon(null);
@@ -242,7 +225,6 @@ internal sealed class AdaptiveAppIcon : Grid
         for (var y = 0; y < icon.Height; y++)
         for (var x = 0; x < icon.Width; x++)
         {
-            // Include every nonzero alpha pixel, including antialiasing and native shadows.
             if (icon.Pixels[(y * icon.Width + x) * 4 + 3] == 0) continue;
             alphaTotal += icon.Pixels[(y * icon.Width + x) * 4 + 3];
             left = Math.Min(left, x); top = Math.Min(top, y);
@@ -254,7 +236,6 @@ internal sealed class AdaptiveAppIcon : Grid
         sourceWidth = icon.Width;
         sourceHeight = icon.Height;
         original = icon;
-        // Already-filled artwork needs less of a backing plate than an open silhouette.
         tile.Opacity = !isStackLayer && alphaTotal / (255d * pixelWidth * pixelHeight) > 0.85 ? 0.45 : 1;
         Fit();
     }
@@ -276,8 +257,6 @@ internal sealed class AdaptiveAppIcon : Grid
         var targetHeight = Math.Min(sourceHeight, (int)Math.Ceiling(image.Height * dpi * maximumHoverScale));
         if (original is not null && (targetWidth != rasterWidth || targetHeight != rasterHeight))
         {
-            // Always filter from the native source, never a previously reduced bitmap.
-            // Reserve enough physical pixels for the maximum hover magnification.
             var raster = IconRasterizer.Downsample(original, targetWidth, targetHeight);
             var bitmap = new WriteableBitmap(raster.Width, raster.Height);
             using (var pixels = bitmap.PixelBuffer.AsStream()) pixels.Write(raster.Pixels);

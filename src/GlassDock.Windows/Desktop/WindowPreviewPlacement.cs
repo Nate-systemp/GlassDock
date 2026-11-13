@@ -11,16 +11,12 @@ public sealed class WindowPreviewPlacement : IDisposable
 {
     private readonly nint window;
     private readonly NativeMethods.SubclassProc callback;
-    // Native moves trigger layout and DWM thumbnail updates. A timer frame can
-    // land on the same integer-pixel rectangle as its predecessor, especially
-    // with DPI scaling; avoid a redundant Win32 resize in that case.
     private PreviewRect? lastPhysicalBounds;
 
     public WindowPreviewPlacement(nint window, bool inspection = false)
     {
         this.window = window;
 
-        // Configure extended styles.
         var exStyle = NativeMethods.GetWindowLongPtr(window, -20).ToInt64();
 
         NativeMethods.SetWindowLongPtr(
@@ -30,12 +26,9 @@ public sealed class WindowPreviewPlacement : IDisposable
                 ? (exStyle | 0x080C0000L) & ~0x80L
                 : (exStyle | 0x08080080L) & ~0x40000L)
         );
-        // Match the dock's native desktop sampling client.
         if (!NativeMethods.SetLayeredWindowAttributes(window, 0, 255, 2))
             throw new Win32Exception();
 
-        // Remove the native caption / resize / window frame.
-        // The preview's glass backdrop draws its own rounded shape.
         var style = NativeMethods.GetWindowLongPtr(window, -16).ToInt64();
 
         NativeMethods.SetWindowLongPtr(
@@ -44,7 +37,6 @@ public sealed class WindowPreviewPlacement : IDisposable
             (nint)(style & ~0x00CF0000L)
         );
 
-        // Do not let DWM apply its own rounded window frame.
         var noCorner = 1;
 
         NativeMethods.DwmSetWindowAttribute(
@@ -54,7 +46,6 @@ public sealed class WindowPreviewPlacement : IDisposable
             sizeof(int)
         );
 
-        // Disable the Windows 11 native border color.
         var noBorder = unchecked((int)0xFFFFFFFE);
 
         NativeMethods.DwmSetWindowAttribute(
@@ -64,7 +55,6 @@ public sealed class WindowPreviewPlacement : IDisposable
             sizeof(int)
         );
 
-        // Tell Windows the frame styles changed.
         NativeMethods.SetWindowPos(
             window,
             0,
@@ -72,11 +62,11 @@ public sealed class WindowPreviewPlacement : IDisposable
             0,
             0,
             0,
-            0x0001 | // SWP_NOSIZE
-            0x0002 | // SWP_NOMOVE
-            0x0004 | // SWP_NOZORDER
-            0x0010 | // SWP_NOACTIVATE
-            0x0020   // SWP_FRAMECHANGED
+            0x0001 |
+            0x0002 |
+            0x0004 |
+            0x0010 |
+            0x0020
         );
 
         var margins = new NativeMethods.Margins();
@@ -117,8 +107,6 @@ public sealed class WindowPreviewPlacement : IDisposable
             if (message == 0x21)
                 return 3;
 
-            // Keep the compositor host background black/transparent.
-            // GetStockObject(4) = BLACK_BRUSH.
             if (message == 0x14 &&
                 NativeMethods.GetClientRect(hwnd, out var rect))
             {
@@ -235,8 +223,6 @@ public sealed class WindowPreviewPlacement : IDisposable
     public void Position(PreviewRect rectangle)
     {
         if (!WindowPreviewLayout.NeedsNativeMove(lastPhysicalBounds, rectangle)) return;
-        // Cache the physical rectangle only after SetWindowPos succeeds. Otherwise
-        // the next frame must retry it instead of leaving a stale placement.
         if (NativeMethods.SetWindowPos(window, -1, (int)rectangle.X, (int)rectangle.Y,
             (int)rectangle.Width, (int)rectangle.Height, 0x10 | 0x40))
             lastPhysicalBounds = rectangle;
@@ -244,8 +230,6 @@ public sealed class WindowPreviewPlacement : IDisposable
 
     public void Hide()
     {
-        // SW_HIDE must be paired with another SWP_SHOWWINDOW even when the
-        // next preview opens at exactly the same physical bounds.
         lastPhysicalBounds = null;
         NativeMethods.ShowWindow(
             window,

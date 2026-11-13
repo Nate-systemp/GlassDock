@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>One circular output fed by the owning dock's existing capture, never its own session.</summary>
 internal sealed class UtilityGlassSurface : IDisposable
 {
     private readonly LiquidGlassDrawingTarget target = new();
@@ -39,7 +38,6 @@ internal sealed class UtilityGlassSurface : IDisposable
     public bool UsesNativeDockBackdrop => UseDockMaterial && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic);
     public UtilityGlassSurface() => drawRim = (drawing, shape) =>
     {
-        // Frosted/Acrylic dock material already owns its texture; omit the utility's extra Clear-style sheen.
         if (UseDockMaterial && mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) return;
         rim.Draw(drawing, shape, new(0, 0, diameter / dpi, height / dpi), dpi,
             highlights ? material : material with { SpecularIntensity = 0 }, dockSurface: true, strokeScale: layoutScale);
@@ -81,7 +79,6 @@ internal sealed class UtilityGlassSurface : IDisposable
                 target.Draw(device, shader, geometry, new(bounds.X, bounds.Y, size, height), scale, drawRim);
             else
             {
-                // Match the native dock only for OFF surfaces; retain the existing ON treatment.
                 var physical = UseDockMaterial ? RefractionLayer.ForNativeBackend(backdrop)
                     : backdrop with { BlurAmount = backdrop.BlurAmount * scale };
                 if (materialEffect is null || physical != appliedBackdrop)

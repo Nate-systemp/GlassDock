@@ -2,11 +2,6 @@ using Xunit;
 
 namespace GlassDock.Windows.Tests;
 
-/// <summary>
-/// Regression guard for live solid/glass mode transitions. The native brush
-/// must change in-place; detaching Window.SystemBackdrop while it is loaded
-/// may invalidate WinUI's queued default-configuration callback.
-/// </summary>
 public sealed class BackdropModeSwitchLifecycleTests
 {
     [Fact]

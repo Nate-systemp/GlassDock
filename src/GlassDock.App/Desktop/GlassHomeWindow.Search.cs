@@ -11,8 +11,6 @@ internal sealed partial class GlassHomeWindow
     {
         launchError = null;
 
-        // Do not index the machine merely because Glass Home was opened.
-        // The metadata worker starts only when the user actually searches.
         if (HasQuery)
             applicationIndex.Start();
 
@@ -21,7 +19,6 @@ internal sealed partial class GlassHomeWindow
 
     private void OnIndexChanged(object? sender, EventArgs args)
     {
-        // Coalesce worker notifications; always filter the CURRENT query on the UI thread.
         if (Interlocked.Exchange(ref refreshQueued, 1) != 0) return;
         if (!DispatcherQueue.TryEnqueue(() =>
         {
@@ -43,8 +40,6 @@ internal sealed partial class GlassHomeWindow
                 search.Text),
             preserveSelection);
 
-        // Only the at-most-eight visible matches request real app icons.
-        // The installed-app index itself stays metadata-only.
         if (HasQuery && selection.Results.Count > 0)
             applicationIndex.RequestIcons(selection.Results);
 
@@ -68,8 +63,6 @@ internal sealed partial class GlassHomeWindow
                             (icon is null ? "0" : "1");
                     }));
 
-        // Avoid throwing away/recreating the same WinUI tree for every
-        // metadata/icon worker notification.
         if (!string.Equals(
                 renderedResultsKey,
                 renderKey,

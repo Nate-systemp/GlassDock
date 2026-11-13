@@ -4,7 +4,6 @@ namespace GlassDock.Core.Applications;
 
 public enum BadgeTransition { None, Appear, Increase, Update, Remove }
 
-/// <summary>Visual transition state for the badge control. It does not choose badge sources.</summary>
 public sealed class NotificationBadgeState
 {
     public BadgeDisplayState Display { get; private set; } = BadgeDisplayState.None;
@@ -20,7 +19,6 @@ public sealed class NotificationBadgeState
         var previous = Display;
         Display = value;
 
-        // Source/timestamp changes do not animate if the user-visible state is unchanged.
         if (previous.Kind == value.Kind && previous.Count == value.Count)
             return BadgeTransition.None;
 
@@ -44,10 +42,8 @@ public sealed class NotificationBadgeState
     };
 }
 
-/// <summary>Legacy exact-AUMID helper retained for compatibility with callers outside BadgeCoordinator.</summary>
 public static class NotificationCounts
 {
-    // Exact AUMID mapping only. Display names and process titles are not identities.
     public static int ForApplication(ApplicationIdentity identity, IReadOnlyDictionary<string, int> counts) =>
         identity.AppUserModelId is { Length: > 0 } id && counts.TryGetValue(id, out var count) ? Math.Max(0, count) : 0;
 }

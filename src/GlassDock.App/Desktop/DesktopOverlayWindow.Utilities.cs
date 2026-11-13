@@ -45,8 +45,8 @@ public sealed partial class DesktopOverlayWindow
         if (closing) return null;
         PreviewRect Bounds(UtilityButton button) => new(button.Glass.Bounds.X, button.Glass.Bounds.Y, button.Glass.Bounds.Z, button.Glass.Bounds.W);
         var utilities = utilityArea.Visibility == Visibility.Visible
-            ? utilityButtons.Values.Select(Bounds).ToArray() : Array.Empty<PreviewRect>();
-        PreviewRect? sound = utilityArea.Visibility == Visibility.Visible && utilityButtons.TryGetValue(kind, out var button)
+            ? utilityButtons.Values.Where(b => b.Visibility == Visibility.Visible && !b.FloatingPresentation).Select(Bounds).ToArray() : Array.Empty<PreviewRect>();
+        PreviewRect? sound = !GridUtilities && utilityArea.Visibility == Visibility.Visible && utilityButtons.TryGetValue(kind, out var button)
             ? Bounds(button) : null;
         return new(WinRT.Interop.WindowNative.GetWindowHandle(this),
             new((root.ActualWidth - surface.ActualWidth) / 2, root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight,
@@ -57,6 +57,7 @@ public sealed partial class DesktopOverlayWindow
     {
         if (!closing && utilityButtons.TryGetValue(UtilityKind.Brightness, out var button))
             button.SetState(false, display?.Available == true, display?.Message ?? "Brightness unavailable on this display · right-click to choose a monitor");
+        quickSettingsPanel?.RefreshValues();
     }
 
     internal void ShowBrightnessMonitors(IReadOnlyList<BrightnessDisplay> displays, string? selected, Action<string?> select)
@@ -76,14 +77,15 @@ public sealed partial class DesktopOverlayWindow
         if (displays.Count == 0) menu.Items.Add(new MenuFlyoutItem { Text = "Checking displays…", IsEnabled = false });
         menu.Opened += (_, _) => previews.BeginContextMenu(menu);
         menu.Closed += (_, _) => { previews.EndContextMenu(menu); if (brightnessSelector == menu) brightnessSelector = null; };
-        menu.ShowAt(button);
+        menu.ShowAt(quickSettingsPanel?.BrightnessAnchor ?? button);
     }
 
     private bool IsPointerOverUtility(double x, double y) =>
-        utilityArea.Visibility == Visibility.Visible && utilityButtons.Values.Any(button =>
-            button.IsHitTestVisible && new global::Windows.Foundation.Rect(
+        utilityArea.Visibility == Visibility.Visible && ((GridUtilities && quickSettingsButton is { IsHitTestVisible: true } grid &&
+            new global::Windows.Foundation.Rect(grid.Glass.Bounds.X, grid.Glass.Bounds.Y, 36, 36).Contains(new(x, y))) || utilityButtons.Values.Any(button =>
+            !button.FloatingPresentation && button.Visibility == Visibility.Visible && button.IsHitTestVisible && new global::Windows.Foundation.Rect(
                 button.Glass.Bounds.X - 2, button.Glass.Bounds.Y - 2,
-                button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y)));
+                button.Glass.Bounds.Z + 4, button.Glass.Bounds.W + 4).Contains(new(x, y))));
 
     private void InitializeUtilities(WifiUtilityService? shared, BluetoothUtilityService? sharedBluetooth,
         AirplaneModeUtilityService? sharedAirplaneMode, NightLightUtilityService? sharedNightLight,
@@ -117,12 +119,20 @@ public sealed partial class DesktopOverlayWindow
         };
         root.AddHandler(UIElement.KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) =>
         {
+            if (e.Key == global::Windows.System.VirtualKey.Escape && IsQuickSettingsOpen)
+            { CloseQuickSettings(); e.Handled = true; return; }
             if (e.Key != global::Windows.System.VirtualKey.Escape || (wifiSettingsOnly is null && bluetoothSettingsOnly is null)) return;
             DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); e.Handled = true;
         }), true);
         root.AddHandler(UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
         {
             var point = e.GetCurrentPoint(root).Position;
+            if (IsQuickSettingsOpen)
+            {
+                if (quickSettingsButton is { } grid && !new global::Windows.Foundation.Rect(grid.Glass.Bounds.X, grid.Glass.Bounds.Y, 36, 36).Contains(point))
+                    CloseQuickSettings();
+                return;
+            }
             if (wifiSettingsOnly is { } settingsButton && !new global::Windows.Foundation.Rect(settingsButton.Glass.Bounds.X,
                 settingsButton.Glass.Bounds.Y, settingsButton.Glass.Bounds.Z, settingsButton.Glass.Bounds.W).Contains(point))
                 DismissWifiSettingsOnly();
@@ -139,6 +149,7 @@ public sealed partial class DesktopOverlayWindow
     private void SynchronizeUtilities()
     {
         if (utilityWifi is null) return;
+        CloseQuickSettings(immediate: true);
         var selected = settingsSession.Current.SelectedUtilities;
         utilityAirplaneMode?.SetMonitoring(selected.Contains(UtilityKind.AirplaneMode));
         utilityNightLight?.SetMonitoring(selected.Contains(UtilityKind.NightLight));
@@ -213,7 +224,7 @@ public sealed partial class DesktopOverlayWindow
                     }
                     if (button.Definition.Kind == UtilityKind.Bluetooth)
                     { await ToggleBluetoothAsync(button); return; }
-                    if (button.Definition.Kind == UtilityKind.Wifi &&
+                    if (!GridUtilities && button.Definition.Kind == UtilityKind.Wifi &&
                         (ReferenceEquals(wifiSettingsOnly, button) || wifiWindow is { IsDetailsOpen: true }))
                     {
                         wifiWindow?.Hide();
@@ -260,6 +271,7 @@ public sealed partial class DesktopOverlayWindow
                 else _ = utilityWifi.RefreshAsync();
             }
         }
+        SynchronizeQuickSettingsMode();
         UpdateUtilitySurfaces();
         WifiStateChanged(this, EventArgs.Empty);
         BluetoothStateChanged(this, EventArgs.Empty);
@@ -287,6 +299,7 @@ public sealed partial class DesktopOverlayWindow
     {
         if (!closing && utilityButtons.TryGetValue(UtilityKind.Volume, out var button))
             button.SetSoundState(e.State.Available, e.State.Muted);
+        if (!closing) quickSettingsPanel?.RefreshValues();
     });
 
     private void DndStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
@@ -331,7 +344,6 @@ public sealed partial class DesktopOverlayWindow
         { StartupDiagnostics.Write($"{button.Definition.Name} toggle failed", error); }
         finally
         {
-            // A skipped native request must also finish the already-started UI transition.
             try { await Finish(); }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
@@ -358,7 +370,6 @@ public sealed partial class DesktopOverlayWindow
         story.Completed += (_, _) =>
         {
             CompositionTarget.Rendering -= Frame;
-            // Let WinUI finish its animation callback before tearing down the animated subtree.
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (closing) return;
@@ -377,6 +388,7 @@ public sealed partial class DesktopOverlayWindow
         {
             foreach (var button in utilityButtons.Values.Concat(fadingUtilities))
             {
+                if (button.FloatingPresentation || button.Visibility != Visibility.Visible) continue;
                 if (!button.IsLoaded || !(button.Glass.UsesNativeDockBackdrop || button.NeedsNativeToggleUnderlay)) continue;
                 if (button.Glass.UsesNativeDockBackdrop)
                 {
@@ -397,6 +409,7 @@ public sealed partial class DesktopOverlayWindow
         var visible = !closing && !windowManager.FullscreenSuppressed && state.State is DockState.Expanding or DockState.Expanded or DockState.Collapsing;
         utilityArea.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         utilityArea.Opacity = surface.Opacity;
+        if (GridUtilities) { PositionQuickSettingsButton(visible); UpdateNativeUtilitySurfaces(); return; }
         if (!visible) { DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); }
         if (utilityButtons.Count == 0) { UpdateNativeUtilitySurfaces(); return; }
         var top = root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight;
@@ -412,7 +425,6 @@ public sealed partial class DesktopOverlayWindow
         var rowWidth = buttons.Length * (dock.Height + gap) - gap;
         if (minimumLeft + rowWidth > root.ActualWidth - 16)
         {
-            // Keep utilities accessible without stealing width from pinned apps.
             var left = Math.Max(16, Math.Min(dock.X + dock.Width - rowWidth, root.ActualWidth - 16 - rowWidth));
             dock = new(left - gap, Math.Max(0, dock.Y - gap - dock.Height), 0, dock.Height);
             minimumLeft = left;
@@ -422,7 +434,6 @@ public sealed partial class DesktopOverlayWindow
             if (button.Definition.Kind is UtilityKind.Wifi or UtilityKind.Bluetooth) utilityOffsets.Remove(button.Definition.Kind);
             var slot = UtilityPlacement.Beside(dock, gap, index);
             slot = slot with { X = slot.X + expansionShift };
-            // Reserve the remaining circles, allowing Wi-Fi to push them along its width animation.
             var maximumRight = root.ActualWidth - 16 - (buttons.Length - index - 1) * (dock.Height + gap);
             var rect = UtilityPlacement.WithinRow(slot, slot.X + utilityOffsets.GetValueOrDefault(button.Definition.Kind), minimumLeft, maximumRight);
             utilityOffsets[button.Definition.Kind] = rect.X - slot.X;
@@ -455,7 +466,7 @@ public sealed partial class DesktopOverlayWindow
     private void WifiStateChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
     {
         if (closing || utilityWifi is null) return;
-        if (!utilityWifi.State.On && wifiWindow is { IsDetailsOpen: true } &&
+        if (!GridUtilities && !utilityWifi.State.On && wifiWindow is { IsDetailsOpen: true } &&
             utilityButtons.TryGetValue(UtilityKind.Wifi, out var source)) ShowWifiSettingsOnly(source);
         else if (utilityWifi.State.On) DismissWifiSettingsOnly();
         var connection = utilityWifi.State.On
@@ -487,6 +498,8 @@ public sealed partial class DesktopOverlayWindow
     private void UpdateUtilitySurfaces()
     {
         var surfaces = utilityButtons.Values.Select(b => b.Glass).ToList();
+        if (quickSettingsButton is { } grid) surfaces.Add(grid.Glass);
+        if (quickSettingsPanel is { } quick) surfaces.AddRange(quick.CapsuleSurfaces);
         if (wifiWindow is { IsOpen: true } window) surfaces.AddRange(window.GlassSurfaces);
         if (bluetoothWindow is { IsOpen: true } bluetooth) surfaces.AddRange(bluetooth.GlassSurfaces);
         liquidGlass.SetUtilities(surfaces);
@@ -495,9 +508,10 @@ public sealed partial class DesktopOverlayWindow
     private void ShowWifiNetworks(UtilityButton button)
     {
         if (utilityWifi is null || closing) return;
+        if (GridUtilities && !PrepareQuickSettingsList(UtilityKind.Wifi)) return;
         bluetoothWindow?.Hide(immediate: true); DismissBluetoothSettingsOnly();
         root.ContextFlyout?.Hide();
-        if (!utilityWifi.State.On)
+        if (!utilityWifi.State.On && !GridUtilities)
         {
             if (ReferenceEquals(wifiSettingsOnly, button)) DismissWifiSettingsOnly();
             else ShowWifiSettingsOnly(button);
@@ -510,6 +524,13 @@ public sealed partial class DesktopOverlayWindow
             ScreenshotRequested = () => ScreenshotRequested?.Invoke()
         };
         wifiWindow = window;
+        if (GridUtilities)
+        {
+            window.LeftOfColumn = quickSettingsPanel?.ColumnBounds;
+            window.UseQuickSettingsMotion = true;
+            window.RelatedWindowHasForeground = () => quickSettingsWindow?.HasForeground == true;
+            window.Hiding += (_, _) => { if (!switchingQuickSettingsList && quickSettingsList == UtilityKind.Wifi) quickSettingsButton?.SetOpen(false); };
+        }
         window.DetailsVisibilityChanged += (_, _) => _ = button.SetDetailsOpenAsync(
             window.IsDetailsOpen || ReferenceEquals(wifiSettingsOnly, button));
         window.ApplyAppearance(settingsSession.Current.DockAppearanceMode, liquidGlass.BackdropMaterial, liquidGlass.Material, (float)DockScale, settingsSession.Current.ClearCircularHighlightsEnabled);
@@ -524,8 +545,8 @@ public sealed partial class DesktopOverlayWindow
         {
             if (ReferenceEquals(wifiWindow, window)) wifiWindow = null;
             UpdateUtilitySurfaces(); previews.EndContextMenu(window);
+            QuickSettingsListHidden(UtilityKind.Wifi);
         };
-        // Hold the dock before showing/activating the popup, including its first layout pass.
         previews.BeginContextMenu(window);
         try { window.Show(button.Glass.Bounds); UpdateUtilitySurfaces(); UpdateLiquidGlass(); }
         catch { window.Hide(immediate: true); previews.EndContextMenu(window); throw; }
@@ -537,7 +558,6 @@ public sealed partial class DesktopOverlayWindow
         previews.BeginContextMenu(button);
         wifiWindow?.Hide(immediate: true);
         _ = button.SetDetailsOpenAsync(true);
-        // With no popup HWND, the existing dock receives Escape and outside-window deactivation.
         SetForegroundWindowForDockKeyboard(WinRT.Interop.WindowNative.GetWindowHandle(this));
         button.Focus(FocusState.Programmatic);
     }
@@ -552,6 +572,8 @@ public sealed partial class DesktopOverlayWindow
 
     private void DisposeUtilities()
     {
+        CloseQuickSettings(immediate: true);
+        quickSettingsButton?.Dispose();
         brightnessSelector?.Hide(); brightnessSelector = null;
         if (utilityVolume is not null)
         {

@@ -6,10 +6,6 @@ using Windows.UI.Notifications.Management;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>
-/// Read-only Windows Notification Center provider. It records only AppUserModelId and toast
-/// count metadata; it never reads notification text, removes notifications or polls.
-/// </summary>
 public class WindowsToastBadgeProvider : IBadgeProvider
 {
     private UserNotificationListener? listener;
@@ -30,7 +26,6 @@ public class WindowsToastBadgeProvider : IBadgeProvider
         busy = true;
         try
         {
-            // Package.Current throws for the ordinary unpackaged launch; don't issue a misleading consent prompt.
             _ = global::Windows.ApplicationModel.Package.Current.Id;
             listener ??= UserNotificationListener.Current;
             var access = requestPermission ? await listener.RequestAccessAsync() : listener.GetAccessStatus();
@@ -85,8 +80,6 @@ public class WindowsToastBadgeProvider : IBadgeProvider
 
                     foreach (var notification in notifications)
                     {
-                        // Intentionally read identity only. Do not access notification.Notification
-                        // or any toast visual/text payload here.
                         var id = notification.AppInfo?.AppUserModelId;
                         if (!string.IsNullOrWhiteSpace(id))
                             rawCounts[id] = rawCounts.GetValueOrDefault(id) + 1;

@@ -5,7 +5,6 @@ using Windows.Foundation;
 
 namespace GlassDock.App.Controls;
 
-/// <summary>Scroll extent counts whole entries; visible children measure and flow at their actual edge heights.</summary>
 internal sealed class WifiNetworkListPanel : Panel
 {
     private double offset;
@@ -72,7 +71,6 @@ internal sealed class WifiNetworkListPanel : Panel
             child.Measure(new(availableSize.Width, height));
             total += height + WifiScrollGeometry.Gap * progress; count++;
         }
-        // Logical distance stays stable while the outgoing/incoming heights exchange one full slot.
         return new(availableSize.Width, scrolling ? count * WifiScrollGeometry.Pitch : Math.Max(0, total - WifiScrollGeometry.Gap));
     }
 

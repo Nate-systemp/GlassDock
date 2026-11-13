@@ -100,7 +100,6 @@ public sealed class InputHelperProtocolTests
     [Fact]
     public void Session_mutex_rejects_a_second_helper_instance()
     {
-        // A synthetic session isolates this test from the real helper.
         using var first = WindowsInputHelperProtocol.AcquireSingleInstance(1000000 + Environment.ProcessId, out var created);
         Assert.True(created);
         try
@@ -120,14 +119,22 @@ public sealed class InputHelperProtocolTests
             "Desktop", "WindowsKeyboardService.cs"));
         var nativeHook = File.ReadAllText(Path.Combine(root.FullName, "src", "GlassDock.Windows",
             "Desktop", "WindowsKeyHook.cs"));
-        // Home.IsVisible is NOT an acceptable condition: Explorer could see the
-        // physical Win-down and activate Windows Start before the bare release.
         Assert.Contains("var captureWinDown = dockShortcutsEnabled;", keyboardService);
         Assert.Contains("hook?.UpdateState(suppressDockToggle, captureWinDown, revision)", keyboardService);
         Assert.Contains("elevatedHelper?.UpdateState(suppressDockToggle, captureWinDown, revision)", keyboardService);
         Assert.Contains("private State state = new(false, true, 0);", nativeHook);
         Assert.Contains("if (captureBareWindowsKey)", nativeHook);
-        Assert.Contains("The physical Win-down never reached Windows", nativeHook);
+        Assert.Matches(@"if \(captureBareWindowsKey\)\s+\{\s+capturedWindowsDown = true;" +
+            @"\s+capturedWindowsKey = keyCode;\s+return 1;", nativeHook);
+        var capturedRelease = nativeHook.IndexOf("if (capturedWindowsDown &&", StringComparison.Ordinal);
+        Assert.True(capturedRelease >= 0);
+        var nextBranch = nativeHook.IndexOf("if (wasLauncherShortcut)", capturedRelease, StringComparison.Ordinal);
+        Assert.True(nextBranch > capturedRelease);
+        var release = nativeHook[capturedRelease..nextBranch];
+        Assert.Contains("capturedWindowsKey == keyCode", release);
+        Assert.Contains("capturedWindowsDown = false;", release);
+        Assert.Contains("signal(false, pressRevision);", release);
+        Assert.Contains("return 1;", release);
     }
 
     [Fact]

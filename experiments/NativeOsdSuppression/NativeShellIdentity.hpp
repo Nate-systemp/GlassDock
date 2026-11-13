@@ -19,7 +19,6 @@ inline bool InitNativeIdentity() noexcept {
     RTL_OSVERSIONINFOW info{}; info.dwOSVersionInfoSize = sizeof(info);
     if (!version || version(&info) != 0) return false;
     observedBuild = info.dwBuildNumber;
-    // This is an observed identity profile, not a claim of injected compatibility.
     return info.dwMajorVersion == 10 && observedBuild == 26300 && readBand && readCaption;
 }
 inline DWORD CurrentShellPid() noexcept {
@@ -33,12 +32,10 @@ inline bool NativeHostIdentity(HWND window, DWORD expectedPid) noexcept {
     if (!GetWindowThreadProcessId(window, &pid) || pid != expectedPid ||
         !GetClassNameW(window, name, 80) || std::wcscmp(name, L"XamlExplorerHostIslandWindow") != 0 ||
         !readBand(window, &band) || band != 18) return false;
-    // InternalGetWindowText avoids synchronous WM_GETTEXT/reentrancy inside Explorer.
     if (readCaption(window, title, 8) != 0 || title[0] != L'\0') return false;
     return FindWindowExW(window, nullptr, L"Windows.UI.Composition.DesktopWindowContentBridge", L"DesktopWindowXamlSource") != nullptr;
 }
 inline Intent UnknownNativeIntent(HWND) noexcept {
-    // There is intentionally no brightness-by-absence-of-volume heuristic.
     return Intent::Unknown;
 }
-} // namespace osd_poc
+}

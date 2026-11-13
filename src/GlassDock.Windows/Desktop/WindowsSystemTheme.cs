@@ -2,7 +2,6 @@ using Windows.UI.ViewManagement;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Reads Windows' current Apps/system light or dark preference.</summary>
 public static class WindowsSystemTheme
 {
     public static bool IsDark()
@@ -15,7 +14,6 @@ public static class WindowsSystemTheme
         }
         catch (Exception) when (OperatingSystem.IsWindows())
         {
-            // Keep the existing Doky default if the shell theme API is unavailable.
             return true;
         }
     }

@@ -55,7 +55,6 @@ bool SnapshotLease(Snapshot& value) noexcept {
     return before == shared->sequence && value.version == 1 && value.session == ownSession;
 }
 
-// File I/O and hashing happen only during initialization, never in a Shell API hook.
 bool ExactBinary(HMODULE module, PCWSTR expected) {
     wchar_t path[MAX_PATH]{};
     if (!module || !GetModuleFileNameW(module, path, MAX_PATH)) return false;
@@ -92,7 +91,6 @@ bool BrightnessContext() noexcept {
     const USHORT count = CaptureStackBackTrace(0, 24, frames, nullptr);
     const auto hostCall = reinterpret_cast<ULONG_PTR>(twinui) + 0x4F977;
     const auto showHost = reinterpret_cast<ULONG_PTR>(hardware) + 0x2379F;
-    // Matching Microsoft PDB identifies this return site as ShowBrightnessAsync$_ResumeCoro$1.
     const auto brightness = reinterpret_cast<ULONG_PTR>(hardware) + 0x22D94;
     for (USHORT i = 0; i + 2 < count; ++i)
         if (reinterpret_cast<ULONG_PTR>(frames[i]) == hostCall &&
@@ -147,7 +145,7 @@ void Cleanup() {
     if (hardware) { FreeLibrary(hardware); hardware = nullptr; }
     if (twinui) { FreeLibrary(twinui); twinui = nullptr; }
 }
-} // namespace
+}
 
 BOOL Wh_ModInit() {
     if (!Wh_GetIntSetting(L"enabled") || CurrentShellPid() != GetCurrentProcessId() ||
@@ -168,7 +166,6 @@ BOOL Wh_ModInit() {
     HMODULE user = GetModuleHandleW(L"user32.dll");
     if (!Wh_SetFunctionHook(std::bit_cast<void*>(GetProcAddress(user, "ShowWindow")), std::bit_cast<void*>(&ShowBrightness), reinterpret_cast<void**>(&showOriginal)) ||
         !Wh_SetFunctionHook(std::bit_cast<void*>(GetProcAddress(user, "SetWindowPos")), std::bit_cast<void*>(&PositionBrightness), reinterpret_cast<void**>(&positionOriginal))) {
-        // The framework rolls back queued hooks on initialization failure before unload.
         Cleanup(); return FALSE;
     }
     enabled = true;

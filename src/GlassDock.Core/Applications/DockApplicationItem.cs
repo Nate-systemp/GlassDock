@@ -26,7 +26,6 @@ public sealed class DockApplicationItem(DockApplication application) : INotifyPr
     }
 }
 
-/// <summary>Apply snapshots on the owning UI thread; retain item identity across running-state changes.</summary>
 public sealed class DockApplications
 {
     public ObservableCollection<DockApplicationItem> VisibleDockApplications { get; } = [];

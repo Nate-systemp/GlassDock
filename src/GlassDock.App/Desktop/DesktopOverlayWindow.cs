@@ -51,10 +51,6 @@ public sealed partial class DesktopOverlayWindow : Window
         Margin = new Thickness(0, 0, 0, 16), IsHitTestVisible = false
     };
 
-    // Magnified artwork lives in a full-window, input-transparent foreground layer.
-    // Drawing the enlarged image inside the original Button/ContentPresenter can
-    // clip its top and bottom at the button's fixed layout bounds. Its hit target,
-    // running indicator and badge stay in the original dock row.
     private readonly Canvas hoverArtworkForeground = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -76,11 +72,6 @@ public sealed partial class DesktopOverlayWindow : Window
         IsHitTestVisible = false
     };
 
-    // Geometry-only XAML paths. They remain available to build the native
-    // hit-test polygon, but they never render. The visible dock edge is owned
-    // exclusively by DesktopGlassBackdrop's compositor mask/inner-edge pass.
-    // Keeping the old XAML rim visible on top of the compositor was the source
-    // of the visibly stair-stepped/pixelated hover wave.
     private readonly XamlPath dockWaveGlow = new()
     {
         IsHitTestVisible = false,
@@ -109,9 +100,6 @@ public sealed partial class DesktopOverlayWindow : Window
     private readonly Action? restoreTaskbarOverride;
     private readonly Action? resumeTaskbarOverride;
     private int notificationRefreshQueued;
-    // Bare-Win can arrive much faster than the dock's open/close storyboard.
-    // Serialize those requests and keep only their parity so key-spam cannot
-    // run overlapping expand/collapse transitions against the same visuals.
     private readonly WindowsApplicationLauncher dropLauncher = new();
     private readonly DockApplicationsViewModel applications;
     private readonly WindowPreviewCoordinator previews;
@@ -120,10 +108,6 @@ public sealed partial class DesktopOverlayWindow : Window
     private bool keyboardDockNavigation;
     private nint keyboardPreviousForegroundWindow;
 
-    // The normal dock is intentionally WS_EX_NOACTIVATE so pointer interaction
-    // never steals focus from a running app. Win+T is a deliberate exception:
-    // without a foreground HWND, WinUI focus visuals move but arrow KeyDown
-    // messages continue going to the user's previous foreground window.
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
     private static extern nint GetForegroundWindowForDockKeyboard();
 
@@ -182,8 +166,6 @@ public sealed partial class DesktopOverlayWindow : Window
     private double dockWaveTargetStrength;
     private double dockWaveCurrentStrength;
 
-    // Pinned-app drag reorder state. Reordering is visual while the pointer is
-    // down, then committed atomically to DockPinStore on release.
     private DockApplicationItem? reorderCandidate;
     private Button? reorderButton;
     private double reorderStartX;
@@ -213,14 +195,14 @@ public sealed partial class DesktopOverlayWindow : Window
     private double DockScale => settingsSession.Current.DockSize;
     private DockSizing appliedSizing;
     private DockSizing Sizing => new(DockScale, settingsSession.Current.IconSize, settingsSession.Current.PinnedPlacement, settingsSession.Current.FloatingDockGap);
-    private double AvailableDockWidth => Math.Max(120d, (root.ActualWidth > 0 ? root.ActualWidth : windowManager.CurrentHostWidthDips) - 32d);
+    private double AvailableDockWidth => Math.Max(120d, (root.ActualWidth > 0 ? root.ActualWidth : windowManager.CurrentHostWidthDips) - (GridUtilities ? 128d : 32d));
     private DockAppearanceSettings Appearance => settingsSession.Appearance.ForDock(DockScale)
         .FitAppRow(VisibleDockApplications.Count, AvailableDockWidth, 36d * DockScale);
     private bool HoverWaveEnabled => !safeMode && settingsSession.Current.HoverWaveEnabled;
     private double ExpandedDockHeight => Sizing.Height;
     private double ExpandedContentTop => root.ActualHeight - icons.Margin.Bottom - ExpandedDockHeight;
     private bool DockPinLock => pinDockRequested || pinnedPlacementActive || pinDockTransitionActive;
-    private const double PeekRestBottom = -2; // Three DIP remain visible above the physical screen edge.
+    private const double PeekRestBottom = -2;
     public string Status { get; private set; } = "Starting desktop recovery protection.";
     public string RenderingMode => settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Clear
         ? liquidGlass.Status : desktopBackdrop.RenderingMode;
@@ -230,7 +212,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
     internal nint MonitorTarget => windowManager.FixedMonitor;
     internal WindowsKeyboardService KeyboardService => keyboard;
-    // Snipping Tool's full-screen selection overlay must not be mistaken for a game.
     private bool snippingPending;
     internal Action? ScreenshotRequested { get; init; }
     internal bool BeginSnippingCapture()
@@ -244,25 +225,21 @@ public sealed partial class DesktopOverlayWindow : Window
             heldTransition = state.HoldTransition();
             animation.FreezeCurrentTransitions();
         }
-        // Freeze the separate app menu first. The main dock is exposed only
-        // after popup capture can no longer sample the newly-visible dock.
         previews.BeginSnippingCapture();
         var frozen = liquidGlass.BeginScreenshotMode();
         if (frozen || (Application.Current as App)?.BasicRendering == true)
-        { wifiWindow?.BeginSnippingCapture(); bluetoothWindow?.BeginSnippingCapture(); }
+        { wifiWindow?.BeginSnippingCapture(); bluetoothWindow?.BeginSnippingCapture(); quickSettingsWindow?.BeginSnippingCapture(); }
         return frozen;
     }
     internal void EndSnippingCapture()
     {
-        // Re-exclude the main dock before the app menu resumes GPU sampling.
         wifiWindow?.EndSnippingCapture();
         bluetoothWindow?.EndSnippingCapture();
+        quickSettingsWindow?.EndSnippingCapture();
         liquidGlass.EndScreenshotMode();
         previews.EndSnippingCapture();
         snippingPending = false;
         if (closing) return;
-        // A foreground/capture transition may have stopped the renderer before
-        // freezing began. Restore visibility and drawing without waiting for a click.
         windowManager.RefreshFullscreenPolicy();
         UpdateBackdropBounds();
         if (heldTransition) { ResumeAfterHold(); return; }
@@ -281,9 +258,6 @@ public sealed partial class DesktopOverlayWindow : Window
         AbortDragLens();
         var oldMonitor = windowManager.CurrentMonitor;
         windowManager.SetFixedMonitor(monitor);
-        // Leaving All Displays for Follow Pointer/Foreground/Primary must use
-        // the guarded timer path instead of relocating synchronously inside the
-        // settings notification (which can re-enter WinUI window events).
         if (monitor == 0)
         {
             windowManager.InvalidateMonitorMetrics();
@@ -351,9 +325,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
         Title = "Doky — Floating Dock";
         WindowBranding.Apply(this);
-        // The settings load in App.OnLaunched is asynchronous, so the UI dispatcher can
-        // already be pumping while this window is constructed. Subscribe before any
-        // native call can show the HWND; the queued callback runs after construction.
         root.Loaded += (_, _) => QueueDesktopStartup();
         Content = root;
         surface.Margin = indicator.Margin = icons.Margin = new Thickness(0, 0, 0, BottomMargin);
@@ -372,15 +343,10 @@ public sealed partial class DesktopOverlayWindow : Window
         liquidGlass = new(hwnd, DispatcherQueue, () => desktopBackdrop.DockGeometry, desktopBackdrop.SetLiquidActive);
         liquidGlass.StatusChanged += (_, _) => StatusChanged?.Invoke(this, EventArgs.Empty);
         root.Children.Add(liquidGlass.Panel);
-        // Keep the wave path for native hit-test sampling; its XAML stroke is
-        // no longer rendered over the compositor's independently sampled edge.
         root.Children.Add(indicator);
         root.Children.Add(icons);
         root.Children.Add(externalDropHighlight);
         root.Children.Add(hoverArtworkForeground);
-        // The compositor wave and Clear glass must remain BEHIND magnified
-        // icon artwork. Explicit root-layer ordering prevents the crest from
-        // painting over an enlarged logo even when the icon crosses the rim.
         Canvas.SetZIndex(surface, 0);
         Canvas.SetZIndex(liquidGlass.Panel, 1);
         Canvas.SetZIndex(indicator, 2);
@@ -392,7 +358,6 @@ public sealed partial class DesktopOverlayWindow : Window
         {
             if (!reorderDragging) suppressDragContext = false;
             EndDockKeyboardNavigation(restorePreviousFocus: false);
-            // Dock clicks need not deactivate a topmost popup. Preserve the source toggle.
             if (!StackSourceOwnsPointer()) stackWindow?.Hide();
         }), true);
         root.ContextRequested += (_, e) => { if (reorderDragging || suppressDragContext) e.Handled = true; };
@@ -400,8 +365,6 @@ public sealed partial class DesktopOverlayWindow : Window
         {
             if (args.WindowActivationState != WindowActivationState.Deactivated) return;
             if (reorderDragging) CancelReorder();
-            // If the user Alt+Tabs or selects another window, stop consuming
-            // arrow keys when they return to Doky later.
             EndDockKeyboardNavigation(restorePreviousFocus: false);
         };
         root.AllowDrop = true;
@@ -479,8 +442,6 @@ public sealed partial class DesktopOverlayWindow : Window
         previews.ActionFailed += (_, message) => SetStatus(message);
         AppWindow.Changed += (_, _) =>
         {
-            // Visual Studio/debugger activation and some shell z-order changes can
-            // disturb a freshly shown overlay. Reassert the documented dock contract.
             if (!presenter.IsAlwaysOnTop) presenter.IsAlwaysOnTop = true;
             previews.Reposition();
             RepositionStackPopup();
@@ -520,8 +481,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 RefreshHoverVisuals();
         };
         displayTimer = DispatcherQueue.CreateTimer();
-        // Pointer-following is latency-sensitive. Other modes retain the cheaper
-        // polling interval.
         displayTimer.Interval = MonitorTrackingInterval(settingsSession.DisplayMode);
         var fullscreenWasHidden = false;
         displayTimer.Tick += (_, _) =>
@@ -545,9 +504,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 return;
             }
             if (fullscreenWasHidden) { fullscreenWasHidden = false; UpdateBackdropBounds(); }
-            // Monitor tracking must keep running even while the dock is expanded.
-            // Otherwise a long auto-hide delay makes Follow pointer / Follow active
-            // window appear broken until the dock collapses.
             if (closing || previews.HoldsDock)
                 return;
 
@@ -581,8 +537,6 @@ public sealed partial class DesktopOverlayWindow : Window
             error =>
             {
                 windowManager.InvalidateMonitorMetrics();
-                // Keep retries on the existing timer; limit repeated logging,
-                // without hiding the exception type, HRESULT or stack trace.
                 if (DateTime.UtcNow - lastRelocationFailure >= TimeSpan.FromSeconds(5))
                 {
                     lastRelocationFailure = DateTime.UtcNow;
@@ -614,7 +568,6 @@ public sealed partial class DesktopOverlayWindow : Window
             keyboard.BareWindowsRequested += (_, _) => RequestDockToggle();
             keyboard.HomeRequested += (_, _) =>
             {
-                // Ctrl+Alt+Space retains the explicit dock toggle.
                 if (home is { IsVisible: true })
                     home.HideHome();
 
@@ -668,7 +621,6 @@ public sealed partial class DesktopOverlayWindow : Window
         surface.Margin = indicator.Margin = new Thickness(0, 0, 0, PeekRestBottom);
         indicator.Opacity = 1;
         windowManager.SetPeekInteraction(PeekRestBottom);
-        // Also queue explicitly so desktop protection does not depend on Loaded timing.
         QueueDesktopStartup();
     }
 
@@ -762,9 +714,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private void SynchronizeItems()
     {
-        // Keep the right-click anchor and neighboring icon positions stable.
-        // The coordinator dismisses menus whose app/window membership changed;
-        // the latest collection is applied when the final menu hold releases.
         if (previews.ContextMenuOpen || reorderDragging || reorderCommitting || externalDragActive || dragLensButton is not null) return;
         if (stackWindow?.IsOpen == true)
         {
@@ -807,20 +756,13 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         var count = VisibleDockApplications.Count;
 
-        // The surface and button row use the same fitted geometry. Utilities
-        // move above the dock when the right-hand row no longer fits.
         var applicationWidth = count <= 0
             ? 100d
             : count * Appearance.ButtonWidth +
               Math.Max(0, count - 1) * Appearance.IconSpacing +
-              36d * DockScale; // breathing room around the app section
+              36d * DockScale;
 
-        // The overlay host is now monitor-aware and can grow well beyond the old
-        // 960-DIP ceiling. Keep 16 DIP of invisible host margin on each side.
-        var hostWidth = root.ActualWidth > 0
-            ? root.ActualWidth
-            : windowManager.CurrentHostWidthDips;
-        var maximumWidth = Math.Max(120d, hostWidth - 32d);
+        var maximumWidth = AvailableDockWidth;
 
         return Math.Min(maximumWidth, applicationWidth);
     }
@@ -943,9 +885,6 @@ public sealed partial class DesktopOverlayWindow : Window
         button.DragLeave += (_, e) => ApplicationDragLeave(button, e);
         button.Drop += async (_, e) => await ApplicationDropAsync(button, item, e);
 
-        // ButtonBase handles pointer events internally for Click and can mark them
-        // handled before ordinary += handlers see them. Register with
-        // handledEventsToo=true so drag-reorder still receives the pointer stream.
         button.AddHandler(
             UIElement.PointerPressedEvent,
             new PointerEventHandler((_, e) => BeginReorderCandidate(button, item, e)),
@@ -969,10 +908,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 if (reorderDragging && properties.IsLeftButtonPressed &&
                     properties.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.RightButtonReleased &&
                     button.CapturePointer(e.Pointer)) return;
-                // ButtonBase may release capture as part of its own pointer-up
-                // handling before our PointerReleased handler gets to commit.
-                // Defer cancellation one dispatcher turn; a successful drop
-                // clears reorderButton first, making this callback a no-op.
                 DispatcherQueue.TryEnqueue(() =>
                 {
                     if (ReferenceEquals(reorderButton, button))
@@ -992,14 +927,9 @@ public sealed partial class DesktopOverlayWindow : Window
     }
 
 
-    // One activation path for mouse clicks and Win+number; keyboard and mouse
-    // must not diverge in minimize/restore or protected elevated-window logic.
     private async Task ActivateDockItemAsync(Button button, DockApplicationItem item)
     {
 
-            // ButtonBase can raise Click before our handledEventsToo PointerReleased
-            // callback commits the drag. Never activate an app while this button is
-            // currently participating in a reorder gesture.
             if ((ReferenceEquals(reorderButton, button) && reorderDragging) ||
                 (suppressClickUntil.Remove(item.Id, out var until) &&
                  DateTime.UtcNow <= until))
@@ -1019,10 +949,8 @@ public sealed partial class DesktopOverlayWindow : Window
                     ? applicationService.MinimizeWindow(target)
                     : applicationService.ActivateWindow(target) || await keyboard.RestoreElevatedWindowAsync(target);
                 if (!succeeded && !closing) SetStatus($"Windows could not {action.ToString().ToLowerInvariant()} {item.Name}.");
-                return; // A rejected window command must never become a new launch.
+                return;
             }
-            // Do not launch a duplicate when the snapshot still contains known
-            // running windows whose handles cannot currently be activated.
             if (windows.Count > 0)
             {
                 SetStatus($"Windows could not access a running {item.Name} window.");
@@ -1051,8 +979,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 await ExpandDockAsync();
                 if (!closing && keyboardDockNavigation)
                 {
-                    // WS_EX_NOACTIVATE is correct for mouse usage, but keyboard
-                    // navigation must explicitly foreground the dock HWND.
                     var dockHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                     if (GetForegroundWindowForDockKeyboard() != dockHwnd)
                         SetForegroundWindowForDockKeyboard(dockHwnd);
@@ -1202,12 +1128,8 @@ public sealed partial class DesktopOverlayWindow : Window
             CancelPillHide();
             previews.Hide();
 
-            // Hover magnification changes rendered icon geometry. Remove it first,
-            // then establish the drag coordinate system from the settled layout.
             animation.ResetMagnification(immediate: true);
 
-            // Clear only the transient wave deformation. Keep the expanded dock rim
-            // visible while reordering.
             dockWaveCurrentStrength = 0;
             dockWaveTargetStrength = 0;
             desktopBackdrop.ClearDockWave();
@@ -1241,8 +1163,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 })
                 .ToArray();
 
-            // Hitboxes share the pointer's DIP space. Preview translations must
-            // not move their own insertion targets under a stationary pointer.
             reorderHitBounds = reorderPinnedButtons.Select(candidate =>
             {
                 var bounds = candidate.TransformToVisual(icons).TransformBounds(
@@ -1250,10 +1170,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 return new DockDragBounds(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
             }).ToArray();
 
-            // Re-read after hover magnification has been cancelled. From this point
-            // onward the dragged button follows the physical pointer delta in ROOT
-            // coordinates. Root does not move when neighbor icons shift, so this
-            // cannot accumulate drift as the icon crosses reorder slots.
             point = e.GetCurrentPoint(icons);
             var sourceCenter = button.TransformToVisual(root).TransformPoint(
                 new(button.ActualWidth / 2, button.ActualHeight / 2));
@@ -1262,7 +1178,6 @@ public sealed partial class DesktopOverlayWindow : Window
             dragIntent.Begin(point.Properties.IsRightButtonPressed);
             reorderDragging = true;
 
-            // ButtonBase may emit Click before PointerReleased reaches us.
             suppressClickUntil[item.Id] = DateTime.UtcNow.AddMilliseconds(750);
 
             button.Opacity = 0.96;
@@ -1275,8 +1190,6 @@ public sealed partial class DesktopOverlayWindow : Window
         if (reorderSlotCenters.Length == 0)
             return;
 
-        // Track the original click point, not the pointer position at the moment
-        // the 6-DIP drag threshold was crossed. Track Y as well as X.
         var rootPoint = e.GetCurrentPoint(root).Position;
         var draggedCenter = DragLensMotion.PointerTarget(
             new((float)rootPoint.X, (float)rootPoint.Y), reorderGrabOffset);
@@ -1308,7 +1221,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 if (dragLensButton is not null) dragLensTarget = draggedCenter;
                 else
                 {
-                    // Basic-rendering fallback uses the same pointer-to-grab offset.
                     var dragTransform = candidate.RenderTransform as TranslateTransform ?? new TranslateTransform();
                     dragTransform.X = draggedCenter.X - reorderSourceCenterRoot.X;
                     dragTransform.Y = draggedCenter.Y - reorderSourceCenterRoot.Y;
@@ -1354,8 +1266,6 @@ public sealed partial class DesktopOverlayWindow : Window
             return;
         }
 
-        // Do not release pointer capture yet. PointerCaptureLost can fire
-        // synchronously and would cancel/clear the reorder state before we commit it.
         if (!reorderDragging)
         {
             ClearReorderState();
@@ -1363,9 +1273,6 @@ public sealed partial class DesktopOverlayWindow : Window
             return;
         }
 
-        // PointerMoved can be coalesced/skipped near release, especially while
-        // ButtonBase owns capture. Resolve the drop slot one final time from
-        // the actual pointer-up position.
         if (FinishStackMerge(button, item, e)) return;
         if (dragPointerTarget.Mode != DockPointerMode.Reorder)
         {
@@ -1390,9 +1297,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
             if (applicationService.ReorderApplications(orderedIds))
             {
-                // Keep the observable collection in the same order immediately.
-                // That prevents the asynchronous application snapshot from
-                // performing a second visible reorder a moment after the drop.
                 reorderCommitting = true;
                 try
                 {
@@ -1417,15 +1321,11 @@ public sealed partial class DesktopOverlayWindow : Window
 
         suppressClickUntil[item.Id] = DateTime.UtcNow.AddMilliseconds(750);
 
-        // A successful FLIP commit owns the transforms until its storyboards finish.
-        // Resetting here would cancel that animation and cause a visible snap/glitch.
         if (!committedWithAnimation)
             ResetReorderVisuals();
 
         ClearReorderState();
 
-        // Release only after the reorder state is cleared so the capture-lost
-        // callback cannot undo the completed drop.
         button.ReleasePointerCapture(e.Pointer);
 
         pointerInsideDock = windowManager.IsPointerInsideInput();
@@ -1458,15 +1358,12 @@ public sealed partial class DesktopOverlayWindow : Window
             .Cast<Button>()
             .ToArray();
 
-        // Capture where every icon is actually being drawn right now, including
-        // the dragged icon and the temporary insertion-gap translations.
         var oldPositions = orderedButtons.ToDictionary(
             button => button,
             button => button
                 .TransformToVisual(icons)
                 .TransformPoint(new global::Windows.Foundation.Point(0, 0)));
 
-        // Remove the drag transforms before changing the StackPanel's real order.
         foreach (var candidate in orderedButtons)
         {
             candidate.RenderTransform = null;
@@ -1491,12 +1388,8 @@ public sealed partial class DesktopOverlayWindow : Window
 
         icons.UpdateLayout();
 
-        // FLIP animation: after layout changes, temporarily translate each icon
-        // back to its pre-drop visual position, then settle it into the new slot.
         foreach (var candidate in orderedButtons)
         {
-            // Its content is lifted into the lens canvas. The lens alone settles
-            // this icon; animating the empty button makes that destination move.
             if (ReferenceEquals(candidate, dragLensButton)) continue;
             var newPosition = candidate
                 .TransformToVisual(icons)
@@ -1629,10 +1522,6 @@ public sealed partial class DesktopOverlayWindow : Window
             return;
         }
 
-        // External shell drags are identified by their StorageItems payload, not by
-        // internal reorder state. If this particular app cannot accept file
-        // activation, leave the routed event available to the dock-level handler so
-        // executable/shortcut drops can still use the existing "Pin to Doky" path.
         if (!WindowsApplicationLauncher.CanOpenWith(item.Application))
         {
             if (ReferenceEquals(externalDropTargetButton, button))
@@ -1719,10 +1608,6 @@ public sealed partial class DesktopOverlayWindow : Window
                 return;
             }
 
-            // Application buttons also accept file drops ("Open with ..."). That
-            // must not steal executable/shortcut drags that are intended to pin a
-            // new application to Doky. Classify the dropped paths before checking
-            // whether the hovered application supports file activation.
             if (paths.All(IsDockPinTarget))
             {
                 var added = 0;
@@ -1986,15 +1871,12 @@ public sealed partial class DesktopOverlayWindow : Window
     private void Entered(object sender, PointerRoutedEventArgs e)
     {
         if (snippingPending) return;
-        // Moving geometry must not simulate a new physical hover.
         if (animation.IsPlacementAnimating || pinDockTransitionActive) return;
         if (!windowManager.IsPointerInsideInput()) return;
         pointerInsideDock = true;
         collapseDelay?.Cancel();
         CancelPillHide();
         if (previews.ContextMenuOpen) return;
-        // Peek raising is driven by native physical-pointer movement only.
-        // An animating pill passing under a stationary cursor is not reentry.
         if (state.State == DockState.Expanded) RefreshHoverVisuals();
     }
 
@@ -2012,7 +1894,6 @@ public sealed partial class DesktopOverlayWindow : Window
     private void OnInteractionHoldChanged()
     {
         if (closing) return;
-        // Menu ownership does not imply that the pointer is over the dock.
         pointerInsideDock = windowManager.IsPointerInsideInput();
         keyboard.SuppressDockToggle = previews.ContextMenuOpen;
         animation.HoldMagnification(previews.ContextMenuOpen);
@@ -2033,10 +1914,6 @@ public sealed partial class DesktopOverlayWindow : Window
             CancelPillHide();
             if (previews.ContextMenuOpen)
             {
-                // A menu is an independent floating window. Do not freeze the
-                // last magnification wave beneath it: that looks like a curved
-                // bridge connecting the menu to the dock. Flatten the existing
-                // mask and GPU refraction while keeping the dock's edge visible.
                 StopDockWaveTimer(clear: false);
                 dockWaveCurrentStrength = 0;
                 dockWaveTargetStrength = 0;
@@ -2071,8 +1948,6 @@ public sealed partial class DesktopOverlayWindow : Window
         {
             var pointer = root.TransformToVisual(icons).TransformPoint(new(x, y));
             animation.UpdateMagnification(pointer.X, pointer.Y);
-            // The glass-edge wave is independent of icon scale/reflow. Re-anchor
-            // it in root coordinates without changing the pill's width or height.
             ShowDockWave(x);
         }
         else
@@ -2089,8 +1964,6 @@ public sealed partial class DesktopOverlayWindow : Window
         if (heldTransition)
         {
             heldTransition = false;
-            // A frozen, partially open dock is not an endpoint. Resume directly
-            // from its held values instead of temporarily claiming Expanded/Idle.
             if (pointerInsideDock || DockPinLock) _ = ExpandDockAsync(resume: true);
             else _ = CollapseDockAsync(resume: true);
             return;
@@ -2131,8 +2004,6 @@ public sealed partial class DesktopOverlayWindow : Window
         pointerInsideDock = true;
         collapseDelay?.Cancel();
         CancelPillHide();
-        // The release handoff owns the visual until the pointer physically
-        // moves again. Do not call UpdateMagnification on an old hover sample.
         if (dragLensHoverDeferred) return;
 
         if (previews.ContextMenuOpen ||
@@ -2153,9 +2024,6 @@ public sealed partial class DesktopOverlayWindow : Window
         }
 
         animation.UpdateMagnification(hoverPointer.X, hoverPointer.Y);
-        // Restore the original pointer-following glass crest. The magnification
-        // controller only transforms icon artwork/positions; SetDockWave only
-        // updates the existing compositor mask and input outline.
         ShowDockWave(e.GetCurrentPoint(root).Position.X);
     }
 
@@ -2217,9 +2085,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
         if (reorderButton is not null)
         {
-            // During icon reorder, freeze the hover-wave animation but preserve the
-            // expanded dock's rim/glow. clear:true would zero both opacities and make
-            // the border disappear until the next collapse/expand cycle.
             dockWaveCurrentStrength = 0;
             dockWaveTargetStrength = 0;
             desktopBackdrop.ClearDockWave();
@@ -2367,7 +2232,6 @@ public sealed partial class DesktopOverlayWindow : Window
             }
         }
 
-        // Input can extend above the pill without changing its rendered geometry.
         reusableIconBounds.Clear();
         foreach (var button in applicationButtons.Values)
         {
@@ -2385,8 +2249,13 @@ public sealed partial class DesktopOverlayWindow : Window
         foreach (var button in utilityButtons.Values)
         {
             var bounds = button.Glass.Bounds;
-            if (button.IsHitTestVisible && utilityArea.Visibility == Visibility.Visible)
+            if (!button.FloatingPresentation && button.Visibility == Visibility.Visible && button.IsHitTestVisible && utilityArea.Visibility == Visibility.Visible)
                 reusableIconBounds.Add((bounds.X - 2, bounds.Y - 2, bounds.X + bounds.Z + 2, bounds.Y + bounds.W + 2));
+        }
+        if (GridUtilities && quickSettingsButton is { IsHitTestVisible: true } gridButton && utilityArea.Visibility == Visibility.Visible)
+        {
+            var bounds = gridButton.Glass.Bounds;
+            reusableIconBounds.Add((bounds.X - 2, bounds.Y - 2, bounds.X + bounds.Z + 2, bounds.Y + bounds.W + 2));
         }
         windowManager.SetInteractionPolygon(cachedWaveOutline, reusableIconBounds);
     }
@@ -2433,8 +2302,6 @@ public sealed partial class DesktopOverlayWindow : Window
             dockWidth -
             radius;
 
-        // Only a tiny inset is needed now because the dock corner itself
-        // becomes the outer half of the edge wave.
         const double crestInset = 4;
 
         var minimum =
@@ -2498,8 +2365,6 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         if (enabled)
         {
-            // Do not synthesize a wave when enabling. The next real pointer move
-            // supplies the anchor. Keep the current plain outline/input region valid.
             dockWaveCurrentStrength = 0;
             dockWaveTargetStrength = 0;
             desktopBackdrop.ClearDockWave();
@@ -2512,9 +2377,6 @@ public sealed partial class DesktopOverlayWindow : Window
         dockWaveTargetStrength = 0;
         desktopBackdrop.ClearDockWave();
 
-        // The invisible XAML geometry still feeds the native hit-test polygon,
-        // so disabling the visual deformation never disables pointer handling,
-        // magnification, auto-hide, drag/reorder, or app activation.
         UpdateDockWaveOutline();
     }
 
@@ -2533,7 +2395,6 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         try
         {
-            // Executes synchronously through retargeting; only completion is awaited.
             await ToggleDockAsync();
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -2609,8 +2470,6 @@ public sealed partial class DesktopOverlayWindow : Window
             (!resume && state.State == DockState.Collapsing)) return;
         if (DockPinLock || previews.HoldsDock || StackPopupOpen) return;
         if (keyboardDockNavigation) return;
-        // Return lifted content to its slot before transforming the whole row.
-        // External file drags retain ownership until their existing completion path.
         if (externalDragActive) return;
         if (reorderButton is not null) CancelReorder();
         if (dragLensButton is not null) AbortDragLens();
@@ -2634,8 +2493,6 @@ public sealed partial class DesktopOverlayWindow : Window
             {
                 ApplyMaterial(false);
                 liquidGlass.DeactivateCapture();
-                // The transition already restored the actual starting pill position.
-                // Do not snap it to a different margin after completion.
                 indicator.Opacity = 1;
                 UpdatePeekInput();
                 SchedulePillHide();
@@ -2665,7 +2522,6 @@ public sealed partial class DesktopOverlayWindow : Window
             pointerInsideDock = windowManager.IsPointerInsideInput();
             if (pointerInsideDock) return;
             state.LeavePeek();
-            // Separate from dock contraction: never fade out the remaining handle.
             animation.AnimateBottom(PeekRestBottom, PillHideDurationMilliseconds);
         }
         catch (OperationCanceledException) { }
@@ -2869,22 +2725,15 @@ public sealed partial class DesktopOverlayWindow : Window
         var cornerRadius = expanded ? VisualDockCornerRadius : 2.5;
         const double opacity = 1;
 
-        // The main dock is a plain solid surface. DesktopGlassBackdrop still
-        // owns the vector mask so the hover wave, DPI scaling, and native hit
-        // geometry remain unchanged.
         surface.ApplyPlain(mode, opacity, cornerRadius);
         var glassStyle = mode.GlassStyle();
         var solid = glassStyle is null;
         var reconnect = desktopBackdrop.UseSolidSurface != solid;
-        // Switch the compositor source without detaching the Window's WinUI
-        // SystemBackdrop. The latter can invalidate a queued WinUI configuration
-        // callback during solid <-> glass transitions ("target" argument error).
         desktopBackdrop.UseSolidSurface = solid;
         desktopBackdrop.UseInnerEdge = !solid;
         if (glassStyle is { } style)
         {
             liquidGlass.SetAppearance(mode, Appearance.ApplyTo(DockMaterialStylePresets.Create(style), true));
-            // Settings already supplies absolute, editable preset values; apply them once.
             desktopBackdrop.ApplyMainDock(style, Appearance.ApplyTo(DockMaterialStylePresets.Create(style), true) with
             {
                 CornerRadius = cornerRadius,
@@ -3113,8 +2962,6 @@ public sealed partial class DesktopOverlayWindow : Window
             else if (state.State == DockState.Expanding) animation.AnimateBottom(BottomMargin, 180);
         }
 
-        // Settings changes are dispatched while the Settings window is still
-        // applying controls; the monitor timer owns any native monitor move.
         if (repositionNativeWindow)
             windowManager.Position(0, settingsSession.DisplayMode);
         if (state.State is DockState.Idle or DockState.Hovering) UpdatePeekInput();
@@ -3133,10 +2980,6 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         if (appliedDisplayMode == displayMode) return;
         appliedDisplayMode = displayMode;
-        // Do not call Position here. Saving Settings fires synchronously, so a
-        // SetWindowPos here used to race XAML layout/changed notifications and
-        // the display timer. The timer performs one guarded transition and
-        // refreshes capture/input/preview geometry after the HWND has moved.
         displayTimer.Interval = MonitorTrackingInterval(displayMode);
         windowManager.InvalidateMonitorMetrics();
 
@@ -3266,9 +3109,6 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         if (startingTest || taskbarSession is { IsActive: true }) return;
 
-        // The watchdog owns taskbar safety and has its own independent recovery path.
-        // Do not prevent taskbar protection from starting just because the optional
-        // keyboard recovery hotkey could not be registered.
         startingTest = true;
         var revision = ++taskbarRevision;
         try
@@ -3289,8 +3129,6 @@ public sealed partial class DesktopOverlayWindow : Window
             });
             if (session.IsActive)
             {
-                // Changing auto-hide updates the work area; the shell can move windows
-                // during that change. Re-anchor to full monitor bounds afterwards.
                 windowManager.Position(0, settingsSession.DisplayMode);
                 heartbeat.Start();
                 SetStatus(whileAppActive
@@ -3432,8 +3270,6 @@ public sealed partial class DesktopOverlayWindow : Window
 
     private async Task ShutdownAsync(bool closeMainWindow, bool completeApplicationShutdown)
     {
-        // Remove every GlassDock surface immediately; native/resource cleanup follows
-        // while the taskbar recovery helper is still independently protecting exit.
         if (closeMainWindow) AppWindow.Hide();
         AbortDragLens();
         DisposeUtilities();
@@ -3475,7 +3311,6 @@ public sealed partial class DesktopOverlayWindow : Window
         lab = null;
         labToClose?.Close();
 
-        // Restore synchronously before stopping native services or closing the last window.
         if (ownsGlobalServices && (taskbarSession is not null || startingTest))
             TaskbarRecovery.RestoreNow();
         animation.Dispose();

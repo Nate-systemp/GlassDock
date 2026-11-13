@@ -161,7 +161,6 @@ public sealed partial class SettingsWindow
         if (glassTarget is "main" or "dock") return control.Supported(glassDraft.Mode);
         if (glassTarget == "indicators")
             return control.Id is "SurfaceOpacity" or "CornerRadius" or "EdgeWidth" or "EdgeOpacity";
-        // Buttons sample the existing in-app backdrop, with no additional screen capture.
         return control.Id is "SurfaceOpacity" or "MaterialBlend" or "BlurAmount" or "BlurQuality"
             or "Saturation" or "Brightness" or "Contrast" or "CornerRadius" or "EdgeWidth" or "EdgeOpacity";
     }

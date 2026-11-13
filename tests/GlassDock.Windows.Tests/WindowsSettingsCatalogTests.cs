@@ -21,6 +21,6 @@ public sealed class WindowsSettingsCatalogTests
         var results = GlassSearch.Find(WindowsSettingsCatalog.Entries.Select(entry => entry.ToSearchResult()), query);
         Assert.Equal(target, results[0].LaunchTarget);
         Assert.Equal(GlassSearchResultType.Setting, results[0].ResultType);
-        Assert.Null(results[0].Icon); // UI supplies a consistent system glyph without native handles.
+        Assert.Null(results[0].Icon);
     }
 }

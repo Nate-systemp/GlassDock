@@ -1,4 +1,3 @@
-// Signature shim only: checks C++ syntax, not Windhawk ABI, linkage or hook safety.
 #include <windows.h>
 extern int Wh_GetIntSetting(PCWSTR);
 extern BOOL Wh_SetFunctionHook(void*, void*, void**);

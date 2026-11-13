@@ -1,4 +1,3 @@
-// Owned test windows only. Never loads code in Explorer.
 #include "ObservationHooks.hpp"
 #include <cstdio>
 #include <stdexcept>

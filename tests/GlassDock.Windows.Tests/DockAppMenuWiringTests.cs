@@ -26,8 +26,6 @@ public sealed class DockAppMenuWiringTests
         Assert.Contains("!snapshot.State.Matches(current.Application)", coordinator);
         Assert.Contains("appMenu?.ApplyAppearance(settings.Appearance", coordinator);
         Assert.Contains("appMenu?.Close()", coordinator);
-        // The menu must remain visible when Snipping Tool takes focus, and
-        // Clear-mode popup capture must be frozen before exposing its HWND.
         var dock = File.ReadAllText(Path.Combine(desktop, "DesktopOverlayWindow.cs"));
         var popup = File.ReadAllText(Path.Combine(directory.FullName, "src", "GlassDock.App", "Rendering", "PopupLiquidGlassSurface.cs"));
         Assert.Contains("snippingCaptureActive", window);
@@ -59,9 +57,6 @@ public sealed class DockAppMenuWiringTests
         Assert.NotNull(directory);
         var window = File.ReadAllText(Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop", "DockAppContextMenuWindow.cs"));
 
-        // Geometry and hover are shared across all five appearance modes.
-        // The approved compact menu scales its original geometry by 85%,
-        // keeping corner, row and hover proportions consistent across modes.
         Assert.Contains("MenuSizeScale = 0.85;", window, StringComparison.Ordinal);
         Assert.Contains("MenuCornerRadius = 11;", window, StringComparison.Ordinal);
         Assert.Contains("MenuWidth = 258 * MenuSizeScale;", window, StringComparison.Ordinal);
@@ -75,15 +70,11 @@ public sealed class DockAppMenuWiringTests
         Assert.Contains("chrome.Background = referenceGlassFill;", window, StringComparison.Ordinal);
         Assert.Contains("theme.Divider.Color = global::Windows.UI.Color.FromArgb(128, 103, 117, 137);", window, StringComparison.Ordinal);
 
-        // Solid Dark/Light retain their original theme palette, screenshot
-        // visibility stays wired, and all menu command callbacks are unchanged.
         Assert.Contains("chrome.Background = theme.Overlay;", window, StringComparison.Ordinal);
         Assert.Contains("root.RequestedTheme = mode == DockAppearanceMode.Dark ? ElementTheme.Dark : ElementTheme.Light;", window, StringComparison.Ordinal);
         Assert.Contains("liquid.BeginScreenshotMode();", window, StringComparison.Ordinal);
         Assert.Contains("liquid.EndScreenshotMode();", window, StringComparison.Ordinal);
         Assert.Contains("entry.Invoke?.Invoke();", window, StringComparison.Ordinal);
-        // The dock must flatten its hover crest while a menu is open so
-        // the two separately rounded windows never form a visual bridge.
         var dock = File.ReadAllText(Path.Combine(directory.FullName, "src", "GlassDock.App", "Desktop", "DesktopOverlayWindow.cs"));
         var holdStart = dock.IndexOf("private void OnInteractionHoldChanged()", StringComparison.Ordinal);
         var holdEnd = dock.IndexOf("private void RefreshHoverVisuals()", StringComparison.Ordinal);

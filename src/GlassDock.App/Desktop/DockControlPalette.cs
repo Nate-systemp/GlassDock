@@ -3,8 +3,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Desktop;
 
-// The dock and its popup windows share these interaction colors. Material
-// tint/blur/borders remain owned by DockAppearanceSettings and the glass graph.
 internal static class DockControlPalette
 {
     public const double ButtonRadius = 9;

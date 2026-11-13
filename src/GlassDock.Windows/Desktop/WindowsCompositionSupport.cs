@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>WinUI's dispatcher is separate from the OS compositor's dispatcher queue.</summary>
 public sealed class WindowsCompositionSupport : IDisposable
 {
     private nint controller;

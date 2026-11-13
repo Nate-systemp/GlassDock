@@ -4,7 +4,6 @@ namespace GlassDock.Windows.Desktop;
 
 internal sealed partial class SystemControlAudio
 {
-    /// <summary>All endpoint/RCW work belongs to the service's MTA worker, never a native callback.</summary>
     internal sealed class VolumeMonitor : IDisposable
     {
         private readonly Action<Action> post;
@@ -48,7 +47,6 @@ internal sealed partial class SystemControlAudio
                 {
                     if (data == 0) return;
                     var eventContext = Marshal.PtrToStructure<Guid>(data);
-                    // Capture this endpoint's identity; late callbacks cannot update its replacement.
                     post(() => { if (id == endpointId) Read(eventContext != context); });
                 });
                 volumePointer = Marshal.GetComInterfaceForObject(callback, typeof(IVolumeNotificationCallback));
@@ -170,7 +168,6 @@ internal sealed partial class SystemControlAudio
     }
 }
 
-// CCW interfaces must be public for Marshal.GetComInterfaceForObject; no class interface is exposed.
 [ComVisible(true), Guid("657804FA-D6AD-4496-8A60-352752AF4F89"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface IVolumeNotificationCallback { [PreserveSig] int OnNotify(nint data); }
 

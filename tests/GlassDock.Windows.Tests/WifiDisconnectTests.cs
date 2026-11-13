@@ -9,11 +9,11 @@ public sealed class WifiDisconnectTests
         { Authentication = 7, Cipher = 4 };
 
     [Theory]
-    [InlineData(0u)] // Not ready
-    [InlineData(3u)] // Disconnecting
-    [InlineData(5u)] // Associating
-    [InlineData(6u)] // Discovering
-    [InlineData(7u)] // Authenticating
+    [InlineData(0u)]
+    [InlineData(3u)]
+    [InlineData(5u)]
+    [InlineData(6u)]
+    [InlineData(7u)]
     public void Transitional_or_unavailable_states_never_confirm_disconnection(uint state)
     {
         Assert.False(WifiNetworkControl.DisconnectConfirmed(Network, state, Array.Empty<byte>()));

@@ -16,14 +16,9 @@ namespace GlassDock.App.Desktop;
 internal sealed record DockAppMenuEntry(string Text, string Glyph, Action? Invoke = null,
     IReadOnlyList<DockAppMenuEntry>? Children = null, bool IsHeading = false);
 
-/// <summary>One retained, interactive app menu using the dock's desktop glass and control palette.</summary>
 internal sealed class DockAppContextMenuWindow : Window
 {
     private const double Gutter = PopupStyle.Gutter;
-    // The visual geometry is identical across Dark, Light, Frosted, Acrylic and Clear.
-    // Only the surface material and palette change with the appearance setting.
-    // Scale the complete existing menu uniformly rather than redesigning its
-    // layout, colors, hover treatment, or native glass/screenshot pipeline.
     internal const double MenuSizeScale = 0.85;
     private static double MenuSize(double value) => value * MenuSizeScale;
     private const double MenuCornerRadius = 11;
@@ -43,9 +38,6 @@ internal sealed class DockAppContextMenuWindow : Window
     private readonly DesktopGlassBackdrop backdrop = new();
     private readonly PopupLiquidGlassSurface liquid;
     private readonly PopupTheme theme = new();
-    // Silver / pearl-blue material sampled from the generated Jump List mockup.
-    // The native Clear/Frosted/Acrylic optics remain beneath this translucent
-    // overlay; no changes to desktop capture or screenshot exclusion are needed.
     private readonly LinearGradientBrush referenceGlassFill = new()
     {
         StartPoint = new(0.08, 0),
@@ -96,8 +88,6 @@ internal sealed class DockAppContextMenuWindow : Window
         presenter.IsResizable = presenter.IsMaximizable = presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
         root.Children.Add(glass);
-        // Dark/Light use their original solid surface. Glass modes receive a
-        // pearlescent silver/gray wash matching the supplied Jump List reference.
         chrome = new Border { Margin = new(Gutter), CornerRadius = new(MenuCornerRadius),
             Background = theme.Overlay, BorderBrush = theme.TileBorder,
             BorderThickness = new(1), IsHitTestVisible = false };
@@ -108,8 +98,6 @@ internal sealed class DockAppContextMenuWindow : Window
         scroll = new ScrollViewer { Content = rows, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollMode = ScrollMode.Disabled };
         body.Children.Add(scroll);
-        // Match the native Jump List hierarchy: actions first, compact app
-        // identity at the bottom, separated by a single hairline divider.
         footer = new StackPanel { Spacing = 0 };
         footer.Children.Add(new Border { Height = 1, Margin = new(MenuSize(11), MenuSize(7), MenuSize(11), MenuSize(3)), Background = theme.Divider });
         var header = new Grid { Margin = new(MenuSize(14), MenuSize(7), MenuSize(10), MenuSize(4)), ColumnSpacing = MenuSize(11) };
@@ -132,7 +120,6 @@ internal sealed class DockAppContextMenuWindow : Window
         { EnableHostBackdropBrush = true, UseDockLayeredTransparency = true };
         try { host.Configure(); }
         catch { host.Dispose(); Close(); throw; }
-        // The native client and Content must exist before the backdrop connects.
         SystemBackdrop = backdrop;
         liquid = new(this, root, backdrop);
         root.SizeChanged += (_, _) => UpdateBounds();
@@ -159,8 +146,6 @@ internal sealed class DockAppContextMenuWindow : Window
         Activated += async (_, e) =>
         {
             if (e.WindowActivationState != WindowActivationState.Deactivated || snippingCaptureActive) return;
-            // The Win+Shift+S event comes through an asynchronous keyboard message.
-            // Let it arrive before treating Snipping Tool's focus as click-outside.
             var revision = showRevision;
             await Task.Delay(180);
             if (!disposed && IsOpen && !snippingCaptureActive && showRevision == revision)
@@ -176,17 +161,12 @@ internal sealed class DockAppContextMenuWindow : Window
     public void ApplyAppearance(DockAppearanceSettings appearance, DockAppearanceMode mode)
     {
         theme.Apply(mode);
-        // Same exact menu geometry in all five modes. Only the color/material
-        // changes: silver glass in Clear/Frosted/Acrylic; original solid palette
-        // in Dark/Light. The light system theme removes dark WinUI button chrome.
         if (mode.GlassStyle() is not null)
         {
             theme.Primary.Color = global::Windows.UI.Color.FromArgb(255, 22, 29, 40);
             theme.Secondary.Color = global::Windows.UI.Color.FromArgb(255, 39, 48, 62);
             theme.Muted.Color = global::Windows.UI.Color.FromArgb(255, 83, 94, 111);
             theme.Divider.Color = global::Windows.UI.Color.FromArgb(128, 103, 117, 137);
-            // Keep Clear more translucent than Frosted while still reading as
-            // pale silver on the user's black wallpaper (not navy/black).
             var alpha = mode switch
             {
                 DockAppearanceMode.Frosted => (byte)248,
@@ -240,8 +220,6 @@ internal sealed class DockAppContextMenuWindow : Window
         });
     }
 
-    // Keep both the popup HWND and its Clear-mode GPU glass image screenshot-visible.
-    // Frosted/Acrylic/Dark/Light do not use this live Clear capture path.
     public void BeginSnippingCapture()
     {
         if (disposed || !IsOpen || snippingCaptureActive) return;
@@ -254,8 +232,6 @@ internal sealed class DockAppContextMenuWindow : Window
         if (!snippingCaptureActive) return;
         snippingCaptureActive = false;
         liquid.EndScreenshotMode();
-        // Snipping Tool may have taken foreground ownership without delivering
-        // another Deactivated event. Restore the usual click-away dismissal.
         if (IsOpen && GetForegroundWindow() != WinRT.Interop.WindowNative.GetWindowHandle(this))
             Hide(immediate: true);
     }
@@ -278,8 +254,6 @@ internal sealed class DockAppContextMenuWindow : Window
         {
             if (entry.Text.Length == 0)
             {
-                // The command model uses blank entries as section separators.
-                // Don't render duplicate or leading dividers.
                 needsSeparator = rows.Children.Count > 0;
                 continue;
             }
@@ -296,8 +270,6 @@ internal sealed class DockAppContextMenuWindow : Window
             }
             else
             {
-                // Sections without supplied headings still get a quiet Tasks
-                // label, rather than fabricating unsupported Recent items.
                 if (!hasHeading && !tasksHeadingShown && !submenu)
                 {
                     AddHeading("Tasks");
@@ -340,8 +312,6 @@ internal sealed class DockAppContextMenuWindow : Window
         }
         var highlight = new Border { Background = menuAccent, CornerRadius = new(MenuRowRadius),
             IsHitTestVisible = false };
-        // A fixed-height content grid makes the blue hover capsule fill the row.
-        // Previously WinUI auto-sized this to the 16px label, leaving a cramped strip.
         var row = new Grid { Height = MenuRowHeight - MenuSize(4), VerticalAlignment = VerticalAlignment.Center };
         row.Children.Add(highlight);
         row.Children.Add(content);
@@ -352,8 +322,6 @@ internal sealed class DockAppContextMenuWindow : Window
             VerticalContentAlignment = VerticalAlignment.Center };
         theme.StyleButton(button);
         button.CornerRadius = new(MenuRowRadius);
-        // The default WinUI Button hover fill would square off the blue selection
-        // and hide its border radius. Our shared highlight owns this interaction.
         var clear = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         button.Resources["ButtonBackgroundPointerOver"] = clear;
         button.Resources["ButtonBackgroundPressed"] = clear;

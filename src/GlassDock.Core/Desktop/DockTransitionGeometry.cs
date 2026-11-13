@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>One reversible silhouette shared by the pill, material and icon row.</summary>
 public readonly record struct DockTransitionGeometry(double Width, double Height, double CornerRadius, double MaterialBlend)
 {
     public static DockTransitionGeometry At(double progress, double expandedWidth, double expandedHeight, double scale = 1)

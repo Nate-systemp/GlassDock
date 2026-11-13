@@ -4,7 +4,6 @@ namespace GlassDock.Core.Desktop;
 
 public readonly record struct HomeCardRect(double X, double Y, double Width, double Height);
 
-/// <summary>One screen of cards, in DIPs. No primary-monitor assumptions or scrolling.</summary>
 public sealed record HomeDashboardLayout(double Width, double Height, double ContentScale,
     IReadOnlyList<HomeCardRect> Cards)
 {
@@ -12,7 +11,6 @@ public sealed record HomeDashboardLayout(double Width, double Height, double Con
     {
         var width = Math.Min(960, Math.Max(1, availableWidth));
         var height = Math.Min(620, Math.Max(1, availableHeight));
-        // At extreme work-area sizes keep a coherent dashboard rather than clipping controls.
         var fit = Math.Min(1, Math.Min(width / 960, height / 620));
         var w = width / fit;
         var h = height / fit;
@@ -34,7 +32,6 @@ public sealed record HomeDashboardLayout(double Width, double Height, double Con
 
 public static class HomeApplications
 {
-    // Expand stacks into their real members; never create another pin store or identity rule.
     public static IReadOnlyList<DockApplication> Select(IEnumerable<DockApplication> source, bool running) =>
         source.SelectMany(app => app.Stack is null ? new[] { app } : app.StackApps)
             .Where(app => running ? app.IsRunning : app.IsPinned)

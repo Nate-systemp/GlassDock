@@ -69,7 +69,6 @@ public sealed class DesktopWindowHighlightTests
                 using var focus = new DesktopWindowFocus(preview, cache);
                 foreach (var monitor in monitors)
                 {
-                    // Normal top-level window: exercise workspace rather than TOOLWINDOW screen coordinates.
                     source = CreateWindowExW(0x08000000, "STATIC", "Monitor placement test", 0x80000006,
                         monitor.Work.Left + 120, monitor.Work.Top + 120, 320, 240, 0, 0, 0, 0);
                     Assert.NotEqual(0, source);
@@ -137,7 +136,6 @@ public sealed class DesktopWindowHighlightTests
                 var ticks = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks;
                 var model = new ApplicationWindow(new(null, Environment.ProcessPath), "Test", source, Environment.ProcessId, ticks, false, null);
                 using var cache = new WindowFrameCache();
-                // Regress the former eight-session cutoff: the requested source is ninth.
                 for (var i = 0; i < 8; i++)
                 {
                     var other = CreateWindowExW(0x08000080, "STATIC", "Earlier capture test", 0x80000006,
@@ -156,8 +154,6 @@ public sealed class DesktopWindowHighlightTests
                 }
                 var retained = Frame();
                 Assert.NotNull(retained);
-                // A desktop mirror must not enlarge a deliberately downsampled
-                // 960x540 frame for an ordinary HD source.
                 Assert.Equal(1280, retained.GetType().GetProperty("Width")!.GetValue(retained));
                 Assert.Equal(720, retained.GetType().GetProperty("Height")!.GetValue(retained));
                 var pixels = (byte[])retained.GetType().GetProperty("Pixels")!.GetValue(retained)!;
@@ -255,7 +251,6 @@ public sealed class DesktopWindowHighlightTests
             nint first = 0, second = 0;
             try
             {
-                // Disposable test windows only, shown without activation.
                 first = CreateWindowExW(0x08000080, "STATIC", "GlassDock highlight test A", 0x80000006,
                     200, 200, 320, 240, 0, 0, 0, 0);
                 second = CreateWindowExW(0x08000080, "STATIC", "GlassDock highlight test B", 0x80000006,
@@ -276,7 +271,7 @@ public sealed class DesktopWindowHighlightTests
                 GetWindowRect(first, out var afterFirst); GetWindowRect(second, out var afterSecond);
                 Assert.Equal(originalFirst, afterFirst); Assert.Equal(originalSecond, afterSecond);
                 highlight.Hide();
-                ShowWindow(second, 7); // Minimize only the disposable test window.
+                ShowWindow(second, 7);
                 highlight.Show(second);
                 Assert.True(IsIconic(second));
                 highlight.Show(first);

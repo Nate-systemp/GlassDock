@@ -40,14 +40,12 @@ internal sealed class ManualUpdateService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            // 1.2.158 has no check cancellation overload. Keep at most one request:
-            // retries join a still-running request rather than spawning abandoned work.
             if (pendingCheck is null || pendingCheck.IsCompleted)
             {
                 pendingCheck = Task.Run(() => manager.CheckForUpdatesAsync());
                 _ = pendingCheck.ContinueWith(task =>
                 {
-                    var error = task.Exception; // Observe failures even after timeout/close.
+                    var error = task.Exception;
                     log?.Invoke($"Network exception type={error?.GetBaseException().GetType().Name} hresult={error?.GetBaseException().HResult:X8}");
                 }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
@@ -80,10 +78,8 @@ internal sealed class ManualUpdateService
         finally { busy = false; }
     }
 
-    // Bound small API/feed requests, without shortening large package downloads.
     internal sealed class MetadataDownloader : HttpClientFileDownloader
     {
-        // Velopack downloader timeout units are minutes, not seconds.
         private const double MetadataTimeoutMinutes = 10d / 60;
         public override Task<string> DownloadString(string url, IDictionary<string, string>? headers = null, double timeout = 30) =>
             base.DownloadString(url, headers, Math.Min(timeout > 0 ? timeout : MetadataTimeoutMinutes, MetadataTimeoutMinutes));
@@ -123,8 +119,6 @@ internal sealed class ManualUpdateService
         if (pending is null || pending.Version != available.TargetFullRelease.Version)
             throw new InvalidOperationException("The update download is not ready. Please retry.");
 
-        // Do NOT use ApplyUpdatesAndRestart: it exits immediately. The caller
-        // invokes normal GlassDock shutdown after this successfully starts Update.exe.
         manager.WaitExitThenApplyUpdates(pending, silent: false, restart: true,
             restartArgs: safeMode ? ["--safe-mode"] : []);
     }

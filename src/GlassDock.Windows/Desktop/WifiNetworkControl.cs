@@ -16,7 +16,6 @@ public sealed record WifiNetwork(Guid Adapter, string Name, string Profile, byte
         { 4 => "WPA personal", 7 => "WPA2 personal", 9 => "WPA3 personal", _ => "Enterprise / other security" };
 }
 
-/// <summary>Native Wi-Fi for unpackaged desktop apps. Credentials go only to Windows WLAN profiles, never Doky settings or logs.</summary>
 public static class WifiNetworkControl
 {
     public static Task<IReadOnlyList<WifiNetwork>> ReadAsync(bool scan, CancellationToken cancellation = default) =>
@@ -60,7 +59,7 @@ public static class WifiNetworkControl
         if (string.IsNullOrEmpty(network.Profile)) return true;
         using var session = new Session();
         var adapter = network.Adapter;
-        uint flags = 0; // Do not request plaintext key material.
+        uint flags = 0;
         Check(WlanGetProfile(session.Handle, ref adapter, network.Profile, 0, out var profileXml, ref flags, out _));
         try
         {
@@ -91,7 +90,7 @@ public static class WifiNetworkControl
                 Marshal.StructureToPtr(ssid, memory, false);
                 var parameters = new Connection
                 {
-                    Mode = 0, // Windows owns saved credentials for both automatic and manual profiles.
+                    Mode = 0,
                     Profile = existing ? network.Profile : "Doky-" + Convert.ToHexString(network.Ssid),
                     Ssid = 0,
                     BssType = network.BssType
@@ -119,7 +118,6 @@ public static class WifiNetworkControl
             }
             finally { Marshal.FreeHGlobal(memory); }
         }, cancellation);
-        // WlanConnect only accepts a request. Confirm the connected flag before claiming success.
         for (var i = 0; i < 20; i++)
         {
             await Task.Delay(500, cancellation);
@@ -138,7 +136,6 @@ public static class WifiNetworkControl
         var current = ReadConnection(session.Handle, ref adapter);
         if (IsDisconnected(network, current)) return "Disconnected.";
         if (current.State is not (1 or 2) || current.Ssid.Length == 0) return "Wi-Fi connection is changing. Try again.";
-        // WlanDisconnect targets an adapter: never disconnect a different network that replaced the selected one.
         Check(WlanDisconnect(session.Handle, ref adapter, 0));
         for (var i = 0; i < 20; i++)
         {
@@ -158,10 +155,10 @@ public static class WifiNetworkControl
 
     private static ConnectionAttributes ReadConnection(nint handle, ref Guid adapter)
     {
-        var result = WlanQueryInterface(handle, ref adapter, 7, 0, out var size, out var data, out _); // current connection
-        if (result == 5023) // ERROR_INVALID_STATE: query the state rather than assume a disconnect completed.
+        var result = WlanQueryInterface(handle, ref adapter, 7, 0, out var size, out var data, out _);
+        if (result == 5023)
         {
-            Check(WlanQueryInterface(handle, ref adapter, 6, 0, out size, out data, out _)); // interface state
+            Check(WlanQueryInterface(handle, ref adapter, 6, 0, out size, out data, out _));
             try
             {
                 if (data == 0 || size < sizeof(uint)) throw new InvalidDataException("Windows returned an incomplete Wi-Fi state.");
@@ -201,7 +198,6 @@ public static class WifiNetworkControl
             try
             {
                 Check(WlanScan(Handle, ref adapter, 0, 0, 0));
-                // The WLAN notification, not a fixed sleep, gates reading fresh scan results.
                 if (!completion.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellation).GetAwaiter().GetResult())
                     throw new Win32Exception("Wi-Fi scan failed.");
             }

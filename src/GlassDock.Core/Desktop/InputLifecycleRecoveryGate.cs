@@ -1,11 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>
-/// Coalesces the paired suspend/resume and lock/unlock notifications that
-/// Windows can deliver for one lifecycle transition. A recovery is still
-/// requested when a resume arrives without a preceding boundary notification;
-/// this covers display-only wakeups and missed power broadcasts.
-/// </summary>
 public sealed class InputLifecycleRecoveryGate
 {
     private bool recoveryRequested;

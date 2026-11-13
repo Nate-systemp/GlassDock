@@ -4,7 +4,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Reads the existing Home mouse-button polling inputs without installing hooks.</summary>
 public static class GlassHomeInput
 {
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativeMethods.Point point);

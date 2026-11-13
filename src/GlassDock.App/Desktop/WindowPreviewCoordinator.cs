@@ -57,8 +57,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     private void DockPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        // The dock intentionally does not activate on every click. Such an outside
-        // click cannot produce the panel's Window.Activated(Deactivated) event.
         appMenu?.Hide(immediate: true);
     }
 
@@ -153,7 +151,7 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         Hide();
         var revision = session.Begin(item.Application);
         HoldChanged?.Invoke(this, EventArgs.Empty);
-        if (!item.IsRunning) return; // The existing app tooltip is the only UI for stopped apps.
+        if (!item.IsRunning) return;
         var delay = new CancellationTokenSource(); pending = delay;
         try
         {
@@ -195,8 +193,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         {
             var selected = session.Activate(window.Handle);
             frameCache.Report(window, "preview-click-before-activation");
-            // Remove the topmost desktop peek before requesting foreground.
-            // A snapshot/activation event must not leave the mirror over the real app.
             Hide(immediate: true);
             var activated = selected is not null &&
                 (applications.ActivateWindow(selected) || await restoreElevated(selected));
@@ -207,8 +203,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         };
         preview.WindowCloseRequested += (_, window) =>
         {
-            // WM_CLOSE preserves the application's own save/confirmation handling.
-            // The service refreshes the snapshot; OnSnapshot rebuilds only after the HWND disappears.
             if (!applications.CloseWindow(window))
                 ActionFailed?.Invoke(this, "That window is no longer available to close.");
         };
@@ -235,8 +229,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     public void EndSnippingCapture()
     {
-        // The dock's own screenshot capture is restored before this call, so
-        // the popup never resumes sampling while the dock is screenshot-visible.
         appMenu?.EndSnippingCapture();
         snippingCaptureActive = false;
         CheckMenuSnapshot();
@@ -255,8 +247,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
     private void OnSnapshot(object? sender, EventArgs args)
     {
         TrackFrames();
-        // Snipping Tool can change the foreground-window snapshot; it must not
-        // accidentally dismiss an open menu before the screenshot is taken.
         if (!snippingCaptureActive) CheckMenuSnapshot();
         if (session.ApplicationId is not { } id) return;
         var item = FindVisibleApplication(id);
@@ -265,8 +255,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
         Reposition();
     }
 
-    // Stack members may be shown in an app action menu or a window preview even
-    // though their windows are not direct children of VisibleDockApplications.
     private DockApplicationItem? FindVisibleApplication(string id) =>
         applications.VisibleDockApplications.FirstOrDefault(item => item.Id == id)
         ?? applications.VisibleDockApplications.SelectMany(item => item.Application.StackApps)
@@ -419,8 +407,6 @@ internal sealed class WindowPreviewCoordinator : IDisposable
 
     public void EndContextMenu(object source)
     {
-        // Defer release one dispatch turn so replacing A with B does not
-        // briefly resume/reset hover visuals between the two menu events.
         dockRoot.DispatcherQueue.TryEnqueue(() =>
         {
             if (disposed || source is MenuFlyout { IsOpen: true } ||

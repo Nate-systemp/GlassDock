@@ -3,7 +3,6 @@ namespace GlassDock.App.Rendering;
 internal static class StartupDiagnostics
 {
     private static int performanceWritePending;
-    // Opt-in diagnostics must not put disk I/O on the dock's UI thread.
     internal static void WritePerformance(string summary)
     {
         if (!GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ||

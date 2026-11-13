@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>One reversible layout curve for both edges of the Wi-Fi list.</summary>
 public static class WifiScrollGeometry
 {
     public const double Height = 36;

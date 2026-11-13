@@ -35,28 +35,18 @@ public sealed partial class DesktopOverlayWindow
         try
         {
             var scale = (float)(root.XamlRoot?.RasterizationScale ?? 1);
-            // Refraction sees the entire app row, including unpinned running apps.
-            // The pinned-only list remains exclusive to reorder target selection.
             dragLensScene = new(icons.Children.OfType<Button>(), button, root, scale);
             dragLensButton = button; dragLensContent = content;
             dragLensContentTheme = content.RequestedTheme;
-            // Preserve inherited dock colors while the original content is lifted
-            // out of the app row into the root's overlay canvas.
             content.RequestedTheme = content.ActualTheme;
             var p = button.TransformToVisual(root).TransformPoint(new(button.ActualWidth / 2, button.ActualHeight / 2));
             dragLensBase = new((float)p.X, (float)p.Y);
-            // The original click offset, not the button center or a delayed
-            // follower, owns the lifted icon position from the first frame.
             dragLensTarget = pointerAnchoredCenter;
             dragLensIconsLeft = (float)icons.TransformToVisual(root).TransformPoint(new(0, 0)).X;
             dragLensSize = (float)Math.Max(48, Appearance.IconSize + 26);
             dragLensMotion.Begin(dragLensTarget, dragLensSize);
-            // Keep the empty source button fixed in the StackPanel slot.
-            // Its old moving RenderTransform contaminated slot measurements.
             button.RenderTransform = null;
             button.Opacity = 1;
-            // Lift the ORIGINAL content out of Button's template clipping boundary.
-            // The empty, fixed-size Button keeps its slot and pointer capture.
             button.Content = null;
             dragLensHost.Children.Add(liquidGlass.LensPanel);
             dragLensHost.Children.Add(content);
@@ -88,7 +78,6 @@ public sealed partial class DesktopOverlayWindow
         if (!dragLensClosing && stackDrag.Mode == DockDragMode.StackMerge &&
             stackDrag.TargetId is { } id && applicationButtons.TryGetValue(id, out var destination))
         {
-            // The existing state machine decides readiness; optics only emphasize it.
             var index = reorderPinnedButtons.IndexOf(destination);
             if (index >= 0 && index < reorderSlotCenters.Length)
             {
@@ -99,15 +88,12 @@ public sealed partial class DesktopOverlayWindow
             target = dragLensBase;
         dragLensMotion.Step(dt, target, dragLensSize, merge, dragLensAnimating,
             precisePointer: !dragLensClosing);
-        // One live icon above the full, unclipped dock-local lens surface.
         Canvas.SetLeft(dragLensContent, dragLensMotion.Position.X - dragLensContent.Width / 2);
         Canvas.SetTop(dragLensContent, dragLensMotion.Position.Y - dragLensContent.Height / 2);
         liquidGlass.UpdateLens(dragLensMotion.Bounds, dragLensMotion.Opacity, merge.HasValue);
         if (dragLensMotion.Finished)
         {
             AbortDragLens();
-            // Hover wave must not pull the icon sideways on the very same frame
-            // that the lens gives its content back to the real dock button.
             RefreshHoverVisuals();
             SynchronizeItems();
             ScheduleCollapse();
@@ -125,8 +111,6 @@ public sealed partial class DesktopOverlayWindow
         dragLensReleaseSlot = null;
         Canvas.SetZIndex(button, 120);
         dragLensScene?.Rebase(root);
-        // Freeze the resolved post-reorder slot; never chase later layout or
-        // neighbor FLIP updates while returning the real icon content.
         dragLensMotion.End(dragLensBase);
         dragLensHoverDeferred = true;
         if (windowManager.TryGetPointerPosition(out var pointerX, out var pointerY))

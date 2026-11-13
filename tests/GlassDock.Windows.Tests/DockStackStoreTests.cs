@@ -19,7 +19,7 @@ public sealed class DockStackStoreTests
             DockDragBounds[] bounds = [new(0, 0, 40, 40), new(46, 0, 86, 40), new(92, 0, 132, 40)];
             var target = DockPointerTarget.Resolve(x, 20, bounds, 0, _ => true);
             Assert.Equal(expected, target.Mode);
-            Assert.False(File.Exists(path)); // Preview cannot persist anything.
+            Assert.False(File.Exists(path));
             if (target.Mode == DockPointerMode.Stack)
             {
                 Assert.True(store.MergeStack(apps[0].Id, apps[target.Index].Id, apps));

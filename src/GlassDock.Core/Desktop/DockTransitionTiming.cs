@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Distance-based retarget timing; normal endpoint choreography is unchanged.</summary>
 public static class DockTransitionTiming
 {
     public static double Progress(double width, double height, double expandedWidth, double expandedHeight, double scale = 1) =>

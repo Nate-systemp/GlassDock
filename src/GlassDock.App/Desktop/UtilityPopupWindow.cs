@@ -13,10 +13,9 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>An activating utility popup; its glass is drawn by the dock's existing capture.</summary>
 internal class UtilityPopupWindow : Window
 {
-    private const double Gutter = 8;
+    internal const double Gutter = 8;
     private readonly nint dock;
     private readonly Grid root = new();
     private readonly DesktopGlassBackdrop transparentBackdrop = new() { UseSolidSurface = true };
@@ -32,6 +31,13 @@ internal class UtilityPopupWindow : Window
     private double dpi = 1;
     private bool closing, disposed, snippingCaptureActive;
     public Action? ScreenshotRequested { get; init; }
+    internal Vector4? LeftOfColumn { get; set; }
+    internal bool RightAlignToAnchor { get; init; }
+    internal bool UseDockOptics { get; init; }
+    internal bool UseQuickSettingsMotion { get; set; }
+    internal Func<bool>? RelatedWindowHasForeground { get; set; }
+    internal Func<bool, Task>? AnimateControls { get; init; }
+    internal bool HasForeground => host.HasForegroundOrOwner(WinRT.Interop.WindowNative.GetWindowHandle(this));
     private int animationRevision;
     public IEnumerable<UtilityGlassSurface> GlassSurfaces => panel.GlassSurfaces;
     public int GlassTargetsRevision => panel.GlassTargetsRevision;
@@ -39,6 +45,7 @@ internal class UtilityPopupWindow : Window
     public bool IsDetailsOpen => IsOpen && !closing && !disposed;
     public event EventHandler? DetailsVisibilityChanged;
     public event EventHandler? Hidden;
+    internal event EventHandler? Hiding;
     public event EventHandler? GlassChanged;
 
     public UtilityPopupWindow(nint dock, IUtilityPanel panel, UtilityTheme theme, string title)
@@ -63,15 +70,14 @@ internal class UtilityPopupWindow : Window
         panel.GlassChanged += (_, _) => { if (IsOpen && !closing) Reposition(anchor, surfacesChanged: true); };
         root.Loaded += (_, _) => { if (IsOpen) Reposition(anchor); };
         root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Hide(); } };
+        root.PointerPressed += (_, e) => { if (AnimateControls is not null && ReferenceEquals(e.OriginalSource, root)) Hide(); };
         Activated += async (_, e) =>
         {
-            // The dock owns explicit outside-click dismissal; its activation is not an outside application.
             if (e.WindowActivationState != WindowActivationState.Deactivated || snippingCaptureActive) return;
             if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
             if (snippingCaptureActive) return;
-            // Allow the existing asynchronous Win+Shift+S notification to arrive first.
             await Task.Delay(180);
-            if (disposed || !IsOpen || closing || snippingCaptureActive || host.HasForegroundOrOwner(dock)) return;
+            if (disposed || !IsOpen || closing || snippingCaptureActive || host.HasForegroundOrOwner(dock) || RelatedWindowHasForeground?.Invoke() == true) return;
             if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
             if (!snippingCaptureActive) Hide();
         };
@@ -87,13 +93,12 @@ internal class UtilityPopupWindow : Window
 
     public void ApplyAppearance(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, float layoutScale, bool highlights)
     {
-        panel.ConfigureGlass(backdrop, PopupMaterial.FrostedUtilityOptics(optics), layoutScale, highlights);
+        panel.ConfigureGlass(backdrop, UseDockOptics ? optics : PopupMaterial.FrostedUtilityOptics(optics), layoutScale, highlights);
     }
 
     public void BeginSnippingCapture()
     {
         if (disposed || !IsOpen || closing || snippingCaptureActive) return;
-        // The owning dock has already stopped the shared monitor capture.
         snippingCaptureActive = true;
         if (captureExcluded) host.SetCaptureExclusion(false);
     }
@@ -102,13 +107,13 @@ internal class UtilityPopupWindow : Window
     {
         if (disposed || !snippingCaptureActive) return;
         snippingCaptureActive = false;
-        // Re-exclude before shared sampling resumes; close if exclusion cannot be restored.
         if ((captureExcluded && !host.SetCaptureExclusion(true)) || !host.HasForegroundOrOwner(dock)) Hide(immediate: true);
     }
 
     public void Show(Vector4 source)
     {
         if (disposed) return;
+        if (AnimateControls is not null) root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         if (IsOpen && !closing) { Reposition(source); Activate(); host.ActivateForUserInput(); _ = panel.RefreshAsync(); return; }
         IsOpen = true; closing = false; root.IsHitTestVisible = true;
         Reposition(source); Activate(); host.ActivateForUserInput();
@@ -128,6 +133,18 @@ internal class UtilityPopupWindow : Window
         panelHost.MaxHeight = Math.Max(1, height - Gutter * 2);
         var rectangle = WindowPreviewLayout.Position(area, dockBounds, dpi, source.X + source.Z / 2, source.Y - 6,
             width, Math.Max(1, height));
+        if (LeftOfColumn is { } column)
+        {
+            var x = dockBounds.X + (column.X - width + Gutter - 12) * dpi;
+            var y = dockBounds.Y + (column.Y + column.W - height + Gutter) * dpi;
+            rectangle = new(Math.Clamp(x, area.X, Math.Max(area.X, area.X + area.Width - width * dpi)),
+                Math.Clamp(y, area.Y, Math.Max(area.Y, area.Y + area.Height - height * dpi)), width * dpi, height * dpi);
+        }
+        else if (RightAlignToAnchor)
+        {
+            var x = dockBounds.X + (source.X + source.Z - width + Gutter) * dpi;
+            rectangle = rectangle with { X = Math.Clamp(x, area.X, Math.Max(area.X, area.X + area.Width - width * dpi)) };
+        }
         if (WindowPreviewLayout.NeedsNativeMove(positioned, rectangle))
         {
             positioned = rectangle;
@@ -143,19 +160,24 @@ internal class UtilityPopupWindow : Window
     private void Animate(bool hide)
     {
         animationRevision++; batch?.Dispose(); batch = null;
+        if (AnimateControls is { } animate) { _ = AnimateControlsAsync(animate, hide, animationRevision); return; }
         var visual = ElementCompositionPreview.GetElementVisual(root);
         track ??= new(visual); track.Stop();
-        if (!animations) { if (hide) FinishHide(); return; }
+        if (!animations && !UseQuickSettingsMotion) { if (hide) FinishHide(); return; }
         var frames = Enumerable.Range(0, 9).Select(i =>
         {
-            var t = i / 8f; var eased = t * t * (3 - 2 * t); var visible = hide ? 1 - eased : eased;
+            var t = i / 8f;
+            var eased = UseQuickSettingsMotion && !hide ? 1 + 2.3f * MathF.Pow(t - 1, 3) + 1.3f * MathF.Pow(t - 1, 2)
+                : t * t * (3 - 2 * t);
+            var visible = hide ? 1 - eased : eased;
             var transform = Matrix4x4.CreateScale(.94f + .06f * visible, .94f + .06f * visible, 1,
                 new((float)(AppWindow.Size.Width / dpi / 2), (float)(AppWindow.Size.Height / dpi), 0));
-            return new PopupCompositionFrame(transform * Matrix4x4.CreateTranslation(0, (1 - visible) * 8, 0), visible);
+            return new PopupCompositionFrame(animations ? transform * Matrix4x4.CreateTranslation(0, (1 - visible) * 8, 0) : Matrix4x4.Identity,
+                Math.Clamp(visible, 0, 1));
         }).ToArray();
         var current = animationRevision;
         batch = visual.Compositor.CreateScopedBatch(Microsoft.UI.Composition.CompositionBatchTypes.Animation);
-        track.Bind(); track.Start(frames, TimeSpan.FromMilliseconds(hide ? 120 : 180));
+        track.Bind(); track.Start(frames, TimeSpan.FromMilliseconds(UseQuickSettingsMotion ? !animations ? 100 : hide ? 140 : 260 : hide ? 120 : 180));
         batch.Completed += (_, _) =>
         {
             if (disposed || current != animationRevision) return;
@@ -165,10 +187,17 @@ internal class UtilityPopupWindow : Window
         batch.End();
     }
 
+    private async Task AnimateControlsAsync(Func<bool, Task> animate, bool hide, int current)
+    {
+        await animate(hide);
+        if (!disposed && current == animationRevision && hide) FinishHide();
+    }
+
     public void Hide(bool immediate = false)
     {
         if (disposed || !IsOpen || (closing && !immediate)) return;
         closing = true; root.IsHitTestVisible = false;
+        Hiding?.Invoke(this, EventArgs.Empty);
         DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);
         if (immediate) FinishHide(); else Animate(true);
     }

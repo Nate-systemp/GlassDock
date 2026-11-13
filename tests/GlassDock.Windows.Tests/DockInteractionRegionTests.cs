@@ -51,8 +51,6 @@ public sealed class DockInteractionRegionTests
                 Assert.Equal(!inside, result == -1);
                 Assert.Equal(transparent, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
             }
-            // Enlarged artwork gets input above a completely unchanged pill.
-            // Clearing the icon rectangles must also invalidate the region cache.
             manager.SetInteractionPolygon([(100, 70), (540, 70), (540, 120), (100, 120)],
                 [(290, 35, 350, 80)]);
             Hit(320, 40, true); Hit(150, 40, false);
@@ -61,10 +59,9 @@ public sealed class DockInteractionRegionTests
             Hit(320, 40, false); Hit(320, 100, true);
             for (var i = 0; i < 100; i++)
             {
-                // A wave rising above the base, with transparent space beside it.
                 manager.SetInteractionPolygon([(100, 70), (270, 70), (320, 58),
                     (370, 70), (540, 70), (540, 120), (100, 120)]);
-                Assert.Equal(0, GetWindowRgn(window, region)); // No visual clipping region.
+                Assert.Equal(0, GetWindowRgn(window, region));
                 Hit(320, 65, true);
                 Hit(320, 100, true);
                 Hit(150, 65, false);
@@ -73,12 +70,10 @@ public sealed class DockInteractionRegionTests
                 Hit(320, 135, false);
 
                 manager.SetInteractionRegion(false);
-                Assert.Equal(0, GetWindowRgn(window, region)); // Input-only; preserve rendered shadow.
+                Assert.Equal(0, GetWindowRgn(window, region));
                 Hit(320, 120, true);
                 Hit(150, 100, false);
 
-                // The hit region follows each animated position, without a
-                // permanent corridor above or beside the pill.
                 manager.SetPeekInteraction(24);
                 Assert.Equal(0, GetWindowRgn(window, region));
                 Hit(320, 125, true);
@@ -89,10 +84,8 @@ public sealed class DockInteractionRegionTests
                 Hit(381, 120, false);
                 Hit(320, 130, false);
 
-                // Once the pill is settled, only the pill-width region and a
-                // small downward click extension remain interactive.
                 manager.SetPeekInteraction(-2);
-                Assert.Equal(0, GetWindowRgn(window, region)); // no visual clipping
+                Assert.Equal(0, GetWindowRgn(window, region));
                 Hit(320, 143, true);
                 Hit(320, 139, false);
                 Hit(240, 143, false);
@@ -114,7 +107,6 @@ public sealed class DockInteractionRegionTests
         {
             using var manager = new WindowsOverlayManager(window);
             manager.Configure();
-            // Position using the target HWND's DPI; no mouse movement or activation.
             var scale = manager.Scale;
             SetWindowPos(window, 0, cursor.X - (int)(hostWidth / 2 * scale), cursor.Y - (int)(120 * scale),
                 (int)(hostWidth * scale), (int)(144 * scale), 0x0014);
@@ -125,8 +117,6 @@ public sealed class DockInteractionRegionTests
             SendMessageW(window, 0x113, 0x4744, 0);
             Assert.True(manager.IsPointerInsideInput());
             Assert.Equal(0, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);
-            // An OLE/window-discovery probe outside the dock must not make the
-            // HWND transparent while the real cursor is inside the drop target.
             var outside = (nint)((ushort)(cursor.X - hostWidth) | ((long)(ushort)cursor.Y << 16));
             Assert.Equal(-1, SendMessageW(window, 0x84, 0, outside));
             Assert.Equal(0, GetWindowLongPtrW(window, -20).ToInt64() & 0x20);

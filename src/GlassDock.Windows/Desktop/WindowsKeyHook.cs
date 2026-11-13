@@ -4,8 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace GlassDock.Windows.Desktop;
 
-// The sole native Win-key implementation, hosted by either helper or fallback.
-// Construct/dispose on the owning message-pump thread. Signals must be nonblocking.
 internal sealed class WindowsKeyHook : IDisposable
 {
     private readonly Action<bool, uint> signal;
@@ -24,20 +22,11 @@ internal sealed class WindowsKeyHook : IDisposable
     private bool capturedWindowsDown;
     private int capturedWindowsKey;
     private sealed record State(bool Suppress, bool Capture, uint Revision);
-    // Capture from the moment the native hook is registered, including the
-    // brief fallback/helper handoff before the latest UI state arrives.
     private State state = new(false, true, 0);
     private uint pressRevision;
     private uint snippingRevision;
     public void RecoverAfterResume()
     {
-        // Must run on the owning message-pump thread. Re-register because Windows
-        // does not expose whether a low-level hook was silently removed.
-        // Install the replacement before releasing the existing hook. If Windows
-        // rejects re-registration during a resume transition, retaining the old
-        // hook is safer than leaving Doky without any Win-key interception.
-        // Both handles belong to this message-pump thread, so no keyboard event
-        // can be dispatched between installation and the old hook's removal.
         var replacement = NativeMethods.SetWindowsHookExW(13, keyboardCallback, 0, 0);
         if (replacement == 0)
             throw new InvalidOperationException("Cannot recover Doky keyboard handling after resume; previous hook retained.");
@@ -101,9 +90,6 @@ internal sealed class WindowsKeyHook : IDisposable
             Marshal.PtrToStructure<NativeMethods.KeyboardData>(
                 data);
 
-        //
-        // Ignore events injected by GlassDock itself.
-        //
         if (key.ExtraInfo == InjectionTag)
         {
             return NativeMethods.CallNextHookEx(
@@ -113,14 +99,11 @@ internal sealed class WindowsKeyHook : IDisposable
                 data);
         }
 
-        //
-        // Only handle keyboard down/up messages.
-        //
         if (message is not (
-            0x100 or // WM_KEYDOWN
-            0x101 or // WM_KEYUP
-            0x104 or // WM_SYSKEYDOWN
-            0x105))  // WM_SYSKEYUP
+            0x100 or
+            0x101 or
+            0x104 or
+            0x105))
         {
             return NativeMethods.CallNextHookEx(
                 keyboardHook,
@@ -143,11 +126,6 @@ internal sealed class WindowsKeyHook : IDisposable
 
         var winHeld = gesture.IsWindowsHeld;
 
-        //
-        // ==================================================
-        // WINDOWS KEY DOWN
-        // ==================================================
-        //
         if (isWindowsKey && down)
         {
             if (!winHeld)
@@ -155,10 +133,6 @@ internal sealed class WindowsKeyHook : IDisposable
                 suppressCurrentWindowsPress = suppressDockToggle;
                 pressRevision = current.Revision;
             }
-            //
-            // New Win press:
-            // recover from any stale launcher state.
-            //
             if (!spaceHeld)
             {
                 launcherChordActive = false;
@@ -168,11 +142,6 @@ internal sealed class WindowsKeyHook : IDisposable
                 keyCode,
                 true);
 
-            // Letting the physical Win-down reach Explorer may activate Start
-            // before the bare-Win release can be recognized. The owning service
-            // enables capture for ALL active dock states (including hidden Home).
-            // If another key follows, OTHER KEYS replays a tagged Win-down first
-            // so genuine Win+ shortcuts can still reach Windows.
             if (captureBareWindowsKey)
             {
                 capturedWindowsDown = true;
@@ -187,18 +156,10 @@ internal sealed class WindowsKeyHook : IDisposable
                 data);
         }
 
-        //
-        // ==================================================
-        // WIN + SPACE DOWN
-        // ==================================================
-        //
         if (keyCode == Space &&
             down &&
             winHeld)
         {
-            //
-            // Ignore keyboard auto-repeat.
-            //
             if (spaceHeld)
             {
                 return 1;
@@ -207,28 +168,15 @@ internal sealed class WindowsKeyHook : IDisposable
             spaceHeld = true;
             launcherChordActive = true;
 
-            //
-            // Mark this as a Win chord so it won't
-            // later be recognized as bare Win.
-            //
             gesture.Process(
                 keyCode,
                 true);
 
             signal(true, pressRevision);
 
-            //
-            // Consume Space so Windows' language/input
-            // switcher does not receive Win+Space.
-            //
             return 1;
         }
 
-        //
-        // ==================================================
-        // SPACE UP
-        // ==================================================
-        //
         if (keyCode == Space &&
             !down)
         {
@@ -241,10 +189,6 @@ internal sealed class WindowsKeyHook : IDisposable
                 keyCode,
                 false);
 
-            //
-            // Consume Space-up when it belonged
-            // to GlassDock's launcher shortcut.
-            //
             if (belongedToLauncher)
             {
                 return 1;
@@ -257,19 +201,11 @@ internal sealed class WindowsKeyHook : IDisposable
                 data);
         }
 
-        //
-        // ==================================================
-        // WINDOWS KEY UP
-        // ==================================================
-        //
         if (isWindowsKey && !down)
         {
             var wasLauncherShortcut =
                 launcherChordActive;
 
-            //
-            // ALWAYS reset these.
-            //
             launcherChordActive = false;
             spaceHeld = false;
 
@@ -278,9 +214,6 @@ internal sealed class WindowsKeyHook : IDisposable
                     keyCode,
                     false);
 
-            // If the matching Win-down was captured, Explorer never received
-            // that physical key. Consume the release as well. Bare Win belongs
-            // to Doky; Win+Space still belongs to Glass Home.
             if (capturedWindowsDown &&
                 capturedWindowsKey == keyCode)
             {
@@ -293,19 +226,9 @@ internal sealed class WindowsKeyHook : IDisposable
                     signal(false, pressRevision);
                 }
 
-                // The physical Win-down never reached Windows. Do not leak an
-                // unmatched Win-up for a suppressed gesture (for example when
-                // Ctrl was already held); Windows may interpret it as Start.
-                // Genuine Win+ shortcuts replay Win-down on the OTHER KEYS
-                // path, which clears capturedWindowsDown before their Win-up.
                 return 1;
             }
 
-            //
-            // ----------------------------------------------
-            // Win+Space was used
-            // ----------------------------------------------
-            //
             if (wasLauncherShortcut)
             {
                 NativeMethods.Input[] inputs =
@@ -343,10 +266,6 @@ internal sealed class WindowsKeyHook : IDisposable
                     return 1;
                 }
 
-                //
-                // If SendInput fails, let the real Win-up
-                // continue so the key never gets stranded.
-                //
                 return NativeMethods.CallNextHookEx(
                     keyboardHook,
                     code,
@@ -354,11 +273,6 @@ internal sealed class WindowsKeyHook : IDisposable
                     data);
             }
 
-            //
-            // ----------------------------------------------
-            // Bare Windows key
-            // ----------------------------------------------
-            //
             if (bareWindows)
             {
                 NativeMethods.Input[] inputs =
@@ -406,13 +320,6 @@ internal sealed class WindowsKeyHook : IDisposable
                 data);
         }
 
-        //
-        // ==================================================
-        // DOCK TASKBAR SHORTCUTS (Win+1–9 / Win+T)
-        // ==================================================
-        // Do not replay the withheld Win-down for Doky-owned shortcuts.
-        // The key-up is consumed as well, so Explorer receives no partial chord.
-        // Ctrl/Alt/Shift combinations remain ordinary Windows shortcuts.
         if (!isWindowsKey)
         {
             if (!down && consumedShortcutKeys.Remove(keyCode))
@@ -420,7 +327,7 @@ internal sealed class WindowsKeyHook : IDisposable
                 gesture.Process(keyCode, false);
                 return 1;
             }
-            if (down && consumedShortcutKeys.Contains(keyCode)) return 1; // key repeat
+            if (down && consumedShortcutKeys.Contains(keyCode)) return 1;
             var shortcutIndex = DockKeyboardShortcut.FromVirtualKey(keyCode);
             if (down && winHeld && capturedWindowsDown &&
                 shortcutIndex >= 0 && !gesture.IsShiftHeld &&
@@ -434,14 +341,7 @@ internal sealed class WindowsKeyHook : IDisposable
             }
         }
 
-        //
-        // ==================================================
-        // OTHER KEYS
-        // ==================================================
-        //
-        // Observe Win+Shift+S and Print Screen without intercepting either shortcut.
-        // The callback merely prepares the already-rendered glass for Snipping.
-        if (keyCode is 0x53 or 0x2C) // S / Print Screen
+        if (keyCode is 0x53 or 0x2C)
         {
             if (!down) snipKeyHeld = false;
             else if (!snipKeyHeld && (keyCode == 0x2C || winHeld && gesture.IsShiftHeld))
@@ -452,17 +352,11 @@ internal sealed class WindowsKeyHook : IDisposable
                 snippingShortcut?.Invoke(snippingRevision);
             }
         }
-        else if (keyCode == 0x1B && down && snipSessionActive) // Escape cancels a snip
+        else if (keyCode == 0x1B && down && snipSessionActive)
         {
             snipSessionActive = false;
             snippingCanceled?.Invoke(snippingRevision);
         }
-        // Keep WindowsKeyGesture synchronized so regular
-        // shortcuts such as Win+E, Win+R, Win+D remain chords.
-        //
-        // If Glass Home captured Win-down, a non-Space key turns the gesture into
-        // a real Windows shortcut. Re-inject only that Win-down (tagged so this
-        // hook ignores it), then allow the real chord key through normally.
         if (down &&
             capturedWindowsDown &&
             winHeld)

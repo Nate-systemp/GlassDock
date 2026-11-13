@@ -16,7 +16,6 @@ using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Desktop;
 
-/// <summary>Retained preview host. DWM owns live pixels; XAML owns card chrome.</summary>
 internal sealed class WindowPreviewWindow : Window
 {
     private const double PreviewCornerRadius = 16;
@@ -149,7 +148,6 @@ internal sealed class WindowPreviewWindow : Window
         root.Children.Add(glass);
         root.Children.Add(chrome);
         ApplyAppearance(appearance, mode);
-        // Attach after Content and native setup.
         SystemBackdrop = backdrop;
         liquid = new(this, root, backdrop);
 
@@ -194,8 +192,6 @@ internal sealed class WindowPreviewWindow : Window
             Draw();
             if (session.CompleteTransition(progress))
             {
-                // The Canvas coordinates were updated by Draw already. A synchronous
-                // layout pass here stalls the final animation frame on busy desktops.
                 SyncHoveredCard();
                 moving = true;
             }
@@ -220,7 +216,6 @@ internal sealed class WindowPreviewWindow : Window
     {
         theme.Apply(mode);
         root.RequestedTheme = mode == DockAppearanceMode.Light ? ElementTheme.Light : ElementTheme.Dark;
-        // Alpha 1 is an input surface, not a separate material overlay.
         root.Background = new SolidColorBrush(DockControlPalette.Surface(mode, 1));
         if (mode.GlassStyle() is not null)
         {
@@ -266,8 +261,6 @@ internal sealed class WindowPreviewWindow : Window
         progress = animationFrom = animationTo = 0;
         Rebuild();
         Draw();
-        // Show the full group automatically, without requiring a second hover
-        // to discover other windows. Focus remains gated until expansion settles.
         Expand();
     }
 
@@ -414,8 +407,6 @@ internal sealed class WindowPreviewWindow : Window
         renderRevision++;
         try
         {
-            // GetArea and XAML mutations can pump messages. Membership and both
-            // endpoint layouts must come from the same captured list.
             var source = session.Windows.ToArray();
             var (area, dpi, _) = WindowPreviewPlacement.GetArea(dock);
             var frame = WindowPreviewFrame.Create(source, page, area.Width / dpi - 24, area.Height / dpi - 24);
@@ -430,7 +421,6 @@ internal sealed class WindowPreviewWindow : Window
             compact = frame.Compact;
             expanded = frame.Expanded;
             var windows = frame.Windows;
-            // DWM registrations follow compact stack z-order, front last.
             foreach (var window in windows.Reverse())
             {
                 if (!previous.Remove(Key(window), out var card)) card = CreateCard(window);
@@ -455,7 +445,6 @@ internal sealed class WindowPreviewWindow : Window
         var fallback = new TextBlock { FontFamily = new("Segoe UI Variable Text"), FontSize = 11,
             FontWeight = Microsoft.UI.Text.FontWeights.Normal, Foreground = theme.Secondary,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        // Account for the card's one-DIP border: identical bounds to the live DWM image.
         var cached = new Image { Stretch = Stretch.Uniform, Margin = new(5, 33, 5, 5), IsHitTestVisible = false };
         var icon = new AdaptiveAppIcon(18, 1, showTile: false) { VerticalAlignment = VerticalAlignment.Center };
         icon.SetIcon(window.Icon);
@@ -474,8 +463,6 @@ internal sealed class WindowPreviewWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         theme.StyleButton(button);
         button.CornerRadius = new(10);
-        // A sibling rather than a child of the activation button. Its click
-        // cannot bubble through the card activation handler.
         var close = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 10, Foreground = theme.Primary },
             Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new(0),
             BorderThickness = new(0), Background = theme.Tile, Opacity = 0, IsHitTestVisible = false };
@@ -519,8 +506,6 @@ internal sealed class WindowPreviewWindow : Window
 
     private void Draw()
     {
-        // Resizing the native HWND fires root.SizeChanged synchronously on some
-        // Windows builds. Never let that event re-enter a partially drawn frame.
         if (!isShown || rebuilding || drawing || cards.Count == 0) return;
         drawing = true;
         var revision = renderRevision;
@@ -533,7 +518,6 @@ internal sealed class WindowPreviewWindow : Window
             var height = Lerp(compact.Height, expanded.Height, progress);
             placement.Position(dock, anchorX, dockTop, width, height);
             var dpi = WindowPreviewPlacement.GetArea(dock).Dpi;
-            // All layers, including native thumbnails, use the same fade and travel.
             var travel = 6 * (1 - visibility);
             root.Opacity = visibility;
             glass.Width = chrome.Width = width;

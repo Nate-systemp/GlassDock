@@ -8,10 +8,6 @@ public enum DockDisplayMode
     AllDisplays = 3
 }
 
-/// <summary>
-/// Persistent GlassDock preferences. Runtime components do not consume these
-/// values until their individual settings are explicitly wired.
-/// </summary>
 public sealed record GlassDockSettings
 {
     public const int CurrentSchemaVersion = 1;
@@ -64,6 +60,7 @@ public sealed record GlassDockSettings
     public Guid? SelectedCustomGlassPreset { get; init; }
     public UtilityKind[] SelectedUtilities { get; init; } = [];
     public UtilityTheme UtilityTheme { get; init; } = UtilityTheme.Dark;
+    public UtilityDisplayMode UtilityDisplayMode { get; init; } = UtilityDisplayMode.Individual;
     public bool SuppressNativeVolumeOsd { get; init; }
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
     public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
@@ -92,10 +89,6 @@ public sealed record GlassDockSettings
     public DockAppearanceMode DockAppearanceMode { get; init; } = DefaultDockAppearanceMode;
     public DockDisplayMode DockDisplayMode { get; init; } = DefaultDockDisplayMode;
 
-    /// <summary>
-    /// Returns a safe current-schema snapshot. Unknown and missing schema
-    /// versions use the current schema until real migrations are introduced.
-    /// </summary>
     public static GlassDockSettings Normalize(GlassDockSettings? settings)
     {
         settings ??= new();
@@ -114,6 +107,7 @@ public sealed record GlassDockSettings
             SelectedUtilities = utilities.Length == 0 ? Array.Empty<UtilityKind>() :
                 settings.SelectedUtilities is not null && utilities.SequenceEqual(settings.SelectedUtilities) ? settings.SelectedUtilities : utilities,
             UtilityTheme = Enum.IsDefined(settings.UtilityTheme) ? settings.UtilityTheme : UtilityTheme.Dark,
+            UtilityDisplayMode = Enum.IsDefined(settings.UtilityDisplayMode) ? settings.UtilityDisplayMode : UtilityDisplayMode.Individual,
             GlassVisuals = settings.GlassVisuals?.Normalize(),
             CustomGlassPresets = presets.Length == 0 ? Array.Empty<CustomGlassPreset>() :
                 settings.CustomGlassPresets is not null && presets.SequenceEqual(settings.CustomGlassPresets)

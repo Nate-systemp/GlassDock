@@ -21,7 +21,6 @@ public partial class App : Application
         .Contains("--basic-rendering", StringComparer.OrdinalIgnoreCase));
     internal bool BasicRendering => optionalComposition.Disabled;
 
-    // Called only by a loaded backdrop host, never before the first Window exists.
     internal bool TryEnableDesktopComposition()
     {
         return optionalComposition.TryInitialize(() =>
@@ -44,7 +43,6 @@ public partial class App : Application
         UnhandledException += (_, e) =>
         {
             Rendering.StartupDiagnostics.Write("Unhandled XAML exception", e.Exception);
-            // Development diagnostics only. No transmission; preserve the fail-fast behavior.
             try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "development-error.log"), e.Exception.ToString()); }
             catch (IOException) { }
         };
@@ -85,7 +83,6 @@ public partial class App : Application
             var dock = dockCoordinator.PrimaryWindow;
             window = dock;
             Rendering.StartupDiagnostics.Write("Dock coordinator constructed");
-            // SetWindowPos shows the non-activating desktop window without taking keyboard focus.
             if (inspect) dock.ShowControls();
             return;
         }

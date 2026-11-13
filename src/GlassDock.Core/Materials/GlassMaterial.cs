@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Materials;
 
-/// <summary>Platform-independent experiment values; dimensions are device-independent pixels.</summary>
 public sealed record GlassMaterial
 {
     public double BlurAmount { get; init; } = 28;
@@ -19,7 +18,6 @@ public sealed record GlassMaterial
     public double RefractionAmount { get; init; }
     public double EdgeHighlight { get; init; } = 0.12;
 
-    /// <summary>Clamp finite input and replace nonfinite values before passing to GPU APIs.</summary>
     public GlassMaterial Normalize() => this with
     {
         BlurAmount = Bound(BlurAmount, 0, 64, 28),

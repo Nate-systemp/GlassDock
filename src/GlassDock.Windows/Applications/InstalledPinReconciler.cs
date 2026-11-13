@@ -13,14 +13,8 @@ internal sealed record InstalledPinRegistration(
 {
     internal bool Matches(string executable, string? pinnedName = null) =>
         string.Equals(ExecutablePath, executable, StringComparison.OrdinalIgnoreCase) ||
-        // InstallLocation can be a shared vendor directory. Only claim direct
-        // executables in that folder, never arbitrary nested products.
         (!string.IsNullOrEmpty(InstallLocation) &&
          SameDirectory(Path.GetDirectoryName(executable), InstallLocation)) ||
-        // Some installers (notably NSIS/Electron) register neither a usable
-        // DisplayIcon nor InstallLocation. Their uninstaller lives alongside
-        // the app. Only associate it when the full product name ALSO matches;
-        // a shared installer directory or vendor alone is never ownership proof.
         (!string.IsNullOrWhiteSpace(UninstallerPath) &&
          SameDirectory(Path.GetDirectoryName(executable), Path.GetDirectoryName(UninstallerPath)) &&
          SameProductName(pinnedName, DisplayName));
@@ -39,7 +33,6 @@ internal sealed record InstalledPinRegistration(
 }
 internal sealed record InstalledPinSnapshot(bool Complete, IReadOnlyList<InstalledPinRegistration> Registrations);
 
-/// <summary>Runs on the existing discovery worker. Absence alone never establishes an uninstall.</summary>
 internal sealed class InstalledPinReconciler
 {
     private readonly Func<InstalledPinSnapshot> read;
@@ -56,9 +49,6 @@ internal sealed class InstalledPinReconciler
         IReadOnlyList<PinnedApplication> pins, IReadOnlyDictionary<string, PinInstallationEvidence> previous)
     {
         var now = clock();
-        // A new pin needs an installation baseline immediately. Reusing a
-        // cached registry snapshot can miss a short install -> pin -> uninstall
-        // sequence and leave only an unrecoverable question-mark tile.
         var newlyPinned = false;
         foreach (var pin in pins)
             newlyPinned |= observedPins.Add(pin.Identity.Key);
@@ -79,8 +69,6 @@ internal sealed class InstalledPinReconciler
             if (availability == PinTargetAvailability.Available && match is { MsiRemoved: false })
                 evidence[id] = new(match.Id, executable);
 
-            // A replacement/updated registration, advertised MSI, inaccessible disk,
-            // existing executable, ambiguous ownership, or launcher arguments veto removal.
             var registrationGone = evidence.TryGetValue(id, out var old) &&
                 string.Equals(old.ExecutablePath, executable, StringComparison.OrdinalIgnoreCase) &&
                 !snapshot.Registrations.Any(entry => entry.Id == old.RegistrationId) && matches.Length == 0;
@@ -98,20 +86,12 @@ internal sealed class InstalledPinReconciler
     private static string? Executable(PinnedApplication pin,
         IReadOnlyDictionary<string, PinInstallationEvidence> previous)
     {
-        // Explicit shell/package and argument-driven launcher identities are not
-        // evidence that the launcher's own installation is the pinned application.
         if (pin.Identity.AppUserModelId?.Contains('!') == true || !string.IsNullOrWhiteSpace(pin.Identity.Arguments)) return null;
         var target = pin.LaunchTarget;
         if (target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
             if (!File.Exists(target))
             {
-                // Uninstallers often delete the Desktop .lnk before the next pin scan.
-                // COM can no longer resolve its former .exe, but a previously verified
-                // installer association is persisted for precisely this pin identity.
-                // Never infer ownership from a missing shortcut alone: only reuse
-                // the earlier association when the local shortcut is truly missing,
-                // not when a drive or network resource is temporarily inaccessible.
                 return PinTargetProbe.Check(target, pin.Identity) == PinTargetAvailability.Unavailable &&
                     previous.TryGetValue(pin.Identity.Key, out var verified)
                     ? NormalizeExecutable(verified.ExecutablePath)
@@ -156,7 +136,7 @@ internal sealed class InstalledPinReconciler
                 foreach (var name in uninstall.GetSubKeyNames())
                 {
                     using var entry = uninstall.OpenSubKey(name);
-                    if (entry is null) return new(false, []); // Concurrent uninstall: retry a complete snapshot.
+                    if (entry is null) return new(false, []);
                     var icon = NormalizeExecutable(entry.GetValue("DisplayIcon") as string);
                     var location = entry.GetValue("InstallLocation") as string;
                     location = SafeInstallDirectory(location);
@@ -164,22 +144,18 @@ internal sealed class InstalledPinReconciler
                     var displayName = entry.GetValue("DisplayName") as string;
                     var uninstallExecutable = UninstallerExecutable(command);
                     var product = Regex.Match(command, @"(?i)\bmsiexec(?:\.exe)?\b.*?(\{[0-9a-f-]{36}\})");
-                    // UNKNOWN only. ABSENT means installed for another user and must be retained.
                     var msiRemoved = product.Success && Guid.TryParse(product.Groups[1].Value, out var code) &&
                         MsiQueryProductState(code.ToString("B").ToUpperInvariant()) == -1;
                     entries.Add(new($"{hive}/{view}/{name}", icon, location, msiRemoved,
                         displayName, uninstallExecutable));
                 }
             }
-            // Some registry branches are shared between views. Treat identical
-            // registrations as one owner while retaining a stable preferred ID.
             return new(true, entries.DistinctBy(e => (e.Id.Split('/')[0], e.Id.Split('/')[2], e.ExecutablePath, e.InstallLocation)).ToArray());
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SecurityException or ArgumentException or NotSupportedException)
         { return new(false, []); }
     }
 
-    /// <summary>Extract only a local executable from a registered uninstall command.</summary>
     internal static string? UninstallerExecutable(string? command)
     {
         if (string.IsNullOrWhiteSpace(command)) return null;
@@ -192,14 +168,11 @@ internal sealed class InstalledPinReconciler
         }
         else
         {
-            // Some uninstall entries omit quotes even when their path has spaces.
             var match = Regex.Match(text, @"^(?<path>.+?\.exe)(?=\s|$)", RegexOptions.IgnoreCase);
             executable = match.Success ? match.Groups["path"].Value : null;
         }
         var normalized = NormalizeExecutable(executable);
         if (normalized is null) return null;
-        // A system executable (msiexec/rundll32) doesn't identify the
-        // application's installation directory and must never match a pin.
         var file = Path.GetFileName(normalized);
         if (file.Equals("msiexec.exe", StringComparison.OrdinalIgnoreCase) ||
             file.Equals("rundll32.exe", StringComparison.OrdinalIgnoreCase)) return null;
@@ -212,7 +185,6 @@ internal sealed class InstalledPinReconciler
         value = Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
         if (value.StartsWith(@"\\") || !Path.IsPathFullyQualified(value)) return null;
         var path = Path.GetFullPath(value).TrimEnd('\\') + "\\";
-        // Never infer ownership from a drive root or shared installation container.
         var containers = new[] { Path.GetPathRoot(path), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             Environment.GetFolderPath(Environment.SpecialFolder.Windows) };

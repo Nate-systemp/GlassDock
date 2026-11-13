@@ -88,7 +88,6 @@ internal static class Program
         {
             var m = DockMaterialStylePresets.Create(mode) with { Contrast = 1.4 };
             using var effect = (ArithmeticCompositeEffect)GlassEffectGraph.Create(scene, scene, m.BlurQuality, m, DockMaterialRendering.BaseBlur(mode, m.BlurAmount));
-            // Match the retained drag-lens traversal, which must include contrast.
             var composite = (CompositeEffect)effect.Source2;
             var contrast = (ContrastEffect)composite.Sources[0];
             var exposure = (ExposureEffect)contrast.Source;

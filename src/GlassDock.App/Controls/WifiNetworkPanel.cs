@@ -87,7 +87,6 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
         password.ApplyTemplate();
         if (VisualTreeHelper.GetChildrenCount(password) > 0 && VisualTreeHelper.GetChild(password, 0) is FrameworkElement templateRoot)
         {
-            // PasswordBox has no TextAlignment property; align its native editor and placeholder separately.
             if (templateRoot.FindName("ContentElement") is ScrollViewer editor)
             {
                 editor.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -179,13 +178,11 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
             autoConnect.ApplyTemplate();
             if (VisualTreeHelper.GetChildrenCount(autoConnect) == 0 ||
                 VisualTreeHelper.GetChild(autoConnect, 0) is not FrameworkElement root) return;
-            // CheckBoxSize is a static native-template resource; resize only its glyph slot.
             if (root.FindName("NormalRectangle") is FrameworkElement circle && circle.Parent is FrameworkElement slot)
                 circle.Width = circle.Height = slot.Width = slot.Height = 16;
             if (root.FindName("CheckGlyph") is FrameworkElement glyph)
                 glyph.Width = glyph.Height = 16;
         };
-        // Keep the native animated checkmark, focus visuals, and CheckBox automation peer.
         foreach (var (suffix, alpha) in new[] { ("", (byte)255), ("PointerOver", (byte)235), ("Pressed", (byte)210) })
         {
             var blue = new SolidColorBrush(global::Windows.UI.Color.FromArgb(alpha, (byte)(accent >> 16), (byte)(accent >> 8), (byte)accent));
@@ -307,7 +304,6 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
 
     private void SynchronizeRows(bool duringTransition = false, double? viewportHeight = null)
     {
-        // Keep retained rows in place while signal rankings change, preserving password focus and scroll identity.
         if (transitioning && !duringTransition) return;
         if (detailsKey is not null)
         {
@@ -618,7 +614,6 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
                 EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
             if (morphContent && frame.Property == "Opacity")
             {
-                // Network text enters only once the widening surface has room for the header columns.
                 animation.BeginTime = TimeSpan.FromTicks(frame.From == 0 ? duration.TimeSpan.Ticks / 2 : 0);
                 animation.Duration = new Duration(TimeSpan.FromTicks((long)(duration.TimeSpan.Ticks * (frame.From == 0 ? .5 : .65))));
             }
@@ -786,7 +781,6 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
     private GlassPart AddGlass(Grid host, Border fallback, float radius)
     {
         var glass = new UtilityGlassSurface { Circular = false, CornerRadius = radius };
-        // Canvas keeps the drawing target out of measurement, so expanded rows can shrink again.
         var layer = new Canvas { IsHitTestVisible = false }; layer.Children.Add(glass.Element); host.Children.Add(layer);
         var part = new GlassPart(host, glass, fallback); glassParts.Add(part);
         glassSurfaces.Add(glass); GlassTargetsRevision++;

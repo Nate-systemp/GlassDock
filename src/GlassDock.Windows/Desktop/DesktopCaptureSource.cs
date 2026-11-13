@@ -6,7 +6,6 @@ using Windows.Graphics.DirectX.Direct3D11;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>GPU-only monitor capture. Owns the frame pool and reversible self-exclusion.</summary>
 public sealed class DesktopCaptureSource : IDisposable
 {
     public readonly record struct Placement(nint Monitor, int X, int Y, int Width, int Height,
@@ -86,9 +85,6 @@ public sealed class DesktopCaptureSource : IDisposable
         pool?.Dispose(); pool = null;
     }
 
-    // The renderer has already presented a clean frame into its own swap chain.
-    // Stop sampling the monitor BEFORE making this HWND screenshot-visible.
-    // No CPU screenshot buffer is created and no new WGC frame can contain Doky.
     public bool PauseForScreenshot()
     {
         if (screenshotPaused) return true;
@@ -96,7 +92,6 @@ public sealed class DesktopCaptureSource : IDisposable
         StopFramePool();
         if (!SetWindowDisplayAffinity(window, 0))
         {
-            // Fail closed: leave capture excluded and rebuild its original pool.
             StartFramePool();
             return false;
         }
@@ -108,7 +103,6 @@ public sealed class DesktopCaptureSource : IDisposable
     public void ResumeAfterScreenshot()
     {
         if (!screenshotPaused) return;
-        // Never restart sampling until the HWND is excluded again.
         if (!SetWindowDisplayAffinity(window, 0x11))
             throw new Win32Exception("Cannot restore screenshot exclusion after Snipping Tool.");
         excluded = true;
@@ -133,8 +127,6 @@ public sealed class DesktopCaptureSource : IDisposable
         if (latest is null) return null;
         try
         {
-            // Two-buffer pool: consume at most one newer queued frame. Never
-            // spin against a live producer or render an obsolete desktop sample.
             var newer = currentPool!.TryGetNextFrame();
             if (newer is not null) { latest.Dispose(); latest = newer; }
             return latest;
@@ -147,7 +139,6 @@ public sealed class DesktopCaptureSource : IDisposable
         if (item is not null) item.Closed -= ItemClosed;
         StopFramePool();
         item = null;
-        // Always restore the original affinity, including if a screenshot was canceled.
         if (excluded || screenshotPaused)
         {
             SetWindowDisplayAffinity(window, previousAffinity);

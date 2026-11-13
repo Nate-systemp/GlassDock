@@ -10,7 +10,6 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // Installer/update hooks must run before XAML and the OnLaunched mutex.
         VelopackApp.Build()
             .OnBeforeUpdateFastCallback(_ =>
                 WindowsInputHelperRegistration.StopBestEffort())
@@ -22,7 +21,6 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Rendering.StartupDiagnostics.Write("Unhandled managed startup/runtime exception", e.ExceptionObject as Exception);
 
-        // Preserve the initialization performed by WinUI's generated entry point.
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Rendering.StartupDiagnostics.Write("Application.Start entering");
         Application.Start(p =>

@@ -29,7 +29,7 @@ public sealed class WindowPreviewFrameTests
             var windows = Enumerable.Range(1, i % 17).Select(Window).ToArray();
             session.Refresh(windows);
             var frame = WindowPreviewFrame.Create(session.Windows, i % 20, i % 2 == 0 ? 500 : 1600, 500);
-            session.Refresh([]); // Simulate another switch before SizeChanged draws this frame.
+            session.Refresh([]);
             Assert.Equal(frame.Windows.Count, frame.Compact.Cards.Count);
             Assert.Equal(frame.Windows.Count, frame.Expanded.Cards.Count);
             for (var card = frame.Windows.Count - 1; card >= 0; card--)

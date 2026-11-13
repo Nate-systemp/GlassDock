@@ -92,7 +92,6 @@ internal static class NativeMethods
         public nuint ExtraInfo;
     }
 
-    // x64 INPUT is 40 bytes, with its union aligned at offset 8.
     [StructLayout(LayoutKind.Explicit, Size = 40)]
     internal struct Input
     {

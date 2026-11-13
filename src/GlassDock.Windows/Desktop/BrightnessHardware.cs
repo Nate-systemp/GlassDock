@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Owned and called only by BrightnessService's MTA worker.</summary>
 internal sealed class BrightnessHardware : IDisposable
 {
     internal sealed record Target(string Id, string Name, nint Monitor, string Backend,
@@ -60,7 +59,7 @@ internal sealed class BrightnessHardware : IDisposable
             if (matches.Length > 0)
             {
                 targets.AddRange(matches.Select(p => p with { Monitor = screen.Handle, Name = screen.Device + " · Built-in display" }));
-                continue; // A WMI panel must not also be exposed as an independent DDC target.
+                continue;
             }
             if (!GetNumberOfPhysicalMonitorsFromHMONITOR(screen.Handle, out var count) || count is 0 or > 32)
             {
@@ -122,10 +121,9 @@ internal sealed class BrightnessHardware : IDisposable
             if (!GetMonitorBrightness(target.Physical, out var min, out _, out var max)) throw new Win32Exception(Marshal.GetLastWin32Error());
             if (!SetMonitorBrightness(target.Physical, BrightnessRange.NativeValue(percent, min, max))) throw new Win32Exception(Marshal.GetLastWin32Error(), "Display rejected DDC/CI brightness change.");
         }
-        // Some DDC controllers NACK a query while applying a write. Retry only readback, on the worker.
         for (var attempt = 0; ; attempt++)
         {
-            try { return Read(target); } // Setter success is never published as an invented hardware value.
+            try { return Read(target); }
             catch (Win32Exception) when (attempt < 3) { Thread.Sleep(80); }
         }
     }
@@ -145,7 +143,7 @@ internal sealed class BrightnessHardware : IDisposable
 
     internal static bool WmiWriteAccepted(object? result) => result switch
     {
-        null => true, // A provider with no output still requires actual hardware readback.
+        null => true,
         bool accepted => accepted,
         uint code => code == 0,
         int code => code == 0,

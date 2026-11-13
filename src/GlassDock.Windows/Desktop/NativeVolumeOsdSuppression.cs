@@ -4,7 +4,6 @@ using GlassDock.Windows.Interop;
 
 namespace GlassDock.Windows.Desktop;
 
-/// <summary>Consumes volume keys before Shell receives them; never changes a foreign window.</summary>
 public sealed class NativeVolumeOsdSuppression : IDisposable
 {
     private readonly MasterVolumeService audio;
@@ -24,7 +23,6 @@ public sealed class NativeVolumeOsdSuppression : IDisposable
         callback = KeyboardMessage;
     }
 
-    // Configure/dispose from Doky's owning UI thread; native callbacks use their own message pump.
     public void SetEnabled(bool value)
     {
         if (disposed) return;
@@ -48,7 +46,7 @@ public sealed class NativeVolumeOsdSuppression : IDisposable
         {
             threadId = GetCurrentThreadId();
             NativeMethods.PeekMessage(out _, 0, 0, 0, 0);
-            hook = NativeMethods.SetWindowsHookExW(13, callback, 0, 0); // WH_KEYBOARD_LL
+            hook = NativeMethods.SetWindowsHookExW(13, callback, 0, 0);
             if (hook == 0) throw new Win32Exception("Cannot register volume key handling.");
             Status = "Volume keys use Core Audio before Shell dispatch.";
             ready.Set();
@@ -95,8 +93,7 @@ public sealed class NativeVolumeOsdSuppression : IDisposable
         if (disposed) return;
         enabled = false;
         disposed = true;
-        if (threadId != 0) PostThreadMessageW(threadId, 0x12, 0, 0); // WM_QUIT
-        // No Shell state exists to restore. Windows also removes this process's hook after a crash.
+        if (threadId != 0) PostThreadMessageW(threadId, 0x12, 0, 0);
     }
 
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
@@ -117,7 +114,6 @@ internal sealed class VolumeKeyCapture
         if (!down) return captured.Remove(key);
         if (captured.Contains(key))
         {
-            // Mute is a toggle, not a repeating step. Keep matching releases paired on disable.
             if (enabled && key != 0xAD) handle(key);
             return true;
         }

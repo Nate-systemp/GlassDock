@@ -41,7 +41,6 @@ public sealed class NightLightUtilityService : IDisposable
     private async Task ExecuteAsync(bool toggle, Func<Task>? finishTransition)
     {
         lock (sync) { if (disposed || disabled || toggle && state.Busy) return; }
-        // A hover refresh may own the gate when the click arrives. Queue the click.
         if (!await gate.WaitAsync(toggle ? Timeout.Infinite : 0, lifetime.Token).ConfigureAwait(false)) return;
         using var changing = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         changing.CancelAfter(TimeSpan.FromSeconds(10));
@@ -65,7 +64,6 @@ public sealed class NightLightUtilityService : IDisposable
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            // Never roll back blindly: a scheduled or user change may have replaced our write.
             NightLightCloudStore? recovered = null;
             if (!changing.IsCancellationRequested && error is not (InvalidDataException or NotSupportedException or OverflowException))
             {

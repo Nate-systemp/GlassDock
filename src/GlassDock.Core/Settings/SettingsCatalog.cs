@@ -6,7 +6,6 @@ public sealed record SettingsSearchEntry(string Page, string Label, string Contr
     public override string ToString() => $"{SettingsCatalog.Pages.First(page => page.Id == Page).Title} · {Label}";
 }
 
-/// <summary>Navigation and searchable options that exist in Doky's settings session.</summary>
 public static class SettingsCatalog
 {
     public static IReadOnlyList<SettingsPageEntry> Pages { get; } = Array.AsReadOnly(new[]
@@ -26,6 +25,7 @@ public static class SettingsCatalog
     public static IReadOnlyList<SettingsSearchEntry> Options { get; } = Array.AsReadOnly(new[]
     {
         new SettingsSearchEntry("Utilities", "Add Utilities", "UtilitiesGrid", "wifi wi-fi bluetooth battery independent circles"),
+        new SettingsSearchEntry("Utilities", "Utility display mode", "UtilityDisplayModeBox", "quick settings grid individual utilities"),
         new SettingsSearchEntry("General", "Start with Windows", "LaunchAtStartupToggle", "startup login launch"),
         new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted acrylic clear liquid glass theme"),
         new SettingsSearchEntry("Appearance", "Blur and opacity", "GlassControls", "diffusion tint transparency material"),

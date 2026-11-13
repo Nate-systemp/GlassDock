@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>One queued consumer; content invalidation survives coalesced frame notifications.</summary>
 public sealed class CaptureDrawGate
 {
     private int queued, invalidated;

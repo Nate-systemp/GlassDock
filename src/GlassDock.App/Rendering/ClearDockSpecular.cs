@@ -6,7 +6,6 @@ using W = global::Windows.UI.Composition;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Rim lighting. Borrows the final wave path; owns all light/mask resources.</summary>
 internal sealed class ClearDockSpecular : IDisposable
 {
     private readonly W.CompositionSpriteShape stroke;
@@ -47,7 +46,6 @@ internal sealed class ClearDockSpecular : IDisposable
             light.ColorStops.Add(stops[i]);
         }
         lighting = compositor.CreateMaskBrush(); lighting.Source = light; lighting.Mask = mask;
-        // A mask brush is not a supported effect input. Capture its pixels first.
         lightVisual = compositor.CreateSpriteVisual(); lightVisual.Brush = lighting;
         lightSurface = compositor.CreateVisualSurface(); lightSurface.SourceVisual = lightVisual;
         lightSource = compositor.CreateSurfaceBrush(lightSurface);
@@ -68,7 +66,6 @@ internal sealed class ClearDockSpecular : IDisposable
         for (var i = 0; i < stops.Length; i++)
         {
             var t = i / 16d;
-            // Short, smoothly faded opposing catches; the middle stays unlit.
             var alpha = diagonal
                 ? material.BorderOpacity * (Math.Exp(-Math.Pow((t - (optics?.HighlightPosition ?? .10)) / (optics?.HighlightSoftness ?? .13), 2))
                     + .65 * Math.Exp(-Math.Pow((t - Math.Min(1, (optics?.HighlightPosition ?? .10) + (optics?.HighlightSpread ?? .80))) / (optics?.HighlightSoftness ?? .13), 2)))
@@ -89,14 +86,10 @@ internal sealed class ClearDockSpecular : IDisposable
         var size = new Vector2((float)(width * dpi * 2), (float)(height * dpi * 2));
         visual.Size = capture.Size = surface.SourceSize = size;
         lightVisual.Size = lightSurface.SourceSize = size / 2;
-        // Only vector coverage is supersampled. Light is evaluated AFTER mask
-        // downsampling, in final window pixels, not in the stroke's scaled space.
         light.StartPoint = new(0, (float)(top * dpi));
         light.EndPoint = new(0, (float)((top + dockHeight) * dpi));
         if (diagonal)
         {
-            // Equal influence from normalized X/Y despite the dock's wide aspect
-            // ratio: the gradient must not turn into a left-to-right stripe.
             var w = Math.Max(1, dockWidth * dpi);
             var h = Math.Max(1, dockHeight * dpi);
             var gradient = DockSpecularLighting.Gradient(w, h, angle);

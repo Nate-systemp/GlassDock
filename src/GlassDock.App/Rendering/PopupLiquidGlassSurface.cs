@@ -5,7 +5,6 @@ using Microsoft.UI.Windowing;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Opt-in lifecycle adapter. Content and native thumbnails stay above the glass.</summary>
 internal sealed class PopupLiquidGlassSurface : IDisposable
 {
     private readonly Window window;
@@ -37,7 +36,6 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
         window.Closed += Closed;
     }
 
-    // Preview paging replaces its card children; preserve this single retained layer.
     public void Attach()
     {
         if (!root.Children.Contains(Element)) root.Children.Insert(0, Element);
@@ -62,13 +60,9 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
             backdrop.PopupMode == DockAppearanceMode.Clear && bounds.Z > 0 && bounds.W > 0;
         if (!active && !wasActive) return;
         wasActive = active;
-        // Root already carries the popup's fade/transform: do not apply opacity twice.
         liquid.Update(active, 1, scale > 0 ? scale : 1, bounds,
             new(bounds.X + bounds.Z / 2, Math.Max(1, bounds.Z / 2), 0, radius));
     }
-    // The capture source normally excludes the popup HWND to avoid recursive
-    // refraction. The screenshot path freezes a clean frame and temporarily
-    // lifts that exclusion, exactly as for the main dock.
     public bool BeginScreenshotMode() => !disposed && liquid.BeginScreenshotMode();
     public void EndScreenshotMode()
     {

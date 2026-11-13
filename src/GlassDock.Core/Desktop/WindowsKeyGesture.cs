@@ -1,9 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>
-/// Recognizes a bare Windows-key release without consuming real Windows shortcuts.
-/// Escape is ignored as a Win-key chord so Esc -> Win remains responsive.
-/// </summary>
 public sealed class WindowsKeyGesture
 {
     private readonly HashSet<int> held = [];
@@ -31,18 +27,12 @@ public sealed class WindowsKeyGesture
 
             if (windows)
             {
-                // Treat Win as "bare" when no meaningful shortcut key
-                // is currently held. Escape is intentionally ignored.
-                // A second Windows key belongs to the same gesture. Keep any
-                // chord disqualification until both Windows keys are released.
                 chord |= held.Any(k => k != key && k != Escape);
             }
             else if (key != Escape &&
                      (held.Contains(LeftWindows) ||
                       held.Contains(RightWindows)))
             {
-                // A real key pressed while Win is held makes this
-                // a Windows shortcut such as Win+E, Win+R, Win+D, etc.
                 chord = true;
             }
 
@@ -67,7 +57,6 @@ public sealed class WindowsKeyGesture
             return true;
         }
 
-        // Reset once neither Windows key remains held.
         if (!held.Contains(LeftWindows) &&
             !held.Contains(RightWindows))
         {

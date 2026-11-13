@@ -12,7 +12,6 @@ using W = global::Windows.UI.Composition;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>The OS compositor supplies desktop pixels; the laboratory's graph supplies the material.</summary>
 internal sealed class DesktopGlassBackdrop : SystemBackdrop
 {
     internal event EventHandler? PopupSurfaceChanged;
@@ -59,8 +58,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private void UpdateUtilityMasks()
     {
         if (utilityMaskRoot is null || compositor is null || canvasDevice is null || fill is null || !hasBounds) return;
-        // Radio toggles change coverage, not resource ownership. Retain masks
-        // until backdrop disconnection instead of closing live compositor objects.
         for (var i = utilitySurfaces.Length; i < utilityMasks.Count; i++)
             utilityMasks[i].Visual.Opacity = 0;
         var sampling = UseInnerEdge || UseSolidSurface ? 2f : 1f;
@@ -90,7 +87,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         }
     }
 
-    /// <summary>Optional disjoint cards share one desktop effect, without a full-window glass/shadow.</summary>
     public void SetSurfaceRegions(IEnumerable<GlassDock.Core.Desktop.HomeCardRect> regions, double contentScale = 1)
     {
         var next = regions.ToArray();
@@ -108,9 +104,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     public LiquidGlassMaterial? VisualMaterial { get; set; }
     private GlassMaterialMode? dockStyle;
     private ClearDockSpecular? clearSpecular;
-    // An optional Clear-only composition path must not crash the entire dock
-    // when a GPU/Windows compositor rejects one of its source brush types.
-    // Keep the existing edge treatment as the supported fallback.
     private bool clearSpecularUnavailable;
 
     public void ApplyMainDock(GlassMaterialMode style, GlassMaterial value)
@@ -120,10 +113,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         Apply(value);
         if (qualityChanged) RebuildConnectedSurface();
     }
-    /// <summary>
-    /// Uses the existing vector mask and wave geometry with a solid color
-    /// source for plain dock finishes.
-    /// </summary>
     public bool UseSolidSurface { get; set; }
     private double presentationOpacity = 1;
     private Matrix4x4 presentationTransform = Matrix4x4.Identity;
@@ -163,8 +152,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             return;
 
         var units = (float)(lastScale * (UseInnerEdge || UseSolidSurface ? 2 : 1));
-        // Conjugate the complete projective matrix, including perspective,
-        // from DIPs into the mask's supersampled physical coordinates.
         var matrix = Matrix4x4.CreateScale(1 / units, 1 / units, 1) * presentationTransform *
             Matrix4x4.CreateScale(units, units, 1);
 
@@ -184,9 +171,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private W.CompositionSurfaceBrush? edgeMask;
     private W.CompositionColorBrush? edgeFill;
 
-    // Partial specular rim highlights. These are deliberately separate from the
-    // continuous refractive inner edge: the full rim stays subtle while only a
-    // few selected edge sections catch brighter "glass glints".
     private W.CompositionPathGeometry? specularLeftTopGeometry;
     private W.CompositionPathGeometry? specularRightTopGeometry;
     private W.CompositionPathGeometry? specularLeftBottomGeometry;
@@ -231,8 +215,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private double solidOpacity = 1;
     private double solidCornerRadius = 28;
 
-    // Retain the latest mask geometry because AppWindow.Hide()/Show()
-    // can disconnect and reconnect the SystemBackdrop.
     private bool hasBounds;
     private double lastWindowWidth;
     private double lastWindowHeight;
@@ -242,8 +224,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private double lastScale = 1;
     private double lastOpacity = 1;
 
-    // Continuous dock-wave state. This deforms the TOP EDGE of the same
-    // dock silhouette; it is not a second pill/shape layered above it.
     private bool waveEnabled;
     private double waveCenterX;
     private double waveHalfWidth = 68;
@@ -255,25 +235,14 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private int connectionVersion;
     private FrameworkElement? loadingRoot;
     private RoutedEventHandler? loadedHandler;
-    // Keep the WinUI SystemBackdrop attached to the Window across appearance changes.
-    // Replacing Window.SystemBackdrop during a live transition can leave its queued
-    // default-configuration callback holding an invalid native target.
     private ICompositionSupportsSystemBackdrop? connectedTarget;
     private FrameworkElement? connectedRoot;
 
-    /// <summary>
-    /// Rebuilds the solid/glass native pipeline under the SAME XAML backdrop
-    /// attachment. Only the underlying composition brush is swapped; WinUI's
-    /// Window.SystemBackdrop property is never detached during theme switching.
-    /// Must be called on the window's UI dispatcher after selecting the new mode.
-    /// </summary>
     public void RebuildConnectedSurface()
     {
         var target = connectedTarget;
         if (target is null || compositor is null)
         {
-            // On initial construction the loaded callback will connect using
-            // the latest mode. Basic-rendering fallback also stays intact.
             return;
         }
 
@@ -286,8 +255,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         }
         catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
         {
-            // Recover only from native composition failures, as at first load.
-            // Do not swallow unrelated UI or application exceptions.
             ReleaseDesktop(target);
             if (Application.Current is App app)
                 app.DisableDesktopComposition(error);
@@ -324,8 +291,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                     }
                     catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
                     {
-                        // Release partially created native resources. Keep the XAML body
-                        // visible; never mark unrelated XAML exceptions handled globally.
                         ReleaseDesktop(target);
                         ((App)Application.Current).DisableDesktopComposition(error);
                         RenderingMode = "Basic XAML surface · desktop composition unavailable";
@@ -367,16 +332,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         fill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(255, 255, 255, 255));
         shape.FillBrush = fill;
         visual = compositor.CreateShapeVisual();
-        // These off-tree mask visuals have no XAML parent to supply soft edge
-        // composition. Explicitly request antialiased bitmap/clip boundaries.
         visual.BorderMode = W.CompositionBorderMode.Soft;
         visual.Shapes.Add(shape);
-        // Capture in a stationary parent's coordinate space. The animated visual
-        // must be a child: transforming the capture root changes its outer-space
-        // placement, rather than the pixels sampled in its own local space.
         maskCaptureRoot = compositor.CreateContainerVisual();
         maskCaptureRoot.Children.InsertAtTop(visual);
-        // OFF utilities share the actual dock effect, outside the dock's own transform.
         utilityMaskRoot = compositor.CreateContainerVisual();
         maskCaptureRoot.Children.InsertAtTop(utilityMaskRoot);
         maskSurface = compositor.CreateVisualSurface();
@@ -420,7 +379,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         {
             source = compositor.CreateBackdropBrush();
             stage = "effect factory";
-            // Separate named leaves keep the graph tree-shaped.
             factory = compositor.CreateEffectFactory(
                 GlassEffectGraph.Create(new W.CompositionEffectSourceParameter("Backdrop"), new W.CompositionEffectSourceParameter("BaseBackdrop"), material.BlurQuality),
                 GlassEffectGraph.Properties.Concat(new[] { "BaseBlur.BlurAmount" }));
@@ -431,15 +389,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             output.Source = effect;
             if (UseInnerEdge)
             {
-                // One vector path owns both the body mask and the inner perimeter.
-                // The final outer mask clips the centered stroke to its inner half.
                 edgeShape = compositor.CreateSpriteShape(geometry);
                 edgeFill = compositor.CreateColorBrush(global::Windows.UI.Color.FromArgb(30, 255, 255, 255));
                 edgeShape.StrokeBrush = edgeFill;
 
-                // Three short highlight paths create the discontinuous white rim
-                // catches seen on real curved glass. They share the same captured
-                // edge surface so there is no extra HWND, timer, or render loop.
                 specularLeftTopGeometry = compositor.CreatePathGeometry();
                 specularRightTopGeometry = compositor.CreatePathGeometry();
                 specularLeftBottomGeometry = compositor.CreatePathGeometry();
@@ -522,8 +475,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         {
             edgeShape.StrokeThickness = (float)(material.BorderThickness * 6 * lastScale);
 
-            // Keep the continuous edge quiet. The eye should read the brighter
-            // discontinuous specular catches rather than a white outline.
             edgeFill!.Color = global::Windows.UI.Color.FromArgb(
                 (byte)Math.Clamp(material.BorderOpacity * 72, 0, 92),
                 255, 255, 255);
@@ -564,8 +515,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 {
                     clearSpecular ??= new ClearDockSpecular(compositor!, geometry!, specularBody);
                     clearSpecular.Brush.SetSourceParameter("Body", specularBody);
-                    // Solid surfaces keep their opaque body; only the shared rim
-                    // receives lighting. A white catch needs more contrast on Light.
                     clearSpecular.Apply(UseDockSpecular
                         ? material with { BorderThickness = .35 * DockLayoutScale, BorderOpacity = UseSolidSurface
                             ? (solidAppearance == DockAppearanceMode.Light ? .45 : .24) : .28 }
@@ -573,14 +522,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                     clearSpecular.SetVisible(true);
                     UpdateClearBounds();
                     ApplyPresentation();
-                    // Publish the optional result only after its initialization
-                    // and bounds update have both succeeded.
                     output.Source = clearSpecular.Brush;
                 }
                 catch (Exception error) when (OptionalComposition.IsRenderingFailure(error))
                 {
-                    // The base effect and the existing vector edge remain valid.
-                    // Do not retry an unsupported native graph on every live switch.
                     clearSpecularUnavailable = true;
                     StartupDiagnostics.Write("Clear specular unavailable; using existing edge", error);
                     try { clearSpecular?.Dispose(); }
@@ -715,10 +660,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
                 (float)(windowWidth * scale),
                 (float)(windowHeight * scale));
 
-        // Supersample the vector coverage mask (not the desktop pixels). The
-        // compositor then linearly downsamples the mask, preserving subpixel
-        // coverage on rounded corners and the animated wave crest. The legacy
-        // XAML rim is now geometry-only, so this is the sole visible edge path.
         var sampling = UseInnerEdge || UseSolidSurface ? 2f : 1f;
         shape!.Scale = new Vector2(sampling);
         visual.Size = size * sampling;
@@ -757,10 +698,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         UpdateUtilityMasks();
     }
 
-    /// <summary>
-    /// Deforms the dock's existing top edge into one smooth wave.
-    /// All values are in root/window DIPs.
-    /// </summary>
     public void SetDockWave(
         double centerX,
         double halfWidth,
@@ -857,8 +794,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         var radius = Math.Max(2,
             Math.Min(material.CornerRadius, Math.Min(lastWidth / 2, lastHeight / 2)));
 
-        // Keep the existing partial spans and intensity. Their curves are sliced
-        // from the same final outline, including waves near either end of the dock.
         var topLeftStart = left + radius * .78;
         var topLeftEnd = Math.Min(
             right - radius - 18,
@@ -875,14 +810,10 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
         Vector2 Px(double x, double y) =>
             new((float)(x * lastScale), (float)(y * lastScale));
 
-        // Preserve the established spans, but slice the final wave outline:
-        // no resting-baseline segment can remain inside the raised glass.
         var leftTop = CreateUpperRim(outline, topLeftStart, topLeftEnd);
         var r = radius;
         var rightTop = CreateUpperRim(outline, topRightStart, right);
 
-        // Bottom-left: deliberately shorter and dimmer-looking by placement;
-        // it balances the composition without enclosing the entire dock.
         var leftBottom = CreateOpenPath(
             (Px(left + r, bottom), null, null),
             (Px(bottomLeftEnd, bottom), null, null));
@@ -961,7 +892,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
 
     private void UpdateRegionPaths()
     {
-        // The same continuous vector contours define the blur mask and optical rim.
         using var body = new CanvasPathBuilder(canvasDevice!);
         using var upper = new CanvasPathBuilder(canvasDevice!);
         Vector2 Pixel(GlassDock.Core.Desktop.DockWaveGeometry.Point p) =>
@@ -990,7 +920,6 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
             var top = CanvasGeometry.CreatePath(upper);
             specularLeftTopGeometry.Path = new W.CompositionPath(top);
             var old = specularLeftTopCanvas; specularLeftTopCanvas = top; old?.Dispose();
-            // Other glint geometries remain empty: there is no full-window rim between cards.
         }
     }
 

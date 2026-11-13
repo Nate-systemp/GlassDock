@@ -5,7 +5,6 @@ using Windows.UI;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>One material graph shared by WinUI in-app and Windows desktop compositor adapters.</summary>
 internal static class GlassEffectGraph
 {
     public static readonly string[] Properties =
@@ -22,7 +21,6 @@ internal static class GlassEffectGraph
         };
         return new ArithmeticCompositeEffect
         {
-            // Desktop translucency must not blend sharp desktop pixels back over the blur.
             Name = "Material", Source1 = blurredBaseSource is not null
                 ? new GaussianBlurEffect { Name = "BaseBlur", BlurAmount = (float)(baseBlur ?? material.BlurAmount), BorderMode = EffectBorderMode.Hard, Source = blurredBaseSource, Optimization = Quality(quality) }
                 : source,

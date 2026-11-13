@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Redirects only the network header; glass and its highlights remain outside this effect.</summary>
 internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement content,
     Vector2? contentOffset = null, float cornerRadius = 18) : IDisposable
 {
@@ -56,7 +55,6 @@ internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement
         shape.CornerRadius = new((float)Math.Min(cornerRadius, height / 2));
         brush!.Properties.InsertScalar("Blur.BlurAmount", (float)((1 - progress) * 4));
         output.Opacity = (float)(progress * progress); output.IsVisible = true;
-        // Hide through an ancestor clip: the visual surface still captures the live header subtree.
         sourceHost.Clip = hidden;
     }
 

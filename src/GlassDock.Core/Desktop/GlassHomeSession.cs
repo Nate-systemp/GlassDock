@@ -4,7 +4,6 @@ public enum GlassHomeState { Hidden, Compact, Expanded }
 
 public readonly record struct GlassHomePointer(double X, double Y, int Buttons, bool Inside);
 
-/// <summary>One opening's pointer origin and button edges, in physical screen pixels.</summary>
 public sealed class GlassHomeSession
 {
     private GlassHomePointer? origin;

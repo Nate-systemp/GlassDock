@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Applications;
 
-/// <summary>Snapshot of the capabilities used by an app menu; no commands or native handles are owned here.</summary>
 public sealed record DockAppMenuState(bool IsPinned, bool CanLaunch, bool CanElevate, bool CanLocate,
     IReadOnlyList<(long Handle, int ProcessId, long StartTicks)> Windows)
 {

@@ -14,7 +14,6 @@ public sealed class GlassDockSettingsChangedEventArgs(GlassDockSettings settings
     public GlassDockSettings Settings { get; } = settings;
 }
 
-/// <summary>Owns the normalized in-memory settings snapshot for one app lifetime.</summary>
 public sealed class GlassDockSettingsSession
 {
     public GlassDockSettingsSession(GlassDockSettings settings)

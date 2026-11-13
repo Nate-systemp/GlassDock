@@ -33,7 +33,6 @@ public sealed class DockWaveGeometryTests
     [Fact]
     public void Wave_corner_does_not_jump_when_crossing_old_merge_threshold()
     {
-        // The old path switched entire corner branches near this position.
         for (var x = 150d; x < 210; x += .1)
         {
             var a = DockWaveGeometry.Create(100, 80, 400, 68, 34, x, 68, 18, 1);

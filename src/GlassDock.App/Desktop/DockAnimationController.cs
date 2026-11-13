@@ -21,13 +21,7 @@ internal sealed class DockAnimationController : IDisposable
     private readonly DockIconTransition iconTransition;
     private readonly FrameworkElement indicator;
     private readonly Canvas hoverArtworkForeground;
-    // One cached mirror per real artwork image, including stack layers. Source
-    // images still belong to their Buttons (for badges, drag and interactions),
-    // but the mirrored pixels render above the glass in the unclipped root.
     private readonly Dictionary<Image, Image> hoverArtworkMirrors = new(ReferenceEqualityComparer.Instance);
-    // The bitmap is mirrored at root level to avoid button clipping, so its
-    // notification badge must be mirrored in that same coordinate space.
-    // Otherwise the red number remains attached to the *unscaled* icon slot.
     private readonly Dictionary<NotificationBadge, ForegroundBadge> hoverBadgeMirrors = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<AdaptiveAppIcon> observedBadgeIcons = new(ReferenceEqualityComparer.Instance);
     private bool badgeRefreshQueued;
@@ -67,8 +61,6 @@ internal sealed class DockAnimationController : IDisposable
     private double pathStartProgress, pathStartBottom, pathTargetBottom;
     private double collapsedBottom;
     private bool pathExpanded;
-    // A built-in XAML dependency property provides the one storyboard clock.
-    // It is never inserted into the visual tree and cannot affect hit testing.
     private readonly Slider progressClock = new() { Minimum = 0, Maximum = 1 };
     private double Progress { get => progressClock.Value; set => progressClock.Value = value; }
     private void ProgressChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs args) => ApplyProgress();
@@ -86,7 +78,6 @@ internal sealed class DockAnimationController : IDisposable
         var bottom = pathStartBottom + (pathTargetBottom - pathStartBottom) * fraction;
         icons.Margin = new Thickness(0, 0, 0, bottom);
         ApplyBottom(bottom);
-        // The retained pill and material share a silhouette, including during blending.
         indicator.Opacity = 1 - frame.MaterialBlend;
         surface.Opacity = frame.MaterialBlend;
     }
@@ -124,9 +115,6 @@ internal sealed class DockAnimationController : IDisposable
             var t = Math.Clamp((Environment.TickCount64 - placementStarted) / placementDuration, 0, 1);
             if (t == 1) { placementTimer.Stop(); IsPlacementAnimating = false; }
 
-            // Directional easing, deliberately not ease-in-out:
-            // raising/opening settles with sine ease-out;
-            // lowering/closing folds away with sine ease-in.
             var eased = placementTarget >= placementFrom
                 ? Math.Sin(t * Math.PI / 2)
                 : 1 - Math.Cos(t * Math.PI / 2);
@@ -163,7 +151,6 @@ internal sealed class DockAnimationController : IDisposable
         PlacementChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Fades the collapsed indicator without interrupting dock animation.</summary>
     public void AnimateIndicatorOpacity(double target, double milliseconds)
     {
         if (disposed) return;
@@ -219,7 +206,6 @@ internal sealed class DockAnimationController : IDisposable
         else if (hover.IsAnimating) StartMagnificationTimer();
     }
 
-    /// <summary>Resize a settled open dock without interpreting removed slots as collapse progress.</summary>
     public void ResizeExpanded(double width, double height)
     {
         if (disposed) return;
@@ -239,7 +225,6 @@ internal sealed class DockAnimationController : IDisposable
         ApplyProgress();
     }
 
-    // Pin placement changes the expanded surface depth, not collapse progress.
     public void SetPlacementHeight(double height)
     {
         expandedHeight = height;
@@ -261,7 +246,6 @@ internal sealed class DockAnimationController : IDisposable
         Trace(
             $"AnimateAsync({expanded}, targetWidth={targetWidth}), previousPending={completion is { Task.IsCompleted: false }}");
 
-        // Sample the rendered geometry before releasing its single animation clock.
         var progress = DockTransitionTiming.Progress(surface.Width, surface.Height, targetWidth, targetHeight, layoutScale);
         var currentBottom = surface.Margin.Bottom;
         if (expanded && progress <= .000001) collapsedBottom = currentBottom;
@@ -322,7 +306,6 @@ internal sealed class DockAnimationController : IDisposable
         return pending.Task;
     }
 
-    /// <summary>Retargets one continuous wave without restarting its spring clock.</summary>
     private void HoverLayoutChanged(object sender, SizeChangedEventArgs args)
     {
         if (disposed || interactionHeld || !hover.HasPointer) return;
@@ -337,7 +320,6 @@ internal sealed class DockAnimationController : IDisposable
         if (hover.IsAnimating) StartMagnificationTimer();
     }
 
-    /// <summary>Releases both scale and translation before drag/reorder takes ownership.</summary>
     public void ResetMagnification(bool immediate = false)
     {
         if (immediate) { hover.Reset(); StopMagnificationTimer(); }
@@ -365,9 +347,6 @@ internal sealed class DockAnimationController : IDisposable
             if (Artwork(element) is { } artwork)
             {
                 var artworkVisual = ElementCompositionPreview.GetElementVisual(artwork);
-                // The actual icon never scales inside its Button: the Button's
-                // native ContentPresenter can clip it even with ZIndex raised.
-                // Magnification is drawn in the root-level foreground instead.
                 artworkVisual.Scale = Vector3.One;
                 DrawHoverArtworkInForeground(artwork, frame.Scale, liveImages);
                 liveBadgeIcons.Add(artwork);
@@ -377,8 +356,6 @@ internal sealed class DockAnimationController : IDisposable
             element.Translation = Vector3.Zero;
             Canvas.SetZIndex(element, (int)Math.Round((frame.Scale - 1) * 1000));
         }
-        // Restore the originals on pointer exit, reorder, source replacement or
-        // removal; never leave a real icon hidden behind a stale mirror.
         foreach (var pair in hoverArtworkMirrors.ToArray())
         {
             if (liveImages.Contains(pair.Key)) continue;
@@ -407,9 +384,6 @@ internal sealed class DockAnimationController : IDisposable
         if (!hover.IsAnimating) StopMagnificationTimer();
     }
 
-    // Notification counts can change after the magnification spring settles.
-    // Refresh the foreground badge once on the UI dispatcher without waking the
-    // 60fps animation timer or disturbing the icon's current target scale.
     private void OnHoverBadgeChanged(object? sender, EventArgs args)
     {
         if (disposed || !hover.HasPointer || badgeRefreshQueued) return;
@@ -445,8 +419,6 @@ internal sealed class DockAnimationController : IDisposable
         if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
             return;
 
-        // The badge follows the exact same optical anchor and spring progress
-        // as the mirrored bitmap, rather than the fixed-size Button/ContentPresenter.
         var bounds = badge.TransformToVisual(hoverArtworkForeground).TransformBounds(
             new global::Windows.Foundation.Rect(0, 0, width, height));
         var anchor = icon.TransformToVisual(hoverArtworkForeground).TransformPoint(
@@ -468,8 +440,6 @@ internal sealed class DockAnimationController : IDisposable
             mirror.LastRevision = icon.HoverBadgeRevision;
         }
 
-        // Scale the entire badge (including its number/text), not just its
-        // outline. Anchor both components to the same baseline as the icon.
         mirror.Visual.Width = bounds.Width;
         mirror.Visual.Height = bounds.Height;
         Canvas.SetLeft(mirror.Visual, anchor.X + (bounds.Left - anchor.X) * scale);
@@ -506,9 +476,6 @@ internal sealed class DockAnimationController : IDisposable
                 width <= 0 || height <= 0)
                 return;
 
-            // Positions are sampled from the unscaled image in root coordinates.
-            // The final rectangle expands about the dock's existing optical
-            // baseline; no button moves or gives up its original hit target.
             var bounds = image.TransformToVisual(hoverArtworkForeground).TransformBounds(
                 new global::Windows.Foundation.Rect(0, 0, width, height));
             var anchor = icon.TransformToVisual(hoverArtworkForeground).TransformPoint(
@@ -534,8 +501,6 @@ internal sealed class DockAnimationController : IDisposable
             Canvas.SetTop(mirror, anchor.Y + (bounds.Top - anchor.Y) * scale);
             Canvas.SetZIndex(mirror, (int)Math.Round(scale * 1000));
             mirror.Visibility = Visibility.Visible;
-            // The artwork and badge are both drawn above the glass in sync;
-            // running indicators, focus visuals and tiles stay in their slots.
             image.Opacity = 0;
         });
     }
@@ -620,12 +585,6 @@ internal sealed class DockAnimationController : IDisposable
             animation);
     }
 
-    /// <summary>
-    /// Stops an in-flight placement/shape transition while retaining the
-    /// values currently rendered on screen. This is used only when a context
-    /// menu takes ownership of the dock interaction; unlike Stop(), it does
-    /// not reset icon magnification or otherwise rebuild the visual state.
-    /// </summary>
     public bool FreezeCurrentTransitions()
     {
         var progress = Progress;

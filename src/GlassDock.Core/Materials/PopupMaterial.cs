@@ -16,13 +16,10 @@ public static class PopupMaterial
         }).Normalize();
     }
 
-    // Clear popup readability pass; foreground controls/thumbnails are never inputs.
     public const float LiquidBackdropBlur = 2.5f;
     public const float LiquidBackdropExposure = 0f;
     public static LiquidGlassMaterial PopupOptics(LiquidGlassMaterial dockOptics) =>
         (dockOptics with { SpecularIntensity = .26f }).Normalize();
-    // A dashboard repeats small neighboring surfaces. Dock-sized shadows overlap
-    // each other here, so only their elevation is reduced; optical settings stay shared.
     public static GlassMaterial ForDashboardCard(GlassMaterial material, DockAppearanceMode mode) =>
         mode.GlassStyle() is null ? material : material with
         {
@@ -40,10 +37,6 @@ public static class PopupMaterial
             _ => 1
         }) * (mode.GlassStyle() is null ? 1 : Math.Clamp(opacity, 0, 1));
 
-    /// <summary>
-    /// Uses the dock's selected preset and user values without a second popup
-    /// blur/tint/opacity policy. Only the panel geometry differs from the pill.
-    /// </summary>
     public static GlassMaterial CreateForPopup(
         DockAppearanceSettings appearance, DockAppearanceMode mode)
     {

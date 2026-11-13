@@ -2,8 +2,6 @@ using System.Buffers.Binary;
 
 namespace GlassDock.Windows.Desktop;
 
-// Format adapted from kvnxiao/win-nightlight-cli (MIT), commit 0461529455f3594b9b9d6cc3d6c2e7a9736de9b5.
-// Unknown fields retain their original headers and encoded values at every envelope level.
 internal sealed class NightLightCloudStore
 {
     private const int MaxBytes = 65536;
@@ -23,15 +21,14 @@ internal sealed class NightLightCloudStore
         wrapper = Structure(Required(container, 1, 10).Value);
         var blob = Required(wrapper, 1, 11).Value;
         var reader = new Reader(blob);
-        if (reader.Byte() != 14) throw Invalid(); // list<int8>, containing a marshaled CB v1 document
+        if (reader.Byte() != 14) throw Invalid();
         var length = reader.Count();
         state = Document(reader.Bytes(length)); reader.End();
         var status = Optional(state, 0, 16);
         if (status is not null && Number(status) != 0) throw Invalid();
         On = status is not null;
         var cause = Optional(state, 10, 16);
-        if (cause is not null && Number(cause) is not (0 or 2)) throw Invalid(); // ZigZag scheduled=0/manual=1
-        // Only initialized state records are writable; do not invent a state from an empty/default payload.
+        if (cause is not null && Number(cause) is not (0 or 2)) throw Invalid();
         LastTransition = Number(Required(state, 20, 6));
         if (LastTransition == 0 || LastTransition > 2650467743999999999) throw Invalid();
         var usable = Optional(state, 30, 2);
@@ -53,7 +50,7 @@ internal sealed class NightLightCloudStore
         var nextContainer = Replace(container, 0, WithValue(Required(container, 0, 6), EncodedNumber(modified)));
         nextContainer = Replace(nextContainer, 1, WithValue(Required(container, 1, 10), Encode(nextWrapper)));
         var result = Encode(Replace(outer, 1, WithValue(Required(outer, 1, 10), Encode(nextContainer))), marshaled: true);
-        _ = new NightLightCloudStore(result); // Validate the rebuilt document before any registry write.
+        _ = new NightLightCloudStore(result);
         return result;
     }
 
@@ -179,7 +176,7 @@ internal sealed class NightLightCloudStore
                     var keyType = Byte(); var valueType = Byte(); var pairs = Count();
                     for (var i = 0; i < pairs; i++) { Skip(keyType, depth + 1); Skip(valueType, depth + 1); }
                     break;
-                default: throw Invalid(); // Includes STOP_BASE and future types: never flatten an unknown schema.
+                default: throw Invalid();
             }
         }
     }

@@ -3,7 +3,6 @@ using GlassDock.Core.Applications;
 
 namespace GlassDock.Windows.Applications;
 
-/// <summary>GlassDock-only preferences. Imported Windows taskbar pins are never modified.</summary>
 internal sealed class DockPinStore
 {
     private readonly object gate = new();
@@ -18,8 +17,6 @@ internal sealed class DockPinStore
         public Dictionary<string, PinInstallationEvidence> Installations { get; init; } = new(StringComparer.Ordinal);
         public List<SavedPin> Pins { get; init; } = [];
         public HashSet<string> Excluded { get; init; } = [];
-        // User override for unavailable local shortcuts. Other missing shortcuts
-        // stay saved but do not occupy dock space until the target returns.
         public HashSet<string> ShownMissingPins { get; init; } = [];
         public List<string>? Order { get; init; }
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -84,10 +81,6 @@ internal sealed class DockPinStore
             var normalized = NormalizeShortcutPins(preferences);
             if (!ReferenceEquals(normalized, preferences))
             {
-                // Canonicalize only Doky's own saved shortcut identity. The exact
-                // launch target remains unchanged, so custom arguments/profile
-                // behavior is preserved. Persist best-effort so pin/unpin/order
-                // operations use the canonical identity on later launches too.
                 if (!Save(normalized))
                     preferences = normalized;
             }
@@ -122,8 +115,6 @@ internal sealed class DockPinStore
             if (removed.Count > 0 || !preferences.Installations.OrderBy(p => p.Key).SequenceEqual(reconciliation.Evidence.OrderBy(p => p.Key)))
             {
                 var next = WithoutPins(preferences, removed, reconciliation.Evidence);
-                // Publish removal only after the atomic preferences write succeeds.
-                // Imported Windows shortcuts are excluded, never edited or deleted.
                 if (Save(next))
                 {
                     result.RemoveAll(pin => removed.Contains(pin.Identity.Key));
@@ -131,11 +122,6 @@ internal sealed class DockPinStore
                 }
             }
 
-            // Only Doky's own local .lnk pins are eligible for visual hiding.
-            // Preserve the saved identity, ordering and stacks; do not infer
-            // permanent uninstall from an unavailable shortcut. Imported pins,
-            // package identities, directories, .url files and direct executable
-            // pins continue to use their original behavior.
             var customIds = preferences.Pins.Select(pin => pin.Identity.Key)
                 .ToHashSet(StringComparer.Ordinal);
             recoverablePins = result
@@ -172,7 +158,6 @@ internal sealed class DockPinStore
         }
     }
 
-    /// <summary>Entries hidden from the dock are always available here for recovery.</summary>
     internal IReadOnlyList<RecoverableDockPin> GetRecoverablePins()
     {
         lock (gate) return recoverablePins.ToArray();
@@ -255,9 +240,6 @@ internal sealed class DockPinStore
                 (remap ??= new(StringComparer.Ordinal))[pin.Identity.Key] = canonical.Key;
             }
 
-            // If two saved shortcuts resolve to the same application identity,
-            // keep the first launch target/order entry instead of creating a
-            // duplicate dock icon.
             if (!pins.Any(existing =>
                     string.Equals(existing.Identity.Key, next.Identity.Key, StringComparison.Ordinal)))
                 pins.Add(next);
@@ -318,7 +300,6 @@ internal sealed class DockPinStore
                     application.Name,
                     target!));
 
-                // Once a custom order exists, newly pinned apps belong at its end.
                 order?.Add(application.Id);
             }
             else
@@ -352,9 +333,6 @@ internal sealed class DockPinStore
             if (!File.Exists(path) && !Directory.Exists(path))
                 return false;
 
-            // Keep the shell target exact (including .lnk files and folders).
-            // The identity is GlassDock-local; LaunchTarget remains the authoritative
-            // ShellExecute target.
             var identity = new ApplicationIdentity(null, path);
             var id = identity.Key;
 
@@ -377,7 +355,6 @@ internal sealed class DockPinStore
                 }
                 catch
                 {
-                    // Filename remains a safe display name.
                 }
             }
 
@@ -398,8 +375,6 @@ internal sealed class DockPinStore
 
             var order = preferences.Order?.Where(existing => existing != id).ToList();
 
-            // If a custom order already exists, append the new item. If there is
-            // no custom order yet, Apply() naturally appends GlassDock-only pins.
             order?.Add(id);
 
             return Save(new Preferences
@@ -454,7 +429,6 @@ internal sealed class DockPinStore
                     preferences.Excluded,
                     StringComparer.Ordinal),
                 ShownMissingPins = new HashSet<string>(preferences.ShownMissingPins, StringComparer.Ordinal),
-                // Keep identities of temporarily absent apps without pinning them.
                 Order = requested.Concat(preferences.Order ?? [])
                     .Distinct(StringComparer.Ordinal).ToList()
             });
@@ -513,7 +487,6 @@ internal sealed class DockPinStore
             members.Add(source.Id);
             var stack = new DockStack(target.Stack?.Id ?? "stack:" + Guid.NewGuid().ToString("N"), target.Stack?.Name ?? "Stack", members);
             var stacks = (preferences.Stacks ?? []).Where(item => item.Id != stack.Id).Append(stack).ToArray();
-            // Snapshot exact imported/custom launch targets before grouping; never touch Windows pins.
             var pins = preferences.Pins.ToList();
             foreach (var app in applications.Where(app => members.Contains(app.Id)))
             {

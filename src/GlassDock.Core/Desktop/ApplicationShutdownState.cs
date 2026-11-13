@@ -1,6 +1,5 @@
 namespace GlassDock.Core.Desktop;
 
-/// <summary>Coordinates one application-wide shutdown request and cancellation signal.</summary>
 public sealed class ApplicationShutdownState
 {
     private readonly CancellationTokenSource cancellation = new();

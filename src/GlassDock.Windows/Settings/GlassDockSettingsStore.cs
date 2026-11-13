@@ -3,7 +3,6 @@ using GlassDock.Core.Settings;
 
 namespace GlassDock.Windows.Settings;
 
-/// <summary>Persists GlassDock settings under the current user's LocalAppData.</summary>
 public sealed class GlassDockSettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

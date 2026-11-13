@@ -8,7 +8,6 @@ using global::Windows.UI.ViewManagement;
 
 namespace GlassDock.App.Rendering;
 
-/// <summary>Live in-app backdrop. Owns its native resources for one connected XAML brush.</summary>
 internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
 {
     private CompositionEffectBrush? effect;
@@ -24,7 +23,6 @@ internal sealed class GlassCompositionBrush : XamlCompositionBrushBase
 
     public GlassCompositionBrush() => FallbackColor = Color.FromArgb(255, 47, 57, 77);
 
-    // GlassSurface supplies its compositor on Loaded; no process-global Window is needed.
 
     public void Connect(Compositor compositor)
     {
