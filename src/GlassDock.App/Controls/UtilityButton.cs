@@ -488,7 +488,7 @@ internal sealed class UtilityButton : Button, IDisposable
         if (disposed) return;
         var sharedGlass = dockMode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
         var displayOn = DisplayOn;
-        Glass.UseDockMaterial = !FloatingPresentation && !displayOn && (sharedGlass || RadioUtility);
+        Glass.UseDockMaterial = !displayOn && (sharedGlass || !FloatingPresentation && RadioUtility);
         tint.BorderThickness = new(sourceHighlighted ? 1.5 : 0);
         tint.BorderBrush = sourceHighlighted ? new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
             (byte)(Definition.Accent >> 16), (byte)(Definition.Accent >> 8), (byte)Definition.Accent)) : null;

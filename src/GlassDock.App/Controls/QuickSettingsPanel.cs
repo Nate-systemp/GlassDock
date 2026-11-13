@@ -40,6 +40,29 @@ internal sealed class QuickSettingsPanel : Canvas, IUtilityPanel
     internal FrameworkElement? BrightnessAnchor => brightnessCapsule?.View;
     internal Vector4 ColumnBounds => new(origin.X + (float)columnX, origin.Y, (float)rowHeight, (float)Height);
     internal IEnumerable<UtilityGlassSurface> CapsuleSurfaces => capsules.Select(c => c.Glass);
+    internal bool UseNativeBackdrop { get; set; }
+
+    internal IEnumerable<(Vector4 Bounds, float Opacity)> NativeGlassSurfaces(FrameworkElement relativeTo)
+    {
+        foreach (var (button, host) in circles)
+        {
+            if (!button.IsLoaded || button.Visibility != Visibility.Visible || host.Visibility != Visibility.Visible ||
+                !(button.Glass.UsesNativeDockBackdrop || button.NeedsNativeToggleUnderlay)) continue;
+            yield return Surface(button, host.Opacity * button.Opacity);
+        }
+        if (capsuleHost.Visibility != Visibility.Visible) yield break;
+        foreach (var capsule in capsules)
+        {
+            if (!capsule.View.IsLoaded || capsule.View.Visibility != Visibility.Visible || !capsule.Glass.UsesNativeDockBackdrop) continue;
+            yield return Surface(capsule.View, capsuleHost.Opacity * capsule.View.Opacity);
+        }
+
+        (Vector4 Bounds, float Opacity) Surface(FrameworkElement element, double opacity)
+        {
+            var rect = element.TransformToVisual(relativeTo).TransformBounds(new(0, 0, element.Width, element.Height));
+            return (new((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height), (float)opacity);
+        }
+    }
 
     internal QuickSettingsPanel(IReadOnlyDictionary<UtilityKind, UtilityButton> buttons, UtilityKind[] selected,
         DockAppearanceMode mode, UtilityTheme theme, double diameter, double iconSize, float scale,
@@ -133,8 +156,10 @@ internal sealed class QuickSettingsPanel : Canvas, IUtilityPanel
             var next = new Vector4(origin.X + (float)rect.X, origin.Y + (float)rect.Y, (float)element.Width, (float)element.Height);
             var visible = active && mode.GlassStyle() is not null && element.IsLoaded && element.Visibility == Visibility.Visible &&
                 (element.Parent is not FrameworkElement parent || parent.Visibility == Visibility.Visible);
-            changed |= glass.Bounds != next || glass.Active != visible;
-            glass.Bounds = next; glass.Active = visible;
+            var native = UseNativeBackdrop && glass.UsesNativeDockBackdrop;
+            changed |= glass.Bounds != next || glass.Active != (visible && !native);
+            glass.Bounds = next; glass.Active = visible && !native;
+            if (native) glass.Hide();
             return changed;
         }
     }

@@ -64,6 +64,7 @@ internal class UtilityPopupWindow : Window
         host = new(WinRT.Interop.WindowNative.GetWindowHandle(this)) { UseDockLayeredTransparency = true };
         host.Configure();
         transparentBackdrop.SetSolidAppearance(light ? DockAppearanceMode.Light : DockAppearanceMode.Dark, 0, 0);
+        transparentBackdrop.SetSurfaceRegions([]);
         SystemBackdrop = transparentBackdrop;
         captureExcluded = (Application.Current as App)?.BasicRendering != true && host.SetCaptureExclusion(true);
         panel.View.SizeChanged += (_, _) => { if (IsOpen && !closing) Reposition(anchor); };
@@ -94,6 +95,15 @@ internal class UtilityPopupWindow : Window
     public void ApplyAppearance(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, float layoutScale, bool highlights)
     {
         panel.ConfigureGlass(backdrop, UseDockOptics ? optics : PopupMaterial.FrostedUtilityOptics(optics), layoutScale, highlights);
+        var native = UseDockOptics && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic);
+        var reconnect = transparentBackdrop.UseSolidSurface == native;
+        transparentBackdrop.UseSolidSurface = !native;
+        transparentBackdrop.VisualMaterial = native ? optics : null;
+        if (native && mode.GlassStyle() is { } style)
+            transparentBackdrop.ApplyMainDock(style, backdrop);
+        else
+            transparentBackdrop.SetSolidAppearance(mode, 0, 0);
+        if (reconnect) transparentBackdrop.RebuildConnectedSurface();
     }
 
     public void BeginSnippingCapture()
@@ -152,8 +162,11 @@ internal class UtilityPopupWindow : Window
         }
         transparentBackdrop.SetBounds(rectangle.Width / dpi, rectangle.Height / dpi,
             rectangle.Width / dpi, rectangle.Height / dpi, 0, dpi, 1);
+        if (panel is QuickSettingsPanel quick) quick.UseNativeBackdrop = !transparentBackdrop.UseSolidSurface;
         var changed = panel.PositionGlass(root, new((float)((rectangle.X - dockBounds.X) / dpi),
             (float)((rectangle.Y - dockBounds.Y) / dpi)), captureExcluded);
+        if (panel is QuickSettingsPanel nativePanel)
+            transparentBackdrop.SetUtilitySurfaces(nativePanel.UseNativeBackdrop ? nativePanel.NativeGlassSurfaces(root) : []);
         if (changed || surfacesChanged) GlassChanged?.Invoke(this, EventArgs.Empty);
     }
 

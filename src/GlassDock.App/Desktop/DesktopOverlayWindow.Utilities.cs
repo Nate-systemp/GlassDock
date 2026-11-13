@@ -400,6 +400,11 @@ public sealed partial class DesktopOverlayWindow
                 surfaces.Add((new((float)bounds.X, (float)bounds.Y, (float)bounds.Width, (float)bounds.Height),
                     (float)(utilityArea.Opacity * button.Opacity)));
             }
+            if (GridUtilities && quickSettingsButton is { IsLoaded: true } grid && grid.Glass.UsesNativeDockBackdrop)
+            {
+                grid.Glass.Active = false; grid.Glass.Hide();
+                surfaces.Add((grid.Glass.Bounds, (float)(utilityArea.Opacity * grid.Opacity)));
+            }
         }
         desktopBackdrop.SetUtilitySurfaces(surfaces);
     }

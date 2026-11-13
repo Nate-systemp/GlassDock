@@ -71,7 +71,9 @@ internal sealed class VerticalUtilityCapsule : IDisposable
         View.Width = width; View.Height = height;
         rounded.Size = new((float)width, (float)height); rounded.CornerRadius = new((float)(width / 2));
         fallback.CornerRadius = new(width / 2);
-        fallback.Background = new SolidColorBrush(mode.GlassStyle() is null ? DockControlPalette.SolidSurface(mode) : DockControlPalette.Surface(mode, 24));
+        Glass.UseDockMaterial = mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
+        fallback.Background = new SolidColorBrush(mode.GlassStyle() is null ? DockControlPalette.SolidSurface(mode)
+            : Glass.UseDockMaterial ? Microsoft.UI.Colors.Transparent : DockControlPalette.Surface(mode, 24));
         Glass.CornerRadius = (float)(width / 2); Glass.Configure(mode, material, optics, highlights, scale);
         Update();
     }

@@ -5,6 +5,44 @@ namespace GlassDock.Windows.Tests;
 public sealed class PopupAppearanceWiringTests
 {
     [Fact]
+    public void Grid_utilities_preserve_the_individual_frosted_and_acrylic_material()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "GlassDock.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+
+        var button = File.ReadAllText(Path.Combine(directory.FullName,
+            "src", "GlassDock.App", "Controls", "UtilityButton.cs"));
+        var surface = File.ReadAllText(Path.Combine(directory.FullName,
+            "src", "GlassDock.App", "Rendering", "UtilityGlassSurface.cs"));
+        Assert.Contains("Glass.UseDockMaterial = !displayOn && (sharedGlass || !FloatingPresentation && RadioUtility);", button);
+        Assert.Contains("var physical = UseDockMaterial ? RefractionLayer.ForNativeBackend(backdrop)", surface);
+        Assert.Contains("if (UseDockMaterial && mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) return;", surface);
+        Assert.Contains("? material.SurfaceOpacity : 1;", surface);
+        foreach (var name in new[] { "QuickSettingsGridButton.cs", "VerticalUtilityCapsule.cs" })
+        {
+            var control = File.ReadAllText(Path.Combine(directory.FullName,
+                "src", "GlassDock.App", "Controls", name));
+            Assert.Contains("Glass.UseDockMaterial = mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;", control);
+            Assert.Contains("? Microsoft.UI.Colors.Transparent :", control);
+        }
+        var popup = File.ReadAllText(Path.Combine(directory.FullName,
+            "src", "GlassDock.App", "Desktop", "UtilityPopupWindow.cs"));
+        var panel = File.ReadAllText(Path.Combine(directory.FullName,
+            "src", "GlassDock.App", "Controls", "QuickSettingsPanel.cs"));
+        var utilities = File.ReadAllText(Path.Combine(directory.FullName,
+            "src", "GlassDock.App", "Desktop", "DesktopOverlayWindow.Utilities.cs"));
+        Assert.Contains("transparentBackdrop.ApplyMainDock(style, backdrop);", popup);
+        Assert.Contains("transparentBackdrop.SetSurfaceRegions([]);", popup);
+        Assert.Contains("quick.UseNativeBackdrop = !transparentBackdrop.UseSolidSurface;", popup);
+        Assert.Contains("transparentBackdrop.SetUtilitySurfaces(nativePanel.UseNativeBackdrop ? nativePanel.NativeGlassSurfaces(root) : []);", popup);
+        Assert.Contains("glass.Active = visible && !native;", panel);
+        Assert.Contains("if (native) glass.Hide();", panel);
+        Assert.Contains("quickSettingsButton is { IsLoaded: true } grid && grid.Glass.UsesNativeDockBackdrop", utilities);
+    }
+
+    [Fact]
     public void Solid_popup_palette_matches_the_main_dock_finishes()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
