@@ -4,6 +4,7 @@ public sealed class TaskbarLease(bool whileAppActive)
 {
     private TimeSpan lastHeartbeat;
     private TimeSpan? hiddenAt;
+    public bool CanRenewAfterTimeout => whileAppActive && hiddenAt is not null;
 
     public void Heartbeat(TimeSpan now) => lastHeartbeat = now;
     public void Hidden(TimeSpan now) => hiddenAt ??= now;

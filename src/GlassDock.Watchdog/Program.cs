@@ -44,11 +44,25 @@ try
     var clock = Stopwatch.StartNew();
     var deadline = new TaskbarLease(args[0] == "--watch-active");
     TimeSpan? hiddenAt = null;
+    var waitingForHeartbeat = false;
     var consecutiveMaintenanceFailures = 0;
     var read = Task.Run(Console.ReadLine);
     while (!parent.HasExited && !emergency.WaitOne(0))
     {
-        if (deadline.IsExpired(clock.Elapsed)) break;
+        if (deadline.IsExpired(clock.Elapsed))
+        {
+            if (!deadline.CanRenewAfterTimeout) break;
+            if (!waitingForHeartbeat)
+            {
+                var restored = controller.Restore();
+                if (!restored) restored = controller.EmergencyRestore();
+                if (!restored) throw new InvalidOperationException("Taskbar restoration failed after heartbeat timeout.");
+                hiddenAt = null;
+                waitingForHeartbeat = true;
+                Console.WriteLine("WAITING: heartbeat expired.");
+                Console.Out.Flush();
+            }
+        }
         if (read.IsCompleted)
         {
             var command = read.GetAwaiter().GetResult();
@@ -57,6 +71,7 @@ try
             {
                 controller.HideForTest();
                 hiddenAt = clock.Elapsed;
+                waitingForHeartbeat = false;
                 deadline.Hidden(clock.Elapsed);
                 Console.WriteLine("HIDDEN");
                 Console.Out.Flush();
@@ -65,7 +80,7 @@ try
             deadline.Heartbeat(clock.Elapsed);
             read = Task.Run(Console.ReadLine);
         }
-        if (hiddenAt is not null)
+        if (hiddenAt is not null && !waitingForHeartbeat)
         {
             if (controller.MaintainHidden())
             {

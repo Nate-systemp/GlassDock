@@ -8,6 +8,7 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
     private readonly SemaphoreSlim writerLock = new(1);
     private Task? monitor;
     private bool stopping;
+    private int renewalRequested;
     public bool IsActive { get; private set; }
     public event EventHandler<string>? Ended;
 
@@ -57,7 +58,7 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
     public async Task HeartbeatAsync()
     {
         if (!IsActive || stopping) return;
-        try { await SendAsync("PING"); }
+        try { await SendAsync(Interlocked.Exchange(ref renewalRequested, 0) == 1 ? "HIDE" : "PING"); }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
             TaskbarRecovery.RestoreNow();
@@ -81,7 +82,11 @@ public sealed class TaskbarDevelopmentSession : IAsyncDisposable
         var status = "Recovery helper ended.";
         try
         {
-            while (await process.StandardOutput.ReadLineAsync() is { } line) status = line;
+            while (await process.StandardOutput.ReadLineAsync() is { } line)
+            {
+                if (line == "WAITING: heartbeat expired.") Interlocked.Exchange(ref renewalRequested, 1);
+                status = line;
+            }
             await process.WaitForExitAsync();
         }
         catch (IOException exception)

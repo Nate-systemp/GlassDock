@@ -8,6 +8,25 @@ public sealed class TaskbarLeaseTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public void Only_an_established_app_lifetime_lease_can_renew_after_a_long_pause(bool active)
+    {
+        var lease = new TaskbarLease(active);
+        Assert.False(lease.CanRenewAfterTimeout);
+        lease.Heartbeat(TimeSpan.FromSeconds(1));
+        Assert.False(lease.CanRenewAfterTimeout);
+        lease.Hidden(TimeSpan.FromSeconds(1));
+        Assert.Equal(active, lease.CanRenewAfterTimeout);
+
+        var resumed = TimeSpan.FromHours(8);
+        Assert.True(lease.IsExpired(resumed));
+        lease.Heartbeat(resumed);
+        Assert.Equal(!active, lease.IsExpired(resumed));
+        Assert.True(lease.IsExpired(resumed + TimeSpan.FromSeconds(10)));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public void Missing_heartbeat_expires_even_before_hide(bool active)
     {
         var lease = new TaskbarLease(active);

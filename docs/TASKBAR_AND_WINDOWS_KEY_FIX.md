@@ -19,3 +19,22 @@ References: [ABM_GETSTATE](https://learn.microsoft.com/en-us/windows/win32/shell
 Release solution and Debug App build: zero warnings/errors. All 32 tests passed (31 Core, one Windows architecture test). Live testing began with `AutoHide=true`. Suppression reported `Visible=false, Enabled=false, AutoHide=false`. Normal exit, deliberate App termination, deliberate watchdog termination, and missing-helper initialization restored/reported `Visible=true, Enabled=true, AutoHide=true`. The original setting journal contained `1` while suppressed. Physical-key tests remain manual as stated above.
 
 The final bottom-center pixel at screen coordinate (960, 1079) accepted dock input after correcting the rounded region's exclusive lower boundary. The dock remained expanded and taskbar status remained hidden, disabled, and auto-hide suspended. Test instances were closed and auto-hide restored afterwards.
+
+## Sleep and long-heartbeat-gap recovery, 2026-11-13
+
+The active watchdog previously ended its process after ten seconds without UI heartbeats. Long sleep could reach that deadline, restore the taskbar, and stop the App heartbeat timer through the session-ended callback. The user then had to resume suppression manually.
+
+An established `--watch-active` session now restores the taskbar at the same ten-second deadline and sends `WAITING: heartbeat expired.` while retaining the verified parent connection. The UI session records that renewal is required. Its next dispatcher heartbeat sends `HIDE`, reacquiring taskbar ownership and original-setting journaling through the existing controller. Ordinary queued `PING` messages leave the restored taskbar visible while waiting. Each renewal request is consumed once to avoid duplicate `HIDE` commands.
+
+The watchdog waits with suppression released while the UI is unresponsive. Parent exit, EOF, `RESTORE`, and the independent emergency event still end the connection. The bounded `--watch` development test retains its sixty-second cap and ends on missing heartbeats. Suppression remains an explicit watchdog-owned development lease with independent recovery.
+
+Validation on this S0 Low Power Idle system used a temporary parent fixture with the required App process identity and the real old/new watchdog executables. Heartbeats were withheld for 12.5 seconds in each timeout case.
+
+- The old watchdog exited and restored the taskbar, reproducing the loss of automatic suppression.
+- The new active watchdog remained connected with the taskbar visible and enabled while heartbeats were withheld.
+- The first recovered UI heartbeat hid and disabled the taskbar again without a Resume action.
+- A second heartbeat timeout followed by the independent recovery command ended the waiting watchdog. A later heartbeat left the taskbar visible.
+- The bounded development session exited after heartbeat timeout and a later heartbeat left the taskbar visible.
+- `scripts/Validate.ps1` passed with zero build warnings/errors, 456 Core tests, and 327 Windows tests. Core tests also model an eight-hour pause and retain the bounded sixty-second deadline.
+
+Physical overnight sleep and hibernate cycles remain unverified. This validation covers the heartbeat-gap and recovery protocol using live taskbar operations.
