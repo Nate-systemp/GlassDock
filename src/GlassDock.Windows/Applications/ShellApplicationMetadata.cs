@@ -129,17 +129,31 @@ internal static class ShellApplicationMetadata
             instance = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"), true)!);
             ((IPersistFile)instance!).Load(path, 0);
             var link = (ApplicationNative.IShellLink)instance;
-            var target = new StringBuilder(32768);
-            var arguments = new StringBuilder(32768);
-            var directory = new StringBuilder(32768);
-            link.GetPath(target, target.Capacity, 0, 4);
-            link.GetArguments(arguments, arguments.Capacity);
-            link.GetWorkingDirectory(directory, directory.Capacity);
-            return (Environment.ExpandEnvironmentVariables(target.ToString()), arguments.ToString(),
-                Environment.ExpandEnvironmentVariables(directory.ToString()));
+            var target = ReadLinkText((buffer, size) => link.GetPath(buffer, size, 0, 4));
+            var arguments = ReadLinkText(link.GetArguments);
+            var directory = ReadLinkText(link.GetWorkingDirectory);
+            return (Environment.ExpandEnvironmentVariables(target), arguments,
+                Environment.ExpandEnvironmentVariables(directory));
         }
         catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException) { return (null, null, null); }
         finally { if (instance is not null) Marshal.ReleaseComObject(instance); }
+    }
+
+    private static string ReadLinkText(Action<StringBuilder, int> read)
+    {
+        var buffer = new StringBuilder(260);
+        while (true)
+        {
+            try { read(buffer, buffer.Capacity); }
+            catch (COMException error) when (error.HResult == unchecked((int)0x8007007A) && buffer.Capacity < 32768)
+            {
+                buffer.Length = buffer.Capacity - 1;
+            }
+            if (buffer.Length < buffer.Capacity - 1 || buffer.Capacity == 32768)
+                return buffer.ToString();
+            buffer.Clear();
+            buffer.EnsureCapacity(Math.Min(buffer.Capacity * 2, 32768));
+        }
     }
 
     private static volatile bool comPinnedUnavailable;

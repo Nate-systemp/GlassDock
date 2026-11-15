@@ -84,6 +84,11 @@ public partial class App : Application
             window = dock;
             Rendering.StartupDiagnostics.Write("Dock coordinator constructed");
             if (inspect) dock.ShowControls();
+#if DEBUG || DOKY_MEMORY_PROBE
+            if (arguments.Contains("--memory-probe", StringComparer.OrdinalIgnoreCase) ||
+                arguments.Contains("--idle-memory-probe", StringComparer.OrdinalIgnoreCase))
+                _ = Diagnostics.MemoryLifecycleProbe.RunAsync(dockCoordinator, settingsSession);
+#endif
             return;
         }
 

@@ -25,7 +25,7 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
     private readonly List<(string Id, Grid Host, AdaptiveAppIcon Icon, Border Indicator)> buttons = [];
     private readonly LiquidGlassRim rim = new();
     private GlassVisualProfile profile = new();
-    private bool highlights = true, disposed;
+    private bool highlights = true, disposed, visible = true;
     private CanvasRenderTarget? scene;
     private PixelShaderEffect? shader;
     private GaussianBlurEffect? blur;
@@ -48,7 +48,20 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
 
     private void PreviewSizeChanged(object sender, SizeChangedEventArgs args)
     {
-        if (!disposed) canvas.Invalidate();
+        if (!disposed && visible) canvas.Invalidate();
+    }
+
+    public void SetVisible(bool value)
+    {
+        if (disposed || visible == value) return;
+        visible = value;
+        if (value) canvas.Invalidate();
+        else
+        {
+            ReleaseEffects();
+            scene?.Dispose(); scene = null;
+            rim.Dispose();
+        }
     }
 
     public void FocusComponent(string id)
@@ -97,12 +110,12 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
             indicator.BorderThickness = new(indicatorMaterial?.EdgeWidth ?? 0);
             indicator.BorderBrush = new SolidColorBrush(Color.FromArgb((byte)(255 * (indicatorMaterial?.EdgeOpacity ?? 0)), 255, 255, 255));
         }
-        canvas.Invalidate();
+        if (visible) canvas.Invalidate();
     }
 
     private void Draw(CanvasControl sender, CanvasDrawEventArgs args)
     {
-        if (disposed || ActualWidth < 1 || ActualHeight < 1) return;
+        if (disposed || !visible || ActualWidth < 1 || ActualHeight < 1) return;
         try
         {
             var size = new Vector2((float)ActualWidth, (float)ActualHeight);

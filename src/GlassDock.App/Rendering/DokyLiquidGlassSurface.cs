@@ -74,6 +74,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private Direct3D11CaptureFrame? currentFrame;
     private CanvasBitmap? bitmap;
     private bool disposed, failed, enabled, screenshotFrozen, desktopRecoveryQueued;
+    private bool updating;
+    private (bool Active, double Opacity, float Scale, Vector4 Dock, Vector4 Wave)? deferredUpdate;
     private readonly GlassDock.Core.Desktop.CaptureDrawGate drawGate = new();
     private long queuedAt;
     private Vector4 dock, wave;
@@ -129,6 +131,25 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     public void Update(bool active, double opacity, float dpiScale, Vector4 dockBounds, Vector4 waveShape)
     {
         if (disposed) return;
+        if (updating)
+        {
+            deferredUpdate = (active, opacity, dpiScale, dockBounds, waveShape);
+            return;
+        }
+        do
+        {
+            deferredUpdate = null;
+            updating = true;
+            try { UpdateCore(active, opacity, dpiScale, dockBounds, waveShape); }
+            finally { updating = false; }
+            if (deferredUpdate is not { } next) return;
+            (active, opacity, dpiScale, dockBounds, waveShape) = next;
+        } while (!disposed);
+    }
+
+    private void UpdateCore(bool active, double opacity, float dpiScale, Vector4 dockBounds, Vector4 waveShape)
+    {
+        if (disposed) return;
         if (screenshotFrozen)
         {
             if (!active && !UtilitiesActive) EndScreenshotMode();
@@ -181,7 +202,13 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
                     popupBlur = new() { Source = popupCrop, BorderMode = EffectBorderMode.Hard };
                     popupExposure = new() { Source = popupBlur, Exposure = PopupMaterial.LiquidBackdropExposure };
                 }
-                capture = new(hwnd, device.As<IDirect3DDevice>(), next);
+                var nextCapture = new DesktopCaptureSource(hwnd, device.As<IDirect3DDevice>(), next);
+                if (disposed || !enabled)
+                {
+                    nextCapture.Dispose();
+                    return;
+                }
+                capture = nextCapture;
                 if (GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled)
                     StartupDiagnostics.Write($"Capture source: hwnd={hwnd:X} monitor={next.Monitor:X} pixels={next.MonitorWidth}x{next.MonitorHeight} popup={popupTarget is not null}");
                 capture.FrameAvailable += FrameAvailable;

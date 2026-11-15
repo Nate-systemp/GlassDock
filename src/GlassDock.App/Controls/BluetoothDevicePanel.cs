@@ -77,7 +77,7 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
         AutomationProperties.SetName(scrollbar, "Paired Bluetooth devices");
         AutomationProperties.SetLiveSetting(status, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         idle = DispatcherQueue.CreateTimer(); idle.Interval = TimeSpan.FromMilliseconds(800); idle.IsRepeating = false;
-        idle.Tick += (_, _) => { if (!scrollbarHover && !scrollbarDragging) FadeScrollbar(0); };
+        idle.Tick += ScrollbarIdle;
         scroll.ViewChanged += (_, _) => { UpdateScroll(); RevealScrollbar(); };
         list.SizeChanged += (_, _) => UpdateScroll();
         surface.SizeChanged += (_, _) => { UpdateScroll(); GlassChanged?.Invoke(this, EventArgs.Empty); };
@@ -315,6 +315,11 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
         }
     }
 
+    private void ScrollbarIdle(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        if (!scrollbarHover && !scrollbarDragging) FadeScrollbar(0);
+    }
+
     private void RevealScrollbar() { if (scrollbar.Maximum <= 0) return; FadeScrollbar(1); idle.Stop(); idle.Start(); }
     private void FadeScrollbar(double opacity)
     {
@@ -342,7 +347,8 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
     {
         if (disposed) return; disposed = true;
         bluetooth.Changed -= BluetoothChanged; glass.RenderingChanged -= GlassRenderingChanged;
-        idle.Stop(); viewportTransition?.Stop(); scrollbarTransition?.Stop();
+        idle.Stop(); idle.Tick -= ScrollbarIdle;
+        viewportTransition?.Stop(); scrollbarTransition?.Stop();
         foreach (var row in rows.Values) { row.Transition?.Stop(); row.Effect.Dispose(); }
         glass.Dispose();
 

@@ -56,6 +56,7 @@ public sealed partial class SettingsWindow
         }
         BuildAppearanceTiles();
         BuildDockPreview();
+        AppWindow.Changed += SettingsVisibilityChanged;
         BuildGlassEditor();
         shellReady = true;
         settingsSession.Changed += SettingsSessionChanged;
@@ -76,6 +77,7 @@ public sealed partial class SettingsWindow
         Closed += (_, _) =>
         {
             settingsSession.Changed -= SettingsSessionChanged;
+            AppWindow.Changed -= SettingsVisibilityChanged;
             // Release the one-shot Settings preview and its WinUI host only
             // after the window has closed. Do not change live rendering.
             try
@@ -113,6 +115,11 @@ public sealed partial class SettingsWindow
             savingNonVisual = true;
             ApplyClick(this, new RoutedEventArgs());
         });
+    }
+
+    private void SettingsVisibilityChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
+    {
+        if (args.DidVisibilityChange) glassPreview?.SetVisible(sender.IsVisible);
     }
 
     private void AddSettingSlider(NumberBox box)

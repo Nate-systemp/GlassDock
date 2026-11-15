@@ -20,7 +20,12 @@
     <ApplicationIcon>Assets\Doky.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(DokyMemoryProbe)' == 'true'">
+    <DefineConstants>$(DefineConstants);DOKY_MEMORY_PROBE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../tests/GlassDock.App.MemoryProbe.cs" Link="Diagnostics/MemoryLifecycleProbe.cs"
+             Condition="'$(Configuration)' == 'Debug' or '$(DokyMemoryProbe)' == 'true'" />
     <RuntimeHostConfigurationOption Include="System.Net.DisableIPv6" Value="true" />
     <Content Include="Assets\Doky.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Doky.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

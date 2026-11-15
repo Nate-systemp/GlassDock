@@ -101,6 +101,7 @@ internal static class ApplicationNative
         void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
         void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string text);
         void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int count);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string text);
     }
     [StructLayout(LayoutKind.Sequential)]
     internal struct BitmapObject

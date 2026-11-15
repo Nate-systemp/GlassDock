@@ -23,7 +23,7 @@ public sealed class DesktopShutdownRegressionTests
         var shutdown = source[shutdownStart..];
 
         var hideMain = shutdown.IndexOf("AppWindow.Hide();", StringComparison.Ordinal);
-        var closeSettings = shutdown.IndexOf("settingsWindow.BeginShutdown()?.Close();", StringComparison.Ordinal);
+        var closeSettings = shutdown.IndexOf("settingsWindow.BeginShutdown()?.ClosePermanently();", StringComparison.Ordinal);
         var restoreTaskbar = shutdown.IndexOf("TaskbarRecovery.RestoreNow();", StringComparison.Ordinal);
         var disposeWatchdog = shutdown.IndexOf("await session.DisposeAsync();", StringComparison.Ordinal);
         var closeMain = shutdown.IndexOf("if (closeMainWindow) Close();", StringComparison.Ordinal);

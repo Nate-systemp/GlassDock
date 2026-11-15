@@ -70,52 +70,90 @@ internal class UtilityPopupWindow : Window
         transparentBackdrop.SetSurfaceRegions([]);
         SystemBackdrop = transparentBackdrop;
         captureExcluded = (Application.Current as App)?.BasicRendering != true && host.SetCaptureExclusion(true);
-        panel.View.SizeChanged += (_, _) => { if (IsOpen && !closing) Reposition(anchor); };
-        panel.GlassChanged += (_, _) => { if (IsOpen && !closing) Reposition(anchor, surfacesChanged: true); };
-        root.Loaded += (_, _) => { if (IsOpen) Reposition(anchor); };
-        root.KeyDown += (_, e) => { if (e.Key == global::Windows.System.VirtualKey.Escape) { e.Handled = true; Hide(); } };
-        root.PointerPressed += (_, e) => { if (AnimateControls is not null && ReferenceEquals(e.OriginalSource, root)) Hide(); };
-        Activated += async (_, e) =>
+        panel.View.SizeChanged += PanelSizeChanged;
+        panel.GlassChanged += PanelGlassChanged;
+        root.Loaded += RootLoaded;
+        root.KeyDown += RootKeyDown;
+        root.PointerPressed += RootPointerPressed;
+        Activated += PopupActivated;
+        Closed += PopupClosed;
+    }
+
+    private void PanelSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (IsOpen && !closing) Reposition(anchor);
+    }
+
+    private void PanelGlassChanged(object? sender, EventArgs args)
+    {
+        if (IsOpen && !closing) Reposition(anchor, surfacesChanged: true);
+    }
+
+    private void RootLoaded(object sender, RoutedEventArgs args)
+    {
+        if (IsOpen) Reposition(anchor);
+    }
+
+    private void RootKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs args)
+    {
+        if (args.Key != global::Windows.System.VirtualKey.Escape) return;
+        args.Handled = true;
+        Hide();
+    }
+
+    private void RootPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs args)
+    {
+        if (AnimateControls is not null && ReferenceEquals(args.OriginalSource, root)) Hide();
+    }
+
+    private async void PopupActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (disposed || args.WindowActivationState != WindowActivationState.Deactivated || snippingCaptureActive) return;
+        if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
+        if (snippingCaptureActive) return;
+        await Task.Delay(180);
+        if (disposed || !IsOpen || closing || snippingCaptureActive || host.HasForegroundOrOwner(dock) || RelatedWindowHasForeground?.Invoke() == true) return;
+        if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
+        if (!snippingCaptureActive) Hide();
+    }
+
+    private void PopupClosed(object sender, WindowEventArgs args)
+    {
+        if (disposed) return;
+        disposed = true; IsOpen = false;
+        Activated -= PopupActivated;
+        Closed -= PopupClosed;
+        panel.View.SizeChanged -= PanelSizeChanged;
+        panel.GlassChanged -= PanelGlassChanged;
+        root.Loaded -= RootLoaded;
+        root.KeyDown -= RootKeyDown;
+        root.PointerPressed -= RootPointerPressed;
+        DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);
+        try
         {
-            if (e.WindowActivationState != WindowActivationState.Deactivated || snippingCaptureActive) return;
-            if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
-            if (snippingCaptureActive) return;
-            await Task.Delay(180);
-            if (disposed || !IsOpen || closing || snippingCaptureActive || host.HasForegroundOrOwner(dock) || RelatedWindowHasForeground?.Invoke() == true) return;
-            if (host.IsScreenshotForeground()) ScreenshotRequested?.Invoke();
-            if (!snippingCaptureActive) Hide();
-        };
-        Closed += (_, _) =>
+            panel.Dispose();
+        }
+        finally
         {
-            if (disposed) return;
-            disposed = true; IsOpen = false;
-            DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);
-            try
-            {
-                panel.Dispose();
-            }
+            animationRevision++;
+            batch?.Dispose(); batch = null;
+            track?.Dispose(); track = null;
+            SystemBackdrop = null;
+            host.Dispose();
+
+            // Notify owners before clearing the popup's visual/event graph.
+            try { Hidden?.Invoke(this, EventArgs.Empty); }
             finally
             {
-                animationRevision++;
-                batch?.Dispose(); batch = null;
-                track?.Dispose(); track = null;
-                SystemBackdrop = null;
-                host.Dispose();
-
-                // Notify owners before clearing the popup's visual/event graph.
-                try { Hidden?.Invoke(this, EventArgs.Empty); }
-                finally
-                {
-                    panelHost.Content = null;
-                    root.Children.Clear();
-                    Content = null;
-                    DetailsVisibilityChanged = null;
-                    Hidden = null;
-                    Hiding = null;
-                    GlassChanged = null;
-                }
+                panelHost.Content = null;
+                root.Children.Clear();
+                Content = null;
+                DetailsVisibilityChanged = null;
+                Hidden = null;
+                Hiding = null;
+                GlassChanged = null;
             }
-        };
+        }
     }
 
     public void ApplyAppearance(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, float layoutScale, bool highlights)
