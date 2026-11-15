@@ -26,7 +26,10 @@ internal sealed class DockAppContextMenuWindow : Window
     private const double MenuRowHeight = 36 * MenuSizeScale;
     private const double MenuRowRadius = 5 * MenuSizeScale;
     private readonly nint dock;
-    private readonly Grid root = new();
+    private readonly Grid root = new()
+    {
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
+    };
     private readonly Grid body;
     private readonly StackPanel footer;
     private readonly StackPanel rows = new();

@@ -17,7 +17,10 @@ internal class UtilityPopupWindow : Window
 {
     internal const double Gutter = 8;
     private readonly nint dock;
-    private readonly Grid root = new();
+    private readonly Grid root = new()
+    {
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent)
+    };
     private readonly DesktopGlassBackdrop transparentBackdrop = new() { UseSolidSurface = true };
     private readonly IUtilityPanel panel;
     private readonly ContentControl panelHost;
@@ -149,6 +152,10 @@ internal class UtilityPopupWindow : Window
         if (AnimateControls is not null) root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         if (IsOpen && !closing) { Reposition(source); Activate(); host.ActivateForUserInput(); _ = panel.RefreshAsync(); return; }
         IsOpen = true; closing = false; root.IsHitTestVisible = true;
+        // Prepare the first composition frame before making this native popup visible.
+        // The existing Animate(false) takes over from zero opacity.
+        if (AnimateControls is null && (animations || UseQuickSettingsMotion))
+            ElementCompositionPreview.GetElementVisual(root).Opacity = 0;
         Reposition(source); Activate(); host.ActivateForUserInput();
         DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);
         Animate(false); _ = panel.RefreshAsync();
