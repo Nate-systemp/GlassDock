@@ -1,5 +1,6 @@
 using GlassDock.Core.Desktop;
 using GlassDock.Core.Applications;
+using GlassDock.Core.Settings;
 using GlassDock.Windows.Interop;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -14,6 +15,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private readonly bool dockShortcutsEnabled;
     private readonly WindowsInputHelperBridge? elevatedHelper;
     private WindowsKeyHook? hook;
+    private readonly UtilityKeyInput? utilityKeys;
     private Func<uint, bool>? volumeKeyHandler;
     private bool suppressDockToggle, captureBareWindowsKey, disposed;
     private uint revision;
@@ -59,6 +61,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     public event EventHandler? SnippingRequested;
     public event EventHandler? SnippingCanceled;
     public event EventHandler? ClipboardChanged;
+    public event Action<UtilityKind, bool>? UtilityKeyChanged;
 
     public WindowsKeyboardService(nint hwnd, bool enableDockShortcuts = true, string? elevatedHelperPath = null)
     {
@@ -69,6 +72,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
             throw new InvalidOperationException("Cannot attach Doky hotkeys.");
         if (enableDockShortcuts)
         {
+            utilityKeys = new(hwnd, (kind, down) => UtilityKeyChanged?.Invoke(kind, down));
             clipboardNotificationsRegistered = AddClipboardFormatListener(hwnd);
             sessionNotificationsRegistered = NativeMethods.WTSRegisterSessionNotification(hwnd, WtsNotifyForThisSession);
             var displayState = ConsoleDisplayState;
@@ -132,6 +136,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     {
         if (disposed) return;
         lifecycleGate.MarkBoundary();
+        utilityKeys?.Reset();
         revision++;
         signals.Clear();
         hook?.ResetInputState();
@@ -142,6 +147,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
     private void RequestLifecycleRecovery(string reason)
     {
         if (disposed || !lifecycleGate.RequestRecovery()) return;
+        utilityKeys?.Reset();
         revision++;
         signals.Clear();
         UpdateState();
@@ -190,6 +196,8 @@ public sealed class WindowsKeyboardService : IKeyboardService
 
     private nint WindowMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
+        if (!disposed && message == 0x00FF) utilityKeys?.Read(lParam);
+        if (!disposed && message == 0x00FE && wParam == 2) utilityKeys?.Remove(lParam);
         if (message == PowerBroadcastMessage)
         {
             switch ((uint)wParam)
@@ -287,6 +295,7 @@ public sealed class WindowsKeyboardService : IKeyboardService
         lifecycleGate.Shutdown();
         signals.Clear();
         elevatedHelper?.Dispose();
+        utilityKeys?.Dispose();
         hook?.Dispose(); hook = null;
         if (clipboardNotificationsRegistered) RemoveClipboardFormatListener(hwnd);
         if (sessionNotificationsRegistered) NativeMethods.WTSUnRegisterSessionNotification(hwnd);

@@ -34,6 +34,7 @@ public sealed partial class SettingsWindow : Window
         set { saveInProgress = value; if (PageScroll is not null) PageScroll.IsEnabled = !value; }
     }
     private bool closed;
+    private bool permanentlyClosing;
     private bool populating;
     private ManualUpdateService? updates;
     private bool updateBusy;
@@ -77,6 +78,14 @@ public sealed partial class SettingsWindow : Window
         var startupEnabled = startupService.IsEnabled();
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         InitializeSettingsShell();
+        // Keep one Settings window alive instead of allocating a new WinUI/XAML
+        // tree and native composition host for every open/close cycle.
+        AppWindow.Closing += (_, args) =>
+        {
+            if (permanentlyClosing || shutdown.IsRequested) return;
+            args.Cancel = true;
+            AppWindow.Hide();
+        };
         PopulateAbout();
         badges.Changed += NotificationsChanged;
         UpdateNotificationStatus();
@@ -94,6 +103,12 @@ public sealed partial class SettingsWindow : Window
         };
     }
 
+    public void ClosePermanently()
+    {
+        permanentlyClosing = true;
+        Close();
+    }
+
     public void ShowCentered(nint owner)
     {
         var area = WindowsMonitorService.GetWorkAreaForWindow(owner);
@@ -101,6 +116,7 @@ public sealed partial class SettingsWindow : Window
         AppWindow.Move(new global::Windows.Graphics.PointInt32(
             area.X + (area.Width - size.Width) / 2,
             area.Y + (area.Height - size.Height) / 2));
+        AppWindow.Show();
         Activate();
         WindowsMonitorService.BringWindowToFront(WinRT.Interop.WindowNative.GetWindowHandle(this));
     }

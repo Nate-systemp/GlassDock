@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              doky-brightness-osd
-// @name            Doky brightness OSD bridge (experimental)
-// @description     Build-pinned brightness-only suppression with a live Doky UI lease
+// @name            Doky Sound and Brightness OSD bridge (experimental)
+// @description     Build-pinned Sound and Brightness suppression with a live Doky UI lease
 // @version         0.1.0
 // @author          Doky
 // @include         explorer.exe
@@ -13,12 +13,13 @@
 // ==WindhawkModSettings==
 /*
 - enabled: false
-  $name: Enable experimental Doky brightness suppression
+  $name: Enable experimental Doky Sound and Brightness suppression
   $description: Requires the opted-in Doky UI lease and exact verified Shell binaries.
 */
 // ==/WindhawkModSettings==
 
 #include "ObservationHooks.hpp"
+#include "HardwareOsdContext.hpp"
 #include <bcrypt.h>
 #include <cstddef>
 
@@ -31,9 +32,21 @@ struct alignas(8) SharedLease {
     volatile LONG64 requests;
     DWORD bridgePid, reserved;
     ULONGLONG bridgeCreated;
+    DWORD volumeReady, reservedVolume;
+    ULONGLONG volumeDeadline;
+    volatile LONG64 volumeRequests;
 };
-static_assert(offsetof(SharedLease, requests) == 40 && offsetof(SharedLease, bridgeCreated) == 56 && sizeof(SharedLease) == 64);
-struct Snapshot { DWORD version{}, ready{}, pid{}, session{}; ULONGLONG created{}, deadline{}; DWORD bridgePid{}; ULONGLONG bridgeCreated{}; };
+static_assert(offsetof(SharedLease, requests) == 40 && offsetof(SharedLease, bridgeCreated) == 56 &&
+    offsetof(SharedLease, volumeReady) == 64 && offsetof(SharedLease, volumeDeadline) == 72 &&
+    offsetof(SharedLease, volumeRequests) == 80 && sizeof(SharedLease) == 88);
+struct Snapshot {
+    DWORD version{}, ready{}, pid{}, session{};
+    ULONGLONG created{}, deadline{};
+    DWORD bridgePid{};
+    ULONGLONG bridgeCreated{};
+    DWORD volumeReady{};
+    ULONGLONG volumeDeadline{};
+};
 HANDLE mapping = nullptr, owner = nullptr, bridge = nullptr;
 SharedLease* shared = nullptr;
 HMODULE hardware = nullptr, twinui = nullptr;
@@ -50,7 +63,8 @@ bool SnapshotLease(Snapshot& value) noexcept {
     const LONG64 before = shared->sequence;
     if (before & 1) return false;
     MemoryBarrier();
-    value = {shared->version, shared->ready, shared->pid, shared->session, shared->created, shared->deadline, shared->bridgePid, shared->bridgeCreated};
+    value = {shared->version, shared->ready, shared->pid, shared->session, shared->created, shared->deadline,
+        shared->bridgePid, shared->bridgeCreated, shared->volumeReady, shared->volumeDeadline};
     MemoryBarrier();
     return before == shared->sequence && value.version == 1 && value.session == ownSession;
 }
@@ -86,28 +100,29 @@ bool ExactBinary(HMODULE module, PCWSTR expected) {
     return ok;
 }
 
-bool BrightnessContext() noexcept {
+Intent HardwareContext() noexcept {
     void* frames[24]{};
     const USHORT count = CaptureStackBackTrace(0, 24, frames, nullptr);
-    const auto hostCall = reinterpret_cast<ULONG_PTR>(twinui) + 0x4F977;
-    const auto showHost = reinterpret_cast<ULONG_PTR>(hardware) + 0x2379F;
-    const auto brightness = reinterpret_cast<ULONG_PTR>(hardware) + 0x22D94;
-    for (USHORT i = 0; i + 2 < count; ++i)
-        if (reinterpret_cast<ULONG_PTR>(frames[i]) == hostCall &&
-            reinterpret_cast<ULONG_PTR>(frames[i + 1]) == showHost &&
-            reinterpret_cast<ULONG_PTR>(frames[i + 2]) == brightness) return true;
-    return false;
+    return HardwareOsdContext(frames, count, reinterpret_cast<ULONG_PTR>(twinui), reinterpret_cast<ULONG_PTR>(hardware));
 }
 
-bool MaySuppressBrightness(HWND window) noexcept {
+Intent MaySuppressHardware(HWND window) noexcept {
     if (!enabled.load(std::memory_order_relaxed) || !owner || !bridge ||
-        WaitForSingleObject(owner, 0) != WAIT_TIMEOUT || WaitForSingleObject(bridge, 0) != WAIT_TIMEOUT) return false;
+        WaitForSingleObject(owner, 0) != WAIT_TIMEOUT || WaitForSingleObject(bridge, 0) != WAIT_TIMEOUT) return Intent::Unknown;
     Snapshot value{};
     const auto now = GetTickCount64();
-    return SnapshotLease(value) && value.ready == 1 && value.pid == ownerIdentity.pid && value.created == ownerIdentity.created &&
-        value.bridgePid == bridgeIdentity.pid && value.bridgeCreated == bridgeIdentity.created &&
-        value.deadline > now && value.deadline - now <= 3000 &&
-        NativeHostIdentity(window, GetCurrentProcessId()) && BrightnessContext();
+    if (!SnapshotLease(value) || value.pid != ownerIdentity.pid || value.created != ownerIdentity.created ||
+        value.bridgePid != bridgeIdentity.pid || value.bridgeCreated != bridgeIdentity.created ||
+        !NativeHostIdentity(window, GetCurrentProcessId())) return Intent::Unknown;
+    const auto intent = HardwareContext();
+    const bool volume = intent == Intent::Volume;
+    const auto ready = volume ? value.volumeReady : value.ready;
+    const auto deadline = volume ? value.volumeDeadline : value.deadline;
+    return ready == 1 && deadline > now && deadline - now <= 3000 ? intent : Intent::Unknown;
+}
+
+void CountRequest(Intent intent) noexcept {
+    InterlockedIncrement64(intent == Intent::Volume ? &shared->volumeRequests : &shared->requests);
 }
 
 BOOL WINAPI ShowBrightness(HWND window, int command) {
@@ -116,9 +131,10 @@ BOOL WINAPI ShowBrightness(HWND window, int command) {
     const DWORD error = GetLastError();
     const bool reveal = command == SW_SHOWNORMAL || command == SW_SHOWMAXIMIZED || command == SW_SHOWNOACTIVATE ||
         command == SW_SHOW || command == SW_SHOWNA || command == SW_RESTORE;
-    if (reveal && MaySuppressBrightness(window)) {
+    const auto intent = reveal ? MaySuppressHardware(window) : Intent::Unknown;
+    if (intent != Intent::Unknown) {
         const BOOL previous = IsWindowVisible(window);
-        InterlockedIncrement64(&shared->requests);
+        CountRequest(intent);
         inBrightnessHook = false; SetLastError(error); return previous;
     }
     inBrightnessHook = false; SetLastError(error);
@@ -128,9 +144,10 @@ BOOL WINAPI PositionBrightness(HWND window, HWND after, int x, int y, int cx, in
     if (inBrightnessHook) return positionOriginal(window, after, x, y, cx, cy, flags);
     inBrightnessHook = true;
     const DWORD error = GetLastError();
-    if ((flags & SWP_SHOWWINDOW) && MaySuppressBrightness(window)) {
+    const auto intent = (flags & SWP_SHOWWINDOW) ? MaySuppressHardware(window) : Intent::Unknown;
+    if (intent != Intent::Unknown) {
         flags = (flags & ~SWP_SHOWWINDOW) | SWP_HIDEWINDOW;
-        InterlockedIncrement64(&shared->requests);
+        CountRequest(intent);
     }
     inBrightnessHook = false; SetLastError(error);
     return positionOriginal(window, after, x, y, cx, cy, flags);
@@ -169,7 +186,7 @@ BOOL Wh_ModInit() {
         Cleanup(); return FALSE;
     }
     enabled = true;
-    Wh_Log(L"Brightness-only bridge ready for Doky PID %lu, hardware/twinui SHA256 pinned", value.pid);
+    Wh_Log(L"Sound and Brightness bridge ready for Doky PID %lu, hardware/twinui SHA256 pinned", value.pid);
     return TRUE;
 }
 BOOL Wh_ModSettingsChanged(BOOL* reload) { enabled = false; *reload = TRUE; return TRUE; }

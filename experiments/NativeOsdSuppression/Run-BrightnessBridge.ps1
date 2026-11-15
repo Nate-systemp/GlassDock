@@ -104,7 +104,7 @@ enabled=1
             $shellProcess = Wait-BrightnessModule $currentShell
             $loaded = $true
         }
-        @{ DokyPid = $app.Id; BridgePid = $PID; ExplorerPid = $shellProcess.Id; Loaded = $loaded; SuppressedRequests = $view.ReadInt64(40); Updated = [DateTime]::UtcNow.ToString('o') } |
+        @{ DokyPid = $app.Id; BridgePid = $PID; ExplorerPid = $shellProcess.Id; Loaded = $loaded; SuppressedRequests = $view.ReadInt64(40); SuppressedVolumeRequests = $view.ReadInt64(80); Updated = [DateTime]::UtcNow.ToString('o') } |
             ConvertTo-Json | Set-Content -LiteralPath $statusFile
         Start-Sleep -Seconds 1
     }

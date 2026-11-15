@@ -828,8 +828,23 @@ internal sealed class WifiNetworkPanel : StackPanel, IUtilityPanel
     {
         if (disposed) return; disposed = true; revision++; wifi.Changed -= RadioChanged;
         CancelTransition(); operation.Cancel(); operation.Dispose(); ClearCredentials();
+        // Release native/composition resources before detaching their XAML owners.
         foreach (var row in rows) row.ContentEffect.Dispose();
         foreach (var part in glassParts) part.Glass.Dispose();
+
+        // This panel is never reused after its popup closes. Break the retained
+        // XAML visual tree and its event/row graphs so closed Wi-Fi popups do not
+        // keep their old network controls reachable through the panel.
+        body.SetConnectionRow(null);
+        body.SetTransitionRow(null);
+        body.Children.Clear();
+        listScroll.Content = null;
+        bodyHost.Content = null;
+        Children.Clear();
+        rows.Clear();
+        glassParts.Clear();
+        glassSurfaces.Clear();
+        GlassChanged = null;
     }
 
     private static bool IsVisible(DependencyObject element)

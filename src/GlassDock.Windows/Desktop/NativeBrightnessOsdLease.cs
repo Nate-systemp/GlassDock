@@ -9,6 +9,7 @@ public sealed class NativeBrightnessOsdLease : IDisposable
 {
     private nint mapping, view;
     private long observedRequests;
+    private long observedVolumeRequests;
     private readonly int processId = Environment.ProcessId;
     private readonly int session = Process.GetCurrentProcess().SessionId;
     private readonly long created = Process.GetCurrentProcess().StartTime.ToUniversalTime().ToFileTimeUtc();
@@ -53,30 +54,34 @@ public sealed class NativeBrightnessOsdLease : IDisposable
         finally { if (descriptor != 0) LocalFree(descriptor); }
     }
 
-    public bool Pulse(bool replacementReady)
+    public bool Pulse(bool replacementReady) => Pulse(replacementReady, 12, 32, 40, ref observedRequests);
+
+    public bool PulseVolume(bool replacementReady) => Pulse(replacementReady, 64, 72, 80, ref observedVolumeRequests);
+
+    private bool Pulse(bool replacementReady, int readyOffset, int deadlineOffset, int requestsOffset, ref long observed)
     {
         if (view == 0) return false;
         if (replacementReady)
         {
-            Marshal.WriteInt64(view, 32, Environment.TickCount64 + 3000);
+            Marshal.WriteInt64(view, deadlineOffset, Environment.TickCount64 + 3000);
             Thread.MemoryBarrier();
-            Marshal.WriteInt32(view, 12, 1);
+            Marshal.WriteInt32(view, readyOffset, 1);
         }
         else
         {
-            Marshal.WriteInt32(view, 12, 0);
+            Marshal.WriteInt32(view, readyOffset, 0);
             Thread.MemoryBarrier();
-            Marshal.WriteInt64(view, 32, 0);
+            Marshal.WriteInt64(view, deadlineOffset, 0);
         }
-        var requests = Marshal.ReadInt64(view, 40);
-        var changed = requests != observedRequests;
-        observedRequests = requests;
+        var requests = Marshal.ReadInt64(view, requestsOffset);
+        var changed = requests != observed;
+        observed = requests;
         return changed;
     }
 
     public void Dispose()
     {
-        if (view != 0) { Pulse(false); UnmapViewOfFile(view); view = 0; }
+        if (view != 0) { Pulse(false); PulseVolume(false); UnmapViewOfFile(view); view = 0; }
         if (mapping != 0) { CloseHandle(mapping); mapping = 0; }
     }
 

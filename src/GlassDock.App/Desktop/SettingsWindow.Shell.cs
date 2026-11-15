@@ -1,6 +1,4 @@
-using GlassDock.App.Controls;
 using GlassDock.App.Rendering;
-using GlassDock.Core.Materials;
 using GlassDock.Core.Settings;
 using GlassDock.Windows.Desktop;
 using Microsoft.UI;
@@ -15,8 +13,6 @@ namespace GlassDock.App.Desktop;
 
 public sealed partial class SettingsWindow
 {
-    private readonly DesktopGlassBackdrop settingsBackdrop = new();
-    private readonly GlassSurface settingsGlass = new() { UseDesktopBackdrop = true, IsHitTestVisible = false };
     private GlassVisualPreview? glassPreview;
     private readonly Dictionary<string, Button> navigation = [];
     private readonly Dictionary<DockAppearanceMode, Button> appearanceButtons = [];
@@ -31,21 +27,16 @@ public sealed partial class SettingsWindow
 
     private void InitializeSettingsShell()
     {
-        SettingsRoot.Children.Insert(0, settingsGlass);
-        Grid.SetColumnSpan(settingsGlass, 2); Grid.SetRowSpan(settingsGlass, 3);
         settingsHost = new(WinRT.Interop.WindowNative.GetWindowHandle(this))
         {
-            EnableHostBackdropBrush = true, UseDockLayeredTransparency = true,
+            UseDockLayeredTransparency = true,
             PreserveWindowChrome = true, MinimumWidthDips = 880, MinimumHeightDips = 640
         };
         settingsHost.Configure();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(SettingsTitleBar);
-        SystemBackdrop = settingsBackdrop;
-        SettingsRoot.SizeChanged += (_, _) => UpdateSettingsBounds();
         SettingsRoot.Loaded += (_, _) =>
         {
-            UpdateSettingsBounds();
             if (editingReady) return;
             populating = true;
             foreach (var box in new[] { IconSizeBox, MagnificationScaleBox, IconSpacingBox }) AddSettingSlider(box);
@@ -53,7 +44,6 @@ public sealed partial class SettingsWindow
             editingReady = true;
         };
         PreviewHost.SizeChanged += (_, _) => { if (shellReady) UpdateDockPreview(); };
-        settingsBackdrop.RenderingModeChanged += SettingsRenderingChanged;
         foreach (var page in SettingsCatalog.Pages)
         {
             var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
@@ -86,10 +76,26 @@ public sealed partial class SettingsWindow
         Closed += (_, _) =>
         {
             settingsSession.Changed -= SettingsSessionChanged;
-            settingsBackdrop.RenderingModeChanged -= SettingsRenderingChanged;
-            SystemBackdrop = null;
-            settingsHost?.Dispose();
-            glassPreview?.Dispose();
+            // Release the one-shot Settings preview and its WinUI host only
+            // after the window has closed. Do not change live rendering.
+            try
+            {
+                glassPreview?.Dispose();
+                if (glassPreview is not null)
+                    PreviewHost.Children.Remove(glassPreview);
+                glassPreview = null;
+            }
+            finally
+            {
+                settingsHost?.Dispose();
+                settingsHost = null;
+                navigation.Clear();
+                appearanceButtons.Clear();
+                // Closing Settings is one-shot. Detach the XAML root so the
+                // native window cannot keep an entire previous Settings tree
+                // (and its controls / graphics resources) rooted across opens.
+                Content = null;
+            }
         };
     }
 
@@ -156,21 +162,14 @@ public sealed partial class SettingsWindow
         if (!shellReady || closed) return;
         var mode = settingsSession.Current.UtilityTheme == UtilityTheme.Light ? DockAppearanceMode.Light : DockAppearanceMode.Dark;
         var light = mode == DockAppearanceMode.Light;
-        var glass = mode.GlassStyle() is not null;
         SettingsRoot.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
         Brush("PrimaryBrush").Color = DockControlPalette.Foreground(mode);
         Brush("SecondaryBrush").Color = light ? Color.FromArgb(255,84,77,68) : Color.FromArgb(255,190,199,211);
-        Brush("ShellBrush").Color = glass ? Color.FromArgb(mode == DockAppearanceMode.Clear ? (byte)100 : (byte)145, 19,27,39)
-            : DockControlPalette.SolidSurface(mode);
+        Brush("ShellBrush").Color = DockControlPalette.SolidSurface(mode);
         Brush("SidebarBrush").Color = light ? Color.FromArgb(70,255,255,255) : Color.FromArgb(35,12,19,29);
         Brush("CardBrush").Color = light ? Color.FromArgb(115,255,255,255) : Color.FromArgb(65,53,68,89);
         Brush("DividerBrush").Color = DockControlPalette.Surface(mode, light ? (byte)38 : (byte)32);
         Brush("SelectionBrush").Color = light ? Color.FromArgb(65,85,126,180) : Color.FromArgb(95,52,100,161);
-        var (shellMode, shellAppearance) = SettingsShellAppearance.Resolve(mode, settingsSession.Appearance);
-        if (mode == DockAppearanceMode.Clear) Brush("ShellBrush").Color = Color.FromArgb(145,19,27,39);
-        PopupStyle.Apply(settingsGlass, settingsBackdrop, shellAppearance, shellMode);
-        settingsGlass.Apply(PopupMaterial.CreateForPopup(shellAppearance, shellMode) with
-            { ShadowOpacity = 0, BorderOpacity = 0, EdgeHighlight = 0, CornerRadius = 0 });
         ClearMaterialNote.Visibility = glassDraft.Mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (value, button) in appearanceButtons)
         {
@@ -183,21 +182,8 @@ public sealed partial class SettingsWindow
         title.ButtonBackgroundColor = title.ButtonInactiveBackgroundColor = Colors.Transparent;
         title.ButtonForegroundColor = DockControlPalette.Foreground(mode);
         title.ButtonHoverBackgroundColor = DockControlPalette.Hover(mode, true);
-        UpdateDockPreview(); UpdateSettingsBounds(); SettingsRenderingChanged(this, EventArgs.Empty);
-    }
-
-    private void UpdateSettingsBounds()
-    {
-        if (!shellReady || SettingsRoot.ActualWidth <= 0) return;
-        var scale = SettingsRoot.XamlRoot?.RasterizationScale ?? 1;
-        settingsBackdrop.SetBounds(SettingsRoot.ActualWidth, SettingsRoot.ActualHeight,
-            SettingsRoot.ActualWidth, SettingsRoot.ActualHeight, 0, scale, 1);
-    }
-
-    private void SettingsRenderingChanged(object? sender, EventArgs e)
-    {
-        if (closed) return;
-        RenderingStatusText.Text = $"Settings rendering: {settingsBackdrop.RenderingMode}\nAppearance: {settingsSession.Current.DockAppearanceMode}\nClear dock: GPU refraction uses its own existing capture surface; Settings does not create a capture session.";
+        UpdateDockPreview();
+        RenderingStatusText.Text = $"Settings rendering: Solid settings surface\nAppearance: {settingsSession.Current.DockAppearanceMode}\nClear dock: GPU refraction uses its own existing capture surface; Settings does not create a capture session.";
     }
 
     private void BuildAppearanceTiles()

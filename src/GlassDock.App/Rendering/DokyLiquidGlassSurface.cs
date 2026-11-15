@@ -144,6 +144,8 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
         {
             if (Output.Visibility != Visibility.Collapsed)
                 Output.Visibility = Visibility.Collapsed;
+            Panel.SwapChain = null;
+            swapChain?.Dispose(); swapChain = null;
             setNativeSuppressed(false);
         }
         if (!active && paintDock is null && !UtilitiesActive)
@@ -281,7 +283,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     {
         if (!drawGate.Request(visualChanged)) return;
         queuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        if (!dispatcher.TryEnqueue(Draw)) drawGate.EnqueueFailed();
+        if (!dispatcher.TryEnqueue(DispatcherQueuePriority.Low, Draw)) drawGate.EnqueueFailed();
     }
     private void Draw() => DrawFrame(drawGate.Begin());
     private void DrawFrame(bool visualChanged, bool frozenFrame = false)
@@ -488,7 +490,7 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     }
     private void Stop()
     {
-        foreach (var utility in utilities) utility.Hide();
+        foreach (var utility in utilities) utility.Dispose();
         screenshotFrozen = false;
         ReleaseLens();
         Output.Visibility = Visibility.Collapsed;

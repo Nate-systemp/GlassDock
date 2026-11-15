@@ -42,8 +42,13 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
         Children.Add(canvas); Children.Add(icons); Children.Add(status);
         FocusComponent("main");
         canvas.Draw += Draw;
-        SizeChanged += (_, _) => canvas.Invalidate();
+        SizeChanged += PreviewSizeChanged;
         AutomationProperties.SetName(this, "Live glass preview with representative dock buttons");
+    }
+
+    private void PreviewSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (!disposed) canvas.Invalidate();
     }
 
     public void FocusComponent(string id)
@@ -71,6 +76,7 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
     public void Update(GlassVisualProfile value, bool showHighlights)
     {
         if (disposed) return;
+        if (profile.Mode != value.Mode) ReleaseEffects();
         profile = value.Normalize(); highlights = showHighlights;
         foreach (var (id, host, icon, indicator) in buttons)
         {
@@ -169,8 +175,20 @@ internal sealed class GlassVisualPreview : Grid, IDisposable
     {
         if (disposed) return;
         disposed = true;
+        SizeChanged -= PreviewSizeChanged;
         canvas.Draw -= Draw;
-        shader?.Dispose(); blur?.Dispose(); native?.Dispose(); scene?.Dispose(); rim.Dispose();
+        ReleaseEffects();
+        scene?.Dispose(); scene = null; rim.Dispose();
         canvas.RemoveFromVisualTree();
+        icons.Children.Clear();
+        buttons.Clear();
+        Children.Clear();
+    }
+
+    private void ReleaseEffects()
+    {
+        shader?.Dispose(); shader = null; shaderState = null;
+        blur?.Dispose(); blur = null;
+        native?.Dispose(); native = null; renderedProfile = null;
     }
 }

@@ -1,4 +1,4 @@
-# Experimental brightness-only bridge
+# Experimental Sound and Brightness bridge
 
 The opt-in runner starts the experimental Doky build and the isolated portable Windhawk instance. Exit Doky or run the stop script to restore native handling. The bridge uses the existing brightness HUD and hardware service. `DOKY_ENABLE_EXPERIMENTAL_BRIGHTNESS_OSD=1` enables the Doky lease publisher for this child process. The Windhawk mod's `enabled` setting defaults to false. The runner enables it for the current session and disables it during cleanup.
 
@@ -13,6 +13,8 @@ The recorded physical Fn-key run produced 31 `ShowWindow(SW_SHOWNA)` requests an
 | `Windows.Internal.HardwareConfirmator.dll + 0x22D94` | `HardwareConfirmatorHost::ShowBrightnessAsync$_ResumeCoro$1 + 0x2B4` |
 
 The matching public PDB was downloaded from Microsoft's symbol server and resolved offline with DIA. The PDB identity is `C6B50D252BDF247FDCBCBAEC6677CD6C1`. The classifier requires this complete ordered return-site sequence and the verified native host identity. It does not infer brightness from size, band, elapsed time, WMI activity or absent volume events.
+
+The touchpad reproduction recorded the same first two return sites followed by `Windows.Internal.HardwareConfirmator.dll + 0x24A14`. The matching Microsoft PDB resolves this to `HardwareConfirmatorHost::ShowVolumeAsync$_ResumeCoro$1 + 0x2B4`. Disassembly confirms a call to `ShowConfirmatorHWND` immediately before that return address. This exact ordered stack now identifies volume requests that bypass the media-key hook. The brightness stack remains independently classified. A visible native volume host can otherwise continue displaying subsequent utility updates.
 
 The allowlist requires OS build 26300, Explorer file version 10.0.26100.9818 and both exact SHA-256 values below. A different update fails initialization.
 
@@ -29,7 +31,9 @@ The earlier read-only comparison run recorded zero matching native-host show cal
 
 The native hook checks the current Shell HWND, ordered brightness stack, deadline and both verified process handles on each candidate. Doky death or launcher/bridge death immediately makes subsequent requests pass through. A stalled UI expires within 3 seconds. The mapping stays open until native unload but cannot renew itself. A counter in the mapping delivers suppressed requests to the existing HUD, including unchanged 0/100% presses. The UI coalesces duplicate WMI/counter events.
 
-`ShowWindow` declines only matching brightness reveals and returns prior visibility. Matching `SWP_SHOWWINDOW` requests are converted to `SWP_HIDEWINDOW`. Hide operations and unknown contexts follow Windows' original calls. No retained foreign-window style, region, opacity or registry mutation needs recovery. Normal framework unload removes the API hooks. Recreated Explorer processes repeat all initialization checks. The first physical press after a real crash and first-frame behavior remain manual acceptance checks.
+The same 128-byte mapping has an optional volume extension at offsets 64 (ready), 72 (deadline), and 80 (request count). The original brightness fields and version remain compatible. Older publishers leave the extension zeroed, so volume requests pass through. Volume readiness requires the native-volume suppression setting, available Core Audio, and an available Doky HUD presentation state. Each utility has its own 3-second deadline and counter. Disposing the publisher revokes both. The UI coalesces duplicate Core Audio/counter volume notifications using the existing 100 ms brightness coalescing interval. The runner reports `SuppressedVolumeRequests` separately.
+
+`ShowWindow` declines matching Sound or Brightness reveals with their respective live leases and returns prior visibility. Matching `SWP_SHOWWINDOW` requests are converted to `SWP_HIDEWINDOW`. Hide operations and unknown contexts follow Windows' original calls. No retained foreign-window style, region, opacity or registry mutation needs recovery. Normal framework unload removes the API hooks. Recreated Explorer processes repeat all initialization checks. The first physical press after a real crash and first-frame behavior remain manual acceptance checks.
 
 The runner owns the temporary Windhawk session, watches Doky exit and restores its saved portable engine configuration. `Stop-BrightnessBridge.ps1` disables this mod and requests normal Windhawk exit. It leaves Doky running. No Explorer termination is part of either script.
 

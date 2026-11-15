@@ -1,4 +1,5 @@
 #include "ObservationHooks.hpp"
+#include "HardwareOsdContext.hpp"
 #include <cstdio>
 #include <stdexcept>
 using namespace osd_observe;
@@ -29,6 +30,23 @@ static void CallShow() {
 int main() {
     try {
         static_assert(sizeof(void*) == 8, "Diagnostic is x64 only");
+        constexpr ULONG_PTR shell = 0x10000000, hardware = 0x20000000;
+        void* frames[] = {nullptr, reinterpret_cast<void*>(shell + 0x4F977),
+            reinterpret_cast<void*>(hardware + 0x2379F), reinterpret_cast<void*>(hardware + 0x24A14)};
+        Check(HardwareOsdContext(frames, 4, shell, hardware) == Intent::Volume,
+              "recorded touchpad volume stack classified by its exact ordered callers");
+        frames[3] = reinterpret_cast<void*>(hardware + 0x22D94);
+        Check(HardwareOsdContext(frames, 4, shell, hardware) == Intent::Brightness,
+              "existing brightness stack retains its classification");
+        Check(HardwareOsdContext(frames, 3, shell, hardware) == Intent::Unknown,
+              "truncated context cannot suppress an unrelated flyout");
+        frames[3] = reinterpret_cast<void*>(hardware + 0x24A15);
+        Check(HardwareOsdContext(frames, 4, shell, hardware) == Intent::Unknown,
+              "unrecognized hardware caller passes through");
+        frames[3] = reinterpret_cast<void*>(hardware + 0x24A14);
+        frames[2] = reinterpret_cast<void*>(hardware + 0x237A0);
+        Check(HardwareOsdContext(frames, 4, shell, hardware) == Intent::Unknown,
+              "volume caller without the verified host chain passes through");
         WNDCLASSW wc{}; wc.lpfnWndProc = DefWindowProcW; wc.hInstance = GetModuleHandleW(nullptr);
         wc.lpszClassName = L"XamlExplorerHostIslandWindow";
         Check(RegisterClassW(&wc) != 0, "owned candidate fixture class registered");

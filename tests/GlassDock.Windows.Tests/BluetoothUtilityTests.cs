@@ -21,17 +21,22 @@ public sealed class BluetoothUtilityTests
     }
 
     [Fact]
-    public void Connection_and_battery_updates_preserve_order_and_previous_snapshot()
+    public void Connected_devices_sort_first_and_updates_preserve_previous_snapshot()
     {
         var store = new BluetoothDeviceStore();
         store.Update(Device("first"), true);
         store.Update(Device("second"), true);
+        store.Update(Device("third", true), true);
+        store.Update(Device("fourth"), true);
         var before = store.Snapshot;
         store.Update(Device("second", true, 42), true);
-        Assert.Equal(new[] { "first", "second" }, store.Snapshot.Select(d => d.Id));
-        Assert.False(before[1].IsConnected);
-        Assert.Null(before[1].BatteryPercent);
-        Assert.True(store.Snapshot[1].IsConnected);
+        Assert.Equal(new[] { "second", "third", "first", "fourth" }, store.Snapshot.Select(d => d.Id));
+        Assert.False(before[2].IsConnected);
+        Assert.Null(before[2].BatteryPercent);
+        Assert.True(store.Snapshot[0].IsConnected);
+        Assert.Equal(42, store.Snapshot[0].BatteryPercent);
+        store.Update(Device("second"), true);
+        Assert.Equal(new[] { "third", "first", "second", "fourth" }, store.Snapshot.Select(d => d.Id));
     }
 
     [Fact]

@@ -34,6 +34,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private readonly NativeBrightnessOsdLease nativeBrightnessOsd = new();
     private readonly DispatcherQueueTimer? brightnessOsdTimer;
     private long lastBrightnessHudSignal;
+    private long lastVolumeHudSignal;
 
     public DesktopOverlayWindow PrimaryWindow { get; }
     private bool QuickSettingsOpen => secondaryDocks.Values.Prepend(PrimaryWindow).Any(window => window.IsQuickSettingsOpen);
@@ -90,6 +91,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         PrimaryWindow.KeyboardService.SnippingRequested += SnippingRequested;
         PrimaryWindow.KeyboardService.SnippingCanceled += SnippingCanceled;
         PrimaryWindow.KeyboardService.ClipboardChanged += ClipboardChanged;
+        PrimaryWindow.KeyboardService.UtilityKeyChanged += UtilityKeyChanged;
         screenshotTimer = PrimaryWindow.DispatcherQueue.CreateTimer();
         screenshotTimer.Interval = TimeSpan.FromSeconds(45);
         screenshotTimer.IsRepeating = false;
@@ -170,6 +172,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         ConfigureVolumeSuppression();
         volumeHud?.Update(UtilityHudValue.Volume(runtime.Volume.State));
         if (!args.External || screenshotActive) return;
+        lastVolumeHudSignal = Environment.TickCount64;
         ShowVolume(VolumeSource(), explicitOpen: false);
     });
 
@@ -179,8 +182,28 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private void VolumeKeyHandled(object? sender, EventArgs args) => PrimaryWindow.DispatcherQueue.TryEnqueue(() =>
     {
-        if (!shuttingDown && !disposed) ShowVolume(VolumeSource(), explicitOpen: false);
+        if (shuttingDown || disposed) return;
+        lastVolumeHudSignal = Environment.TickCount64;
+        ShowVolume(VolumeSource(), explicitOpen: false);
     });
+
+    private void UtilityKeyChanged(UtilityKind kind, bool down)
+    {
+        if (shuttingDown || disposed) return;
+        if (!down)
+        {
+            (kind == UtilityKind.Volume ? volumeHud : brightnessHud)?.ReleaseKey();
+            return;
+        }
+        if (kind == UtilityKind.Volume) ShowVolume(VolumeSource(), explicitOpen: false, keyDown: true);
+        else
+        {
+            var display = runtime.Brightness.Displays.FirstOrDefault(d => d.Available && d.Backend == "WMI");
+            if (display is null) return;
+            var source = secondaryDocks.Values.Prepend(PrimaryWindow).FirstOrDefault(d => d.SoundMonitor == display.Monitor) ?? PrimaryWindow;
+            ShowBrightness(source, explicitOpen: false, display.Id, keyDown: true);
+        }
+    }
 
     private void ConfigureVolumeSuppression()
     {
@@ -190,7 +213,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             ? runtime.Volume.TryHandleVolumeKey : null);
     }
 
-    private bool ShowVolume(DesktopOverlayWindow source, bool explicitOpen)
+    private bool ShowVolume(DesktopOverlayWindow source, bool explicitOpen, bool keyDown = false)
     {
         if (shuttingDown || disposed || screenshotActive || QuickSettingsOpen || !runtime.Volume.State.Available) return false;
         if (!explicitOpen && brightnessHud?.IsInteracting == true) return false;
@@ -198,7 +221,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         volumeHud ??= new(UtilityKind.Volume, () => UtilityHudValue.Volume(runtime.Volume.State), runtime.Volume.SetVolume);
         volumeOwner = source;
         volumeHud.ApplyAppearance(settingsSession.Appearance, settingsSession.Current.DockAppearanceMode);
-        volumeHud.Show(UtilityHudValue.Volume(runtime.Volume.State), () => source.SoundAnchor, explicitOpen);
+        volumeHud.Show(UtilityHudValue.Volume(runtime.Volume.State), () => source.SoundAnchor, explicitOpen, keyDown);
         return volumeHud.IsOpen;
     }
 
@@ -227,6 +250,14 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private void PulseBrightnessSuppression()
     {
+        var volumeReady = !disposed && !shuttingDown && !safeMode && !inspection && !screenshotActive &&
+            !QuickSettingsOpen && settingsSession.Current.SuppressNativeVolumeOsd && runtime.Volume.State.Available &&
+            brightnessHud?.IsInteracting != true;
+        if (nativeBrightnessOsd.PulseVolume(volumeReady) && volumeReady && Environment.TickCount64 - lastVolumeHudSignal >= 100)
+        {
+            lastVolumeHudSignal = Environment.TickCount64;
+            ShowVolume(VolumeSource(), explicitOpen: false);
+        }
         var display = runtime.Brightness.Displays.FirstOrDefault(d => d.Available && d.Backend == "WMI");
         var ready = !disposed && !shuttingDown && !safeMode && !inspection && !screenshotActive &&
             display is not null && volumeHud?.IsInteracting != true;
@@ -236,7 +267,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         ShowBrightness(source, explicitOpen: false, display.Id);
     }
 
-    private bool ShowBrightness(DesktopOverlayWindow source, bool explicitOpen, string? changedDisplay = null)
+    private bool ShowBrightness(DesktopOverlayWindow source, bool explicitOpen, string? changedDisplay = null, bool keyDown = false)
     {
         if (shuttingDown || disposed || screenshotActive || QuickSettingsOpen) return false;
         var display = changedDisplay is null ? BrightnessFor(source) : runtime.Brightness.Displays.FirstOrDefault(d => d.Id == changedDisplay);
@@ -249,12 +280,13 @@ internal sealed class MonitorDockCoordinator : IDisposable
             if (brightnessTarget is { } id) runtime.Brightness.SetBrightness(id, value * 100);
         });
         brightnessHud.ApplyAppearance(settingsSession.Appearance, settingsSession.Current.DockAppearanceMode);
-        brightnessHud.Show(BrightnessValue(), () => brightnessOwner?.BrightnessAnchor, explicitOpen);
+        brightnessHud.Show(BrightnessValue(), () => brightnessOwner?.BrightnessAnchor, explicitOpen, keyDown);
         return brightnessHud.IsOpen;
     }
 
     private void DisposeVolumeHud()
     {
+        PrimaryWindow.KeyboardService.UtilityKeyChanged -= UtilityKeyChanged;
         nativeVolumeOsd.Dispose();
         PrimaryWindow.KeyboardService.SetVolumeKeyHandler(null);
         volumeHud?.Dispose(); volumeHud = null; volumeOwner = null;

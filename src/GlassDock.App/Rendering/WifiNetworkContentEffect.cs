@@ -21,9 +21,11 @@ internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement
     private ContainerVisual? output;
     private CompositionRoundedRectangleGeometry? shape;
     private CompositionGeometricClip? clip;
+    private bool disposed;
 
     public void Update(double progress, double width, double height)
     {
+        if (disposed) return;
         if (progress >= 1 || progress <= 0 || content.ActualWidth <= 0)
         {
             sourceHost.Clip = progress <= 0 ? hidden : null;
@@ -60,8 +62,21 @@ internal sealed class WifiNetworkContentEffect(Grid sourceHost, FrameworkElement
 
     public void Dispose()
     {
-        sourceHost.Clip = null; ElementCompositionPreview.SetElementChildVisual(Element, null);
+        if (disposed) return;
+        disposed = true;
+        sourceHost.Clip = null;
+        ElementCompositionPreview.SetElementChildVisual(Element, null);
+
+        // Detach the cross-visual capture graph before releasing COM objects;
+        // otherwise its brushes/surfaces can keep a closed row's visual alive.
+        if (surface is not null) surface.SourceVisual = null;
+        if (image is not null) image.Brush = null;
+        if (output is not null) output.Clip = null;
+        if (source is not null) source.Surface = null;
+
         output?.Dispose(); image?.Dispose(); clip?.Dispose(); shape?.Dispose(); brush?.Dispose(); factory?.Dispose();
         source?.Dispose(); surface?.Dispose();
+        output = null; image = null; clip = null; shape = null;
+        brush = null; factory = null; source = null; surface = null;
     }
 }

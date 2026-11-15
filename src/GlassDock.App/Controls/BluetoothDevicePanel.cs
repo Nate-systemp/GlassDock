@@ -121,6 +121,7 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
             var removed = rows[id]; removed.Transition?.Stop(); removed.Effect.Dispose(); list.Children.Remove(removed.Host); rows.Remove(id);
             if (expandedId == id) expandedId = null;
         }
+        var index = 0;
         foreach (var device in devices)
         {
             if (!rows.TryGetValue(device.Id, out var row))
@@ -128,6 +129,12 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
                 row = CreateRow(device); rows.Add(device.Id, row); list.Children.Add(row.Host);
             }
             UpdateRow(row, device);
+            if (list.Children[index] != row.Host)
+            {
+                list.Children.Remove(row.Host);
+                list.Children.Insert(index, row.Host);
+            }
+            index++;
         }
         var informativeMessage = !string.IsNullOrWhiteSpace(radio.Message) && radio.Message != "Bluetooth on";
         status.Text = informativeMessage ? radio.Message : devices.Count == 0 ? "No paired devices" : "";
@@ -338,5 +345,14 @@ internal sealed class BluetoothDevicePanel : StackPanel, IUtilityPanel
         idle.Stop(); viewportTransition?.Stop(); scrollbarTransition?.Stop();
         foreach (var row in rows.Values) { row.Transition?.Stop(); row.Effect.Dispose(); }
         glass.Dispose();
+
+        // A closed popup never reuses its panel. Release native-backed XAML
+        // content and references retained by the per-device visual tree.
+        scroll.Content = null;
+        list.Children.Clear();
+        surface.Children.Clear();
+        Children.Clear();
+        rows.Clear();
+        GlassChanged = null;
     }
 }

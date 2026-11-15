@@ -199,7 +199,18 @@ internal sealed class QuickSettingsPanel : Canvas, IUtilityPanel
     {
         if (disposed) return;
         disposed = true; capsuleRevision++; presentation.Stop(); capsuleMotion.Stop(); CompositionTarget.Rendering -= AnimationFrame;
-        ReleaseButtons(); foreach (var capsule in capsules) capsule.Dispose();
+        ReleaseButtons();
+        foreach (var capsule in capsules) capsule.Dispose();
+
+        // Utility buttons are returned to the dock by ReleaseButtons; only
+        // temporary capsule hosts belong to this one-shot popup panel.
+        capsuleCanvas.Children.Clear();
+        Children.Clear();
+        capsules.Clear();
+        surfaces.Clear();
+        GlassChanged = null;
+        DismissRequested = null;
+        BrightnessMonitorRequested = null;
     }
 
     private sealed class Motion

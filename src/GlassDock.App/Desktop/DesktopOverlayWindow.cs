@@ -3297,7 +3297,7 @@ public sealed partial class DesktopOverlayWindow : Window
         CompositionTarget.Rendering -= TickDockWave;
 
         settingsSession.Changed -= SettingsChanged;
-        settingsWindow.BeginShutdown()?.Close();
+        settingsWindow.BeginShutdown()?.ClosePermanently();
 
         var controlsToClose = controls;
         controls = null;

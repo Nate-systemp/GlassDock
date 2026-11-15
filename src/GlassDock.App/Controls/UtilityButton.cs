@@ -52,7 +52,7 @@ internal sealed class UtilityButton : Button, IDisposable
     public bool IsToggling { get; private set; }
     internal bool NeedsNativeToggleUnderlay => nativeToggleUnderlay && !Glass.UsesNativeDockBackdrop && !Glass.HasFrame;
     private bool DisplayOn => toggleVisualState ?? active;
-    private double diameter, maximumWidth, expansionTarget;
+    private double diameter, configuredIconSize, maximumWidth, expansionTarget;
     private double captionTitleWidth, captionWidth;
     public bool IsExpanded { get; private set; }
     private int morphRevision;
@@ -230,12 +230,14 @@ internal sealed class UtilityButton : Button, IDisposable
     public void Configure(double diameter, double iconSize, UtilityTheme theme, DockAppearanceMode dockMode, double availableWidth)
     {
         if (RadioUtility) iconSize *= .95;
-        var changed = this.diameter != diameter || icon.Width != iconSize || this.theme != theme || this.dockMode != dockMode;
+        var changed = this.diameter != diameter || configuredIconSize != iconSize || this.theme != theme || this.dockMode != dockMode;
         var nextMaximum = Math.Max(diameter, Definition.Kind == UtilityKind.Wifi
             ? Math.Min(MaximumExpandedWidth, availableWidth) : availableWidth);
         var limitChanged = maximumWidth != nextMaximum;
         if (!changed && !limitChanged) return;
-        this.diameter = diameter; maximumWidth = nextMaximum;
+        maximumWidth = nextMaximum;
+        if (!changed) { UpdateExpansionTarget(); return; }
+        this.diameter = diameter; configuredIconSize = iconSize;
         this.dockMode = dockMode;
         this.theme = theme; Height = face.Height = diameter;
         if (!double.IsFinite(Width)) Width = diameter;

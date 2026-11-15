@@ -87,8 +87,31 @@ internal class UtilityPopupWindow : Window
             if (disposed) return;
             disposed = true; IsOpen = false;
             DetailsVisibilityChanged?.Invoke(this, EventArgs.Empty);
-            panel.Dispose(); animationRevision++; batch?.Dispose(); track?.Dispose();
-            SystemBackdrop = null; host.Dispose(); Hidden?.Invoke(this, EventArgs.Empty);
+            try
+            {
+                panel.Dispose();
+            }
+            finally
+            {
+                animationRevision++;
+                batch?.Dispose(); batch = null;
+                track?.Dispose(); track = null;
+                SystemBackdrop = null;
+                host.Dispose();
+
+                // Notify owners before clearing the popup's visual/event graph.
+                try { Hidden?.Invoke(this, EventArgs.Empty); }
+                finally
+                {
+                    panelHost.Content = null;
+                    root.Children.Clear();
+                    Content = null;
+                    DetailsVisibilityChanged = null;
+                    Hidden = null;
+                    Hiding = null;
+                    GlassChanged = null;
+                }
+            }
         };
     }
 

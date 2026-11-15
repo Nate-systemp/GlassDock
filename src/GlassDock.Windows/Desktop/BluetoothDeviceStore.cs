@@ -8,7 +8,7 @@ internal sealed class BluetoothDeviceStore
     private readonly Dictionary<string, long> pending = new(StringComparer.Ordinal);
     private long generation;
 
-    public IReadOnlyList<BluetoothDeviceInfo> Snapshot => Array.AsReadOnly(devices.Values.ToArray());
+    public IReadOnlyList<BluetoothDeviceInfo> Snapshot => Array.AsReadOnly(devices.Values.OrderByDescending(device => device.IsConnected).ToArray());
     public BluetoothDeviceInfo? Find(string id) => devices.GetValueOrDefault(id);
 
     public void Update(BluetoothDeviceInfo device, bool paired)

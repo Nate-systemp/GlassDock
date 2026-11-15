@@ -79,5 +79,7 @@ internal sealed class PopupLiquidGlassSurface : IDisposable
         window.AppWindow.Changed -= WindowChanged;
         window.Closed -= Closed;
         liquid.Dispose();
+        // The popup is closing; detach its visual host after disposal.
+        root.Children.Remove(Element);
     }
 }
