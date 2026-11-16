@@ -224,7 +224,6 @@ internal sealed class WindowPreviewWindow : Window
             var alpha = mode switch
             {
                 DockAppearanceMode.Frosted => (byte)246,
-                DockAppearanceMode.Acrylic => (byte)240,
                 _ => (byte)232
             };
             previewGlassFill.GradientStops[0].Color = global::Windows.UI.Color.FromArgb(alpha, 195, 203, 216);

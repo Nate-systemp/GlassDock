@@ -4,6 +4,26 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class LiquidGlassPerformanceWiringTests
 {
+    [Fact]
+    public void Utility_effects_are_created_only_for_the_active_appearance_branch()
+    {
+        var source = Read("src/GlassDock.App/Rendering/UtilityGlassSurface.cs");
+        var draw = source[source.IndexOf("public void Draw(", StringComparison.Ordinal)..source.IndexOf("public void Hide()", StringComparison.Ordinal)];
+        var clearBranch = draw.IndexOf("if (mode == DockAppearanceMode.Clear)", StringComparison.Ordinal);
+        var shaderCreation = draw.IndexOf("shader ??= new PixelShaderEffect", StringComparison.Ordinal);
+        Assert.True(clearBranch >= 0 && shaderCreation > clearBranch);
+        Assert.True(draw.IndexOf("blur ??= new()", StringComparison.Ordinal) > clearBranch);
+
+        var configure = source[source.IndexOf("public void Configure(", StringComparison.Ordinal)..source.IndexOf("public void Draw(", StringComparison.Ordinal)];
+        Assert.Contains("if (this.mode != mode) ReleaseEffects();", configure);
+        var release = source[source.IndexOf("private void ReleaseEffects()", StringComparison.Ordinal)..source.IndexOf("public void Dispose()", StringComparison.Ordinal)];
+        Assert.Contains("materialEffect?.Dispose()", release);
+        Assert.Contains("shader?.Dispose()", release);
+        Assert.Contains("blur?.Dispose()", release);
+        Assert.Contains("previous = null", release);
+        Assert.Contains("if (shader is not null) shader.Source1 = null;", draw);
+    }
+
     private static string Read(string relative)
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

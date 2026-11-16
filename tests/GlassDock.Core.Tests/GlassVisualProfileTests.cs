@@ -7,6 +7,26 @@ namespace GlassDock.Core.Tests;
 public sealed class GlassVisualProfileTests
 {
     [Fact]
+    public void Legacy_acrylic_values_use_frosted_in_direct_profile_and_session_paths()
+    {
+        var settings = new GlassDockSettings
+        {
+            DockAppearanceMode = (DockAppearanceMode)3,
+            GlassMaterialMode = (GlassMaterialMode)1,
+            GlassBlurAmount = 31,
+            DockOpacity = .6
+        };
+        var session = new GlassDockSettingsSession(settings);
+        Assert.Equal(DockAppearanceMode.Frosted, session.Current.DockAppearanceMode);
+        Assert.Equal(GlassMaterialMode.Frosted, session.Appearance.GlassMaterialMode);
+        var profile = GlassVisualProfile.FromSettings(settings);
+        Assert.Equal(DockAppearanceMode.Frosted, profile.Mode);
+        Assert.Equal(31, profile.Material.BlurAmount);
+        Assert.Equal(.6f, profile.Material.MaterialBlend);
+        Assert.Equal(DockAppearanceMode.Frosted, GlassVisualProfile.BuiltIn((DockAppearanceMode)3).Mode);
+    }
+
+    [Fact]
     public void Legacy_settings_keep_their_values_and_default_clear_transparency()
     {
         var settings = new GlassDockSettings { DockAppearanceMode = DockAppearanceMode.Clear,

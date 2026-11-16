@@ -34,7 +34,7 @@ internal sealed class DesktopGlassBackdrop : SystemBackdrop
     private readonly List<UtilityMask> utilityMasks = [];
     private W.ContainerVisual? utilityMaskRoot;
     internal bool SupportsUtilitySurfaces => utilityMaskRoot is not null && !UseSolidSurface &&
-        dockStyle is (GlassMaterialMode.Frosted or GlassMaterialMode.Acrylic);
+        dockStyle is GlassMaterialMode.Frosted;
 
     internal void SetUtilitySurfaces(IEnumerable<(Vector4 Bounds, float Opacity)> surfaces)
     {

@@ -153,7 +153,6 @@ public sealed partial class SettingsWindow : Window
         NativeVolumeOsdToggle.IsOn = settings.SuppressNativeVolumeOsd;
 
         if (!glassDirty) LoadGlassDraft(settings);
-        DockAppearanceModeBox.SelectedIndex = (int)glassDraft.Mode;
         UpdateDockAppearanceDescription(glassDraft.Mode);
 
         DockDisplayModeBox.SelectedIndex = (int)settings.DockDisplayMode;
@@ -442,17 +441,6 @@ public sealed partial class SettingsWindow : Window
         if (message is not null) UpdateStatusText.Text = message;
     }
 
-    private DockAppearanceMode SelectedDockAppearance =>
-        Enum.IsDefined((DockAppearanceMode)DockAppearanceModeBox.SelectedIndex)
-            ? (DockAppearanceMode)DockAppearanceModeBox.SelectedIndex
-            : DockAppearanceMode.Dark;
-
-    private void DockAppearanceChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (populating || refreshingGlass || !editingReady || saving || closed) return;
-        SelectBuiltInGlass(SelectedDockAppearance);
-    }
-
     private void UpdateDockAppearanceDescription(DockAppearanceMode mode)
     {
         DockAppearanceDescription.Text = mode switch
@@ -460,7 +448,6 @@ public sealed partial class SettingsWindow : Window
             DockAppearanceMode.Light => "Soft off-white solid surface with no glass effect.",
             DockAppearanceMode.Dark => "Deep charcoal solid surface with no glass effect.",
             DockAppearanceMode.Frosted => "Soft blurred glass with stronger diffusion and an opaque feel.",
-            DockAppearanceMode.Acrylic => "Lighter acrylic-style glass with more background visibility.",
             DockAppearanceMode.Clear => "The clearest glass preset with minimal blur and higher transparency.",
             _ => "Choose the material used by the main dock."
         };

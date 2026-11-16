@@ -4,9 +4,12 @@ namespace GlassDock.Core.Materials;
 
 public static class PopupMaterial
 {
+    private static readonly LiquidGlassMaterial FrostedUtilityDefaults =
+        GlassVisualProfile.BuiltIn(DockAppearanceMode.Frosted).DockMaterial;
+
     public static LiquidGlassMaterial FrostedUtilityOptics(LiquidGlassMaterial dockOptics)
     {
-        var frosted = GlassVisualProfile.BuiltIn(DockAppearanceMode.Frosted).DockMaterial;
+        var frosted = FrostedUtilityDefaults;
         return (dockOptics with
         {
             BlurAmount = Math.Max(dockOptics.BlurAmount, frosted.BlurAmount),
@@ -32,7 +35,6 @@ public static class PopupMaterial
         (mode switch
         {
             DockAppearanceMode.Frosted => .16,
-            DockAppearanceMode.Acrylic => .12,
             DockAppearanceMode.Clear => .08,
             _ => 1
         }) * (mode.GlassStyle() is null ? 1 : Math.Clamp(opacity, 0, 1));

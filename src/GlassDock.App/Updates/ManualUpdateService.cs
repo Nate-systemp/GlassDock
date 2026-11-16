@@ -6,7 +6,7 @@ namespace GlassDock.App.Updates;
 internal sealed class ManualUpdateService
 {
     internal const string RepositoryUrl = "https://github.com/Nate-systemp/GlassDock";
-    internal const string PackageId = "Natesystemp.GlassDock";
+    internal const string PackageId = "Doky";
     private readonly UpdateManager manager;
     private UpdateInfo? available;
     private bool busy;

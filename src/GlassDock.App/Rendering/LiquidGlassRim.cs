@@ -9,16 +9,17 @@ namespace GlassDock.App.Rendering;
 internal sealed class LiquidGlassRim : IDisposable
 {
     private CanvasLinearGradientBrush? brush;
-    private LiquidGlassMaterial? applied;
+    private (float Position, float Softness, float Spread, float Falloff, float Top, float Bottom)? appliedRimStops;
+    private (float Shine, float Intensity, float Opacity, float Top, float Bottom)? appliedGlowStops;
 
     public void Draw(CanvasDrawingSession drawing, CanvasGeometry geometry, Vector4 bounds,
         float scale, LiquidGlassMaterial material, bool dockSurface = false, float strokeScale = 1)
     {
-        if (brush is null || applied != material)
+        var rimStops = (material.HighlightPosition, material.HighlightSoftness, material.HighlightSpread,
+            material.SpecularFalloff, material.TopLight, material.BottomLight);
+        if (brush is null || appliedRimStops != rimStops)
         {
             brush?.Dispose();
-            glow?.Dispose(); glow = null;
-            applied = material;
             var stops = new CanvasGradientStop[33];
             for (var i = 0; i < stops.Length; i++)
             {
@@ -31,6 +32,7 @@ internal sealed class LiquidGlassRim : IDisposable
                     (byte)Math.Round(255 * Math.Clamp(alpha, 0, 1)), 240, 247, 255) };
             }
             brush = new(drawing.Device, stops);
+            appliedRimStops = rimStops;
         }
         var gradient = DockSpecularLighting.Gradient(bounds.Z, bounds.W, material.SpecularAngleDegrees);
         var origin = new Vector2(bounds.X, bounds.Y);
@@ -63,8 +65,14 @@ internal sealed class LiquidGlassRim : IDisposable
         static CanvasGradientStop Stop(float at, byte alpha) =>
             new() { Position = at, Color = global::Windows.UI.Color.FromArgb(alpha, 255, 255, 255) };
         byte Alpha(float value) => (byte)Math.Clamp(value * material.InnerShine * material.SpecularIntensity / .16f * material.SurfaceOpacity, 0, 255);
-        glow ??= new(drawing.Device, new[] { Stop(0, Alpha(34 * material.TopLight)), Stop(.18f, Alpha(16 * material.TopLight)),
-            Stop(.5f, Alpha(3)), Stop(.82f, 0), Stop(1, Alpha(12 * material.BottomLight)) });
+        var glowStops = (material.InnerShine, material.SpecularIntensity, material.SurfaceOpacity, material.TopLight, material.BottomLight);
+        if (glow is null || appliedGlowStops != glowStops)
+        {
+            glow?.Dispose();
+            glow = new(drawing.Device, new[] { Stop(0, Alpha(34 * material.TopLight)), Stop(.18f, Alpha(16 * material.TopLight)),
+                Stop(.5f, Alpha(3)), Stop(.82f, 0), Stop(1, Alpha(12 * material.BottomLight)) });
+            appliedGlowStops = glowStops;
+        }
         var top = new Vector2(0, (bounds.Y - bounds.W * .25f) * scale);
         var bottom = new Vector2(0, (bounds.Y + bounds.W) * scale);
         glow.StartPoint = top;
@@ -76,6 +84,7 @@ internal sealed class LiquidGlassRim : IDisposable
     {
         brush?.Dispose(); brush = null;
         glow?.Dispose(); glow = null;
-        applied = null;
+        appliedRimStops = null;
+        appliedGlowStops = null;
     }
 }

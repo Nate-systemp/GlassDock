@@ -47,7 +47,7 @@ internal sealed class QuickSettingsGridButton : Button, IDisposable
         var brush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, (byte)(color >> 16), (byte)(color >> 8), (byte)color));
         square.Stroke = brush;
         foreach (var cell in cells.Children.OfType<Rectangle>()) cell.Stroke = brush;
-        Glass.UseDockMaterial = mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
+        Glass.UseDockMaterial = mode is DockAppearanceMode.Frosted;
         fallback.Background = new SolidColorBrush(mode.GlassStyle() is null
             ? Desktop.DockControlPalette.SolidSurface(mode) : Glass.UseDockMaterial
                 ? Microsoft.UI.Colors.Transparent : Desktop.DockControlPalette.Surface(mode, 24));

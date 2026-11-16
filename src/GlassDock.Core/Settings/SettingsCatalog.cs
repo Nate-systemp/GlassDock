@@ -27,7 +27,7 @@ public static class SettingsCatalog
         new SettingsSearchEntry("Utilities", "Add Utilities", "UtilitiesGrid", "wifi wi-fi bluetooth battery independent circles"),
         new SettingsSearchEntry("Utilities", "Utility display mode", "UtilityDisplayModeBox", "quick settings grid individual utilities"),
         new SettingsSearchEntry("General", "Start with Windows", "LaunchAtStartupToggle", "startup login launch"),
-        new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted acrylic clear liquid glass theme"),
+        new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted clear liquid glass theme"),
         new SettingsSearchEntry("Appearance", "Blur and opacity", "GlassControls", "diffusion tint transparency material"),
         new SettingsSearchEntry("Appearance", "Liquid Glass optics", "GlassControls", "refraction depth dispersion frost splay distortion falloff softness"),
         new SettingsSearchEntry("Appearance", "Highlights", "GlassControls", "light angle intensity specular rim position reflections shine glints"),

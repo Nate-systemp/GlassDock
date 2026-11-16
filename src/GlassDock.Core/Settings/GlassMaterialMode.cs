@@ -5,9 +5,8 @@ namespace GlassDock.Core.Settings;
 
 public enum GlassMaterialMode
 {
-    Frosted,
-    Acrylic,
-    Clear
+    Frosted = 0,
+    Clear = 2
 }
 
 public static class DockMaterialStylePresets
@@ -23,16 +22,6 @@ public static class DockMaterialStylePresets
             Tint = 0xDCEAFF,
             BorderThickness = GlassDockSettings.DefaultBorderThickness,
             BorderOpacity = GlassDockSettings.DefaultBorderOpacity
-        },
-        GlassMaterialMode.Acrylic => new()
-        {
-            BlurAmount = 10,
-            Opacity = 0.58,
-            Saturation = 1.22,
-            Brightness = 1.06,
-            Tint = 0xD8E9FF,
-            BorderThickness = 0.8,
-            BorderOpacity = 0.48
         },
         GlassMaterialMode.Clear => new()
         {

@@ -6,7 +6,6 @@ public static class DockMaterialRendering
 {
     public static double BaseBlur(GlassMaterialMode? style, double blur) => style switch
     {
-        GlassMaterialMode.Acrylic => Math.Min(blur, DockMaterialStylePresets.Create(GlassMaterialMode.Clear).BlurAmount),
         GlassMaterialMode.Clear => 0,
         _ => blur
     };

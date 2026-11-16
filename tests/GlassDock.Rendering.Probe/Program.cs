@@ -28,7 +28,7 @@ internal static class Program
         using var rim = new LiquidGlassRim();
         LiquidGlassShaderState? state = null;
         var bounds = new Vector4(40, 40, 360, 100);
-        byte[] Render(LiquidGlassMaterial m)
+        byte[] Render(LiquidGlassMaterial m, LiquidGlassRim? selectedRim = null)
         {
             using var target = new CanvasRenderTarget(device, 440, 180, 96);
             using var geometry = CanvasGeometry.CreateRoundedRectangle(device, 40, 40, 360, 100, m.CornerRadius, m.CornerRadius);
@@ -43,12 +43,24 @@ internal static class Program
                 using (draw.CreateLayer(1, geometry))
                 {
                     draw.DrawImage(shader);
-                    rim.Draw(draw, geometry, bounds, 1, m, dockSurface: true);
+                    (selectedRim ?? rim).Draw(draw, geometry, bounds, 1, m, dockSurface: true);
                 }
             }
             return target.GetPixelBytes();
         }
         var checks = 0;
+        Render(new());
+        var brushField = typeof(LiquidGlassRim).GetField("brush", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var glowField = typeof(LiquidGlassRim).GetField("glow", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var originalBrush = brushField.GetValue(rim);
+        var originalGlow = glowField.GetValue(rim);
+        Render(new() { BlurAmount = 22, RefractionStrength = 17, SpecularAngleDegrees = 135 });
+        if (originalBrush is null || originalGlow is null ||
+            !ReferenceEquals(originalBrush, brushField.GetValue(rim)) ||
+            !ReferenceEquals(originalGlow, glowField.GetValue(rim)))
+            throw new InvalidOperationException("Unrelated optical controls recreated rim gradient brushes.");
+        checks++;
+
         byte[] RenderLens(float refraction, float opacity)
         {
             using var target = new CanvasRenderTarget(device, 440, 180, 96);
@@ -79,12 +91,16 @@ internal static class Program
             var changed = control.Write(baseline, control.Read(baseline) == control.Maximum ? (float)control.Minimum : (float)control.Maximum);
             var before = Render(baseline);
             var after = Render(changed);
+            using var freshRim = new LiquidGlassRim();
+            if (!after.SequenceEqual(Render(changed, freshRim)))
+                throw new InvalidOperationException(control.Id + " cached rim differs from a freshly created rim.");
+            checks++;
             var delta = before.Zip(after, (a, b) => Math.Abs(a - b)).Sum();
             if (delta == 0) throw new InvalidOperationException(control.Id + " did not change rendered pixels.");
             Console.WriteLine($"{control.Id}: pixel delta {delta}");
             checks++;
         }
-        foreach (var mode in new[] { GlassMaterialMode.Frosted, GlassMaterialMode.Acrylic, GlassMaterialMode.Clear })
+        foreach (var mode in new[] { GlassMaterialMode.Frosted, GlassMaterialMode.Clear })
         {
             var m = DockMaterialStylePresets.Create(mode) with { Contrast = 1.4 };
             using var effect = (ArithmeticCompositeEffect)GlassEffectGraph.Create(scene, scene, m.BlurQuality, m, DockMaterialRendering.BaseBlur(mode, m.BlurAmount));
@@ -99,6 +115,11 @@ internal static class Program
             if (target.GetPixelBytes().All(b => b == 0)) throw new InvalidOperationException(mode + " native graph is empty.");
             checks++;
         }
+        var beforeRelease = Render(new());
+        rim.Dispose();
+        if (!beforeRelease.SequenceEqual(Render(new())))
+            throw new InvalidOperationException("Rim resources did not recreate identically after disposal.");
+        checks++;
         Console.WriteLine($"PASS: {checks} GPU checks. No windows, capture sessions, or user settings touched.");
         return 0;
     }

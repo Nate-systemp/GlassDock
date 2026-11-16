@@ -170,7 +170,6 @@ public sealed partial class SettingsWindow
         refreshingGlass = true;
         glassPresetBox.ItemsSource = glassPresets;
         glassPresetBox.SelectedItem = glassPresets.FirstOrDefault(p => p.Id == selectedGlassPreset);
-        DockAppearanceModeBox.SelectedIndex = (int)glassDraft.Mode;
         CircularHighlightsToggle.IsOn = glassDraft.NativeHighlights;
         ClearCircularHighlightsToggle.IsOn = glassDraft.ClearHighlights;
         UpdateDockAppearanceDescription(glassDraft.Mode);

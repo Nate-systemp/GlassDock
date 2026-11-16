@@ -119,7 +119,6 @@ internal sealed class AdaptiveAppIcon : Grid
             GlassDock.Core.Settings.DockAppearanceMode.Light or GlassDock.Core.Settings.DockAppearanceMode.Dark
                 => Desktop.DockControlPalette.SolidSurface(stackAppearance),
             GlassDock.Core.Settings.DockAppearanceMode.Frosted => global::Windows.UI.Color.FromArgb(190, 42, 49, 59),
-            GlassDock.Core.Settings.DockAppearanceMode.Acrylic => global::Windows.UI.Color.FromArgb(150, 42, 49, 59),
             _ => global::Windows.UI.Color.FromArgb(100, 42, 49, 59)
         };
         tile.Background = new SolidColorBrush(color);

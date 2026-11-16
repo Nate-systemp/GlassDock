@@ -195,8 +195,6 @@ public sealed partial class SettingsWindow
 
     private void BuildAppearanceTiles()
     {
-        var samples = new[] { Color.FromArgb(255,36,36,36), Color.FromArgb(255,216,204,184),
-            Color.FromArgb(210,121,147,177), Color.FromArgb(165,64,121,181), Color.FromArgb(70,129,183,224) };
         foreach (var mode in Enum.GetValues<DockAppearanceMode>())
         {
             AppearanceTiles.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
@@ -205,7 +203,14 @@ public sealed partial class SettingsWindow
             scene.Children.Add(new Border { CornerRadius = new(8), Background = new LinearGradientBrush
                 { StartPoint = new(0,0), EndPoint = new(1,1), GradientStops = {
                     new() { Color = Color.FromArgb(255,33,50,78), Offset = 0 }, new() { Color = Color.FromArgb(255,146,167,190), Offset = 1 } } } });
-            scene.Children.Add(new Border { Margin = new(6,12,6,4), CornerRadius = new(12), Background = new SolidColorBrush(samples[(int)mode]),
+            var sample = mode switch
+            {
+                DockAppearanceMode.Dark => Color.FromArgb(255,36,36,36),
+                DockAppearanceMode.Light => Color.FromArgb(255,216,204,184),
+                DockAppearanceMode.Frosted => Color.FromArgb(210,121,147,177),
+                _ => Color.FromArgb(70,129,183,224)
+            };
+            scene.Children.Add(new Border { Margin = new(6,12,6,4), CornerRadius = new(12), Background = new SolidColorBrush(sample),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(100,255,255,255)), BorderThickness = new(0.5) });
             content.Children.Add(scene);
             content.Children.Add(new TextBlock { Text = mode == DockAppearanceMode.Clear ? "Clear" : mode.ToString(), FontSize = 12, TextAlignment = TextAlignment.Center });
@@ -213,7 +218,7 @@ public sealed partial class SettingsWindow
                 HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brush("CardBrush") };
             AutomationProperties.SetName(button, mode == DockAppearanceMode.Clear ? "Clear — Liquid Glass" : mode.ToString());
             button.Click += (_, _) => SelectBuiltInGlass(mode);
-            Grid.SetColumn(button, (int)mode); AppearanceTiles.Children.Add(button); appearanceButtons[mode] = button;
+            Grid.SetColumn(button, AppearanceTiles.Children.Count); AppearanceTiles.Children.Add(button); appearanceButtons[mode] = button;
         }
     }
 

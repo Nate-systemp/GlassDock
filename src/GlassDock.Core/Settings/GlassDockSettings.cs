@@ -162,9 +162,7 @@ public sealed record GlassDockSettings
                 MaximumBorderOpacity,
                 DefaultBorderOpacity),
             GlassMaterialMode = DockMaterialStylePresets.Normalize(settings.GlassMaterialMode),
-            DockAppearanceMode = Enum.IsDefined(settings.DockAppearanceMode)
-                ? settings.DockAppearanceMode
-                : DefaultDockAppearanceMode,
+            DockAppearanceMode = settings.DockAppearanceMode.Normalize(DefaultDockAppearanceMode),
             DockDisplayMode = Enum.IsDefined(settings.DockDisplayMode)
                 ? settings.DockDisplayMode
                 : DefaultDockDisplayMode

@@ -7,6 +7,68 @@ namespace GlassDock.Windows.Tests;
 
 public sealed class GlassDockSettingsStoreTests
 {
+    [Theory]
+    [InlineData(0, DockAppearanceMode.Dark)]
+    [InlineData(1, DockAppearanceMode.Light)]
+    [InlineData(2, DockAppearanceMode.Frosted)]
+    [InlineData(4, DockAppearanceMode.Clear)]
+    public async Task Supported_saved_modes_keep_their_identity_and_visual_controls(int value, DockAppearanceMode expected)
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        await File.WriteAllTextAsync(store.SettingsFilePath,
+            $$"""
+            {
+              "DockAppearanceMode": {{value}},
+              "GlassMaterialMode": 2,
+              "GlassVisuals": {
+                "Mode": {{value}},
+                "Material": {"BlurAmount":31,"MaterialBlend":0.6}
+              }
+            }
+            """);
+
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(expected, loaded.DockAppearanceMode);
+        Assert.Equal(GlassMaterialMode.Clear, loaded.GlassMaterialMode);
+        Assert.Equal(expected, loaded.GlassVisuals!.Mode);
+        Assert.Equal(31, loaded.GlassVisuals.Material.BlurAmount);
+        Assert.Equal(.6f, loaded.GlassVisuals.Material.MaterialBlend);
+        await store.SaveAsync(loaded);
+        Assert.Equal(loaded, await location.CreateStore().LoadAsync());
+    }
+
+    [Fact]
+    public async Task Saved_acrylic_preferences_migrate_to_frosted_and_survive_restart()
+    {
+        using var location = new TemporarySettingsDirectory();
+        var store = location.CreateStore();
+        const string json = """
+            {"DockAppearanceMode":3,"GlassMaterialMode":1,"IconSize":32,"PinDock":true,
+             "GlassVisuals":{"Mode":3,"Material":{"BlurAmount":31},"DockOverride":{"SurfaceOpacity":0.6}},
+             "CustomGlassPresets":[{"Id":"0a036047-4b90-4e77-ae14-15e221d2913f","Name":"Saved glass","Profile":{"Mode":3}}]}
+            """;
+        await File.WriteAllTextAsync(store.SettingsFilePath, json);
+
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(DockAppearanceMode.Frosted, loaded.DockAppearanceMode);
+        Assert.Equal(GlassMaterialMode.Frosted, loaded.GlassMaterialMode);
+        Assert.Equal(DockAppearanceMode.Frosted, loaded.GlassVisuals!.Mode);
+        Assert.Equal(31, loaded.GlassVisuals.Material.BlurAmount);
+        Assert.Equal(.6f, loaded.GlassVisuals.DockOverride!.SurfaceOpacity);
+        Assert.Equal(DockAppearanceMode.Frosted, Assert.Single(loaded.CustomGlassPresets).Profile.Mode);
+        Assert.Equal(32, loaded.IconSize);
+        Assert.True(loaded.PinDock);
+        Assert.Equal(json, await File.ReadAllTextAsync(store.SettingsFilePath));
+
+        await store.SaveAsync(loaded);
+        var reloaded = await location.CreateStore().LoadAsync();
+        Assert.Equal(loaded with { CustomGlassPresets = reloaded.CustomGlassPresets }, reloaded);
+        Assert.Equal(loaded.CustomGlassPresets, reloaded.CustomGlassPresets);
+    }
+
     [Fact]
     public async Task Native_volume_suppression_is_opt_in_and_round_trips_without_changing_other_settings()
     {
@@ -60,7 +122,7 @@ public sealed class GlassDockSettingsStoreTests
             """{"DockAppearanceMode":4,"GlassMaterialMode":1,"Material":"obsolete","IconSize":32,"LaunchAtStartup":true}""");
         var loaded = await store.LoadAsync();
         Assert.Equal(GlassMaterialMode.Clear, loaded.DockAppearanceMode.GlassStyle());
-        Assert.Equal(GlassMaterialMode.Acrylic, loaded.GlassMaterialMode);
+        Assert.Equal(GlassMaterialMode.Frosted, loaded.GlassMaterialMode);
         Assert.Equal(32, loaded.IconSize);
         Assert.True(loaded.LaunchAtStartup);
         await store.SaveAsync(loaded);
@@ -71,7 +133,6 @@ public sealed class GlassDockSettingsStoreTests
     [InlineData(DockAppearanceMode.Light)]
     [InlineData(DockAppearanceMode.Dark)]
     [InlineData(DockAppearanceMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic)]
     [InlineData(DockAppearanceMode.Clear)]
     public async Task Legacy_material_loads_with_plain_default_and_appearance_survives_restart(DockAppearanceMode mode)
     {
@@ -133,7 +194,7 @@ public sealed class GlassDockSettingsStoreTests
             DockOpacity = 0.66,
             BorderThickness = 1.4,
             BorderOpacity = 0.52,
-            GlassMaterialMode = GlassMaterialMode.Acrylic
+            GlassMaterialMode = GlassMaterialMode.Frosted
         };
 
         await store.SaveAsync(expected);

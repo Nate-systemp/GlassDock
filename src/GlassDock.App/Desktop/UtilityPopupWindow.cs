@@ -159,7 +159,7 @@ internal class UtilityPopupWindow : Window
     public void ApplyAppearance(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, float layoutScale, bool highlights)
     {
         panel.ConfigureGlass(backdrop, UseDockOptics ? optics : PopupMaterial.FrostedUtilityOptics(optics), layoutScale, highlights);
-        var native = UseDockOptics && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic);
+        var native = UseDockOptics && mode is DockAppearanceMode.Frosted;
         var reconnect = transparentBackdrop.UseSolidSurface == native;
         transparentBackdrop.UseSolidSurface = !native;
         transparentBackdrop.VisualMaterial = native ? optics : null;

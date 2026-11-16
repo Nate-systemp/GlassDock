@@ -23,6 +23,7 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
     private CompositionSpriteShape? maskShape;
     private CompositionColorBrush? maskFill;
     private GlassMaterial material = new();
+    private LinearGradientBrush? lightingBrush;
     private DockAppearanceMode plainAppearance = DockAppearanceMode.Dark;
     private double plainOpacity = 1;
     private double plainCornerRadius = 28;
@@ -70,23 +71,7 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
         if (UseDesktopBackdrop) MaterialShape.Fill = new SolidColorBrush(Colors.Transparent);
         else brush.Connect(compositor);
-        shadow = compositor.CreateDropShadow();
-        shadow.Color = Colors.Black;
-        shadowGeometry = compositor.CreateRoundedRectangleGeometry();
-        maskShape = compositor.CreateSpriteShape(shadowGeometry);
-        maskFill = compositor.CreateColorBrush(Colors.White);
-        maskShape.FillBrush = maskFill;
-        maskVisual = compositor.CreateShapeVisual();
-        maskVisual.Shapes.Add(maskShape);
-        maskSurface = compositor.CreateVisualSurface();
-        maskSurface.SourceVisual = maskVisual;
-        shadowMask = compositor.CreateSurfaceBrush(maskSurface);
-        shadow.Mask = shadowMask;
-        shadowVisual = compositor.CreateSpriteVisual();
-        shadowVisual.Shadow = shadow;
-        ElementCompositionPreview.SetElementChildVisual(ShadowHost, shadowVisual);
         Apply(material);
-        ResizeShadow();
     }
 
     public void Apply(GlassMaterial value, bool animate = false)
@@ -98,24 +83,24 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         Rim.CornerRadius = new CornerRadius(material.CornerRadius);
         Rim.BorderThickness = new Thickness(material.BorderThickness);
         Rim.Opacity = material.BorderOpacity;
-        LightingShape.Fill = new LinearGradientBrush
+        // Keep the same stops and colors, but avoid allocating a new XAML brush
+        // and three new GradientStop objects every time settings are applied.
+        lightingBrush ??= new LinearGradientBrush
         {
             StartPoint = new global::Windows.Foundation.Point(0, 0),
             EndPoint = new global::Windows.Foundation.Point(0.8, 1),
             GradientStops =
             {
-                new GradientStop { Color = Color.FromArgb((byte)(material.EdgeHighlight * 255), 255, 255, 255), Offset = 0 },
-                new GradientStop { Color = Colors.Transparent, Offset = 0.4 },
-                new GradientStop { Color = Color.FromArgb((byte)(material.EdgeHighlight * 100), 145, 224, 255), Offset = 1 }
+                new GradientStop { Offset = 0 },
+                new GradientStop { Offset = 0.4 },
+                new GradientStop { Offset = 1 }
             }
         };
-        if (shadow is not null)
-        {
-            shadow.Opacity = (float)material.ShadowOpacity;
-            shadow.BlurRadius = (float)material.ShadowBlur;
-            shadow.Offset = new Vector3(0, (float)material.ShadowOffset, 0);
-        }
-        ResizeShadow();
+        lightingBrush.GradientStops[0].Color = Color.FromArgb((byte)(material.EdgeHighlight * 255), 255, 255, 255);
+        lightingBrush.GradientStops[1].Color = Colors.Transparent;
+        lightingBrush.GradientStops[2].Color = Color.FromArgb((byte)(material.EdgeHighlight * 100), 145, 224, 255);
+        if (!ReferenceEquals(LightingShape.Fill, lightingBrush)) LightingShape.Fill = lightingBrush;
+        UpdateShadow();
     }
 
     public void ApplyPlain(
@@ -152,13 +137,43 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
             MaterialShape.Fill = new SolidColorBrush(color);
         }
 
-        if (shadow is not null)
-        {
-            shadow.Opacity = (float)material.ShadowOpacity;
-            shadow.BlurRadius = (float)material.ShadowBlur;
-            shadow.Offset = new Vector3(0, (float)material.ShadowOffset, 0);
-        }
+        // Plain surfaces never display a shadow. Release any existing GPU mask.
+        ReleaseShadow();
+    }
 
+    // Zero-opacity shadows must not allocate an off-screen composition surface.
+    // Recreate it on demand if a non-zero shadow is selected later.
+    private void UpdateShadow()
+    {
+        if (material.ShadowOpacity <= 0)
+        {
+            ReleaseShadow();
+            return;
+        }
+        if (!IsLoaded || UsePlainSurface || (UseDesktopBackdrop && desktopFallback)) return;
+
+        if (shadow is null)
+        {
+            var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
+            shadow = compositor.CreateDropShadow();
+            shadow.Color = Colors.Black;
+            shadowGeometry = compositor.CreateRoundedRectangleGeometry();
+            maskShape = compositor.CreateSpriteShape(shadowGeometry);
+            maskFill = compositor.CreateColorBrush(Colors.White);
+            maskShape.FillBrush = maskFill;
+            maskVisual = compositor.CreateShapeVisual();
+            maskVisual.Shapes.Add(maskShape);
+            maskSurface = compositor.CreateVisualSurface();
+            maskSurface.SourceVisual = maskVisual;
+            shadowMask = compositor.CreateSurfaceBrush(maskSurface);
+            shadow.Mask = shadowMask;
+            shadowVisual = compositor.CreateSpriteVisual();
+            shadowVisual.Shadow = shadow;
+            ElementCompositionPreview.SetElementChildVisual(ShadowHost, shadowVisual);
+        }
+        shadow.Opacity = (float)material.ShadowOpacity;
+        shadow.BlurRadius = (float)material.ShadowBlur;
+        shadow.Offset = new Vector3(0, (float)material.ShadowOffset, 0);
         ResizeShadow();
     }
 
@@ -175,8 +190,11 @@ public sealed partial class GlassSurface : Microsoft.UI.Xaml.Controls.UserContro
         if (maskSurface is not null) maskSurface.SourceSize = size;
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e)
+    private void OnUnloaded(object sender, RoutedEventArgs e) => ReleaseShadow();
+
+    private void ReleaseShadow()
     {
+        if (shadowVisual is null && shadow is null) return;
         ElementCompositionPreview.SetElementChildVisual(ShadowHost, null);
         shadowVisual?.Dispose();
         shadowVisual = null;

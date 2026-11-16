@@ -22,7 +22,6 @@ public sealed class DockMaterialRenderingTests
 
     [Theory]
     [InlineData(GlassMaterialMode.Frosted, 20, .78, 20)]
-    [InlineData(GlassMaterialMode.Acrylic, 10, .58, 4)]
     [InlineData(GlassMaterialMode.Clear, 4, .42, 0)]
     public void Styles_keep_absolute_settings_and_distinct_backdrop_branches(GlassMaterialMode style, double blur, double opacity, double baseBlur)
     {

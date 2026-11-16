@@ -74,7 +74,7 @@ public sealed class HomeDashboardTests
     public void GlassCardsReduceOverlappingShadowsWithoutChangingOpticalSettings()
     {
         var material = new GlassMaterial { BlurAmount = 24, Opacity = .7, Tint = 0x183050 };
-        foreach (var mode in new[] { DockAppearanceMode.Frosted, DockAppearanceMode.Acrylic, DockAppearanceMode.Clear })
+        foreach (var mode in new[] { DockAppearanceMode.Frosted, DockAppearanceMode.Clear })
         {
             var card = PopupMaterial.ForDashboardCard(material, mode);
             Assert.Equal(material.BlurAmount, card.BlurAmount);
@@ -88,7 +88,7 @@ public sealed class HomeDashboardTests
         Assert.Same(material, PopupMaterial.ForDashboardCard(material, DockAppearanceMode.Dark));
         Assert.True(PopupMaterial.DashboardContrast(DockAppearanceMode.Frosted, .7) >
             PopupMaterial.DashboardContrast(DockAppearanceMode.Clear, .7));
-        Assert.True(PopupMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .8) >
-            PopupMaterial.DashboardContrast(DockAppearanceMode.Acrylic, .4));
+        Assert.True(PopupMaterial.DashboardContrast(DockAppearanceMode.Frosted, .8) >
+            PopupMaterial.DashboardContrast(DockAppearanceMode.Frosted, .4));
     }
 }

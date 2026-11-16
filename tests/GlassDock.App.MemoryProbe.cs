@@ -183,7 +183,7 @@ internal static class MemoryLifecycleProbe
                 await Task.Delay(350);
                 var slot = (RetainedWindowSlot<SettingsWindow>)Field(dock, "settingsWindow")!;
                 var settings = slot.Current!;
-                foreach (var mode in new[] { DockAppearanceMode.Clear, DockAppearanceMode.Acrylic, DockAppearanceMode.Dark })
+                foreach (var mode in new[] { DockAppearanceMode.Clear, DockAppearanceMode.Frosted, DockAppearanceMode.Light, DockAppearanceMode.Dark })
                 {
                     Call(settings, "SelectBuiltInGlass", mode);
                     await Task.Delay(80);

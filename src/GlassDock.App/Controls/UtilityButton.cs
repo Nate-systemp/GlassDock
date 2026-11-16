@@ -474,7 +474,7 @@ internal sealed class UtilityButton : Button, IDisposable
             GeometryChanged?.Invoke(this, EventArgs.Empty);
         };
         morph.Begin();
-        TrackPresentation(dockMode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) && !DisplayOn);
+        TrackPresentation(dockMode is DockAppearanceMode.Frosted && !DisplayOn);
     }
 
     private UtilityTheme IconTheme => dockMode.GlassStyle() is null
@@ -488,7 +488,7 @@ internal sealed class UtilityButton : Button, IDisposable
     private void Render()
     {
         if (disposed) return;
-        var sharedGlass = dockMode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic;
+        var sharedGlass = dockMode is DockAppearanceMode.Frosted;
         var displayOn = DisplayOn;
         Glass.UseDockMaterial = !displayOn && (sharedGlass || !FloatingPresentation && RadioUtility);
         tint.BorderThickness = new(sourceHighlighted ? 1.5 : 0);

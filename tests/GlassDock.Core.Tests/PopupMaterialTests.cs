@@ -55,7 +55,6 @@ public sealed class PopupMaterialTests
 
     [Theory]
     [InlineData(GlassMaterialMode.Frosted)]
-    [InlineData(GlassMaterialMode.Acrylic)]
     [InlineData(GlassMaterialMode.Clear)]
     public void Popup_inherits_dock_material_and_user_overrides(GlassMaterialMode mode)
     {

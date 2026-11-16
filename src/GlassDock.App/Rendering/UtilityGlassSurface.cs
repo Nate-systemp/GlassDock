@@ -35,17 +35,17 @@ internal sealed class UtilityGlassSurface : IDisposable
     public Vector4 Bounds { get; set; }
     public bool Active { get; set; }
     public bool UseDockMaterial { get; set; }
-    public bool UsesNativeDockBackdrop => UseDockMaterial && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic);
+    public bool UsesNativeDockBackdrop => UseDockMaterial && mode is DockAppearanceMode.Frosted;
     public UtilityGlassSurface() => drawRim = (drawing, shape) =>
     {
-        if (UseDockMaterial && mode is DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic) return;
+        if (UseDockMaterial && mode is DockAppearanceMode.Frosted) return;
         rim.Draw(drawing, shape, new(0, 0, diameter / dpi, height / dpi), dpi,
             highlights ? material : material with { SpecularIntensity = 0 }, dockSurface: true, strokeScale: layoutScale);
     };
 
     public void Configure(DockAppearanceMode mode, GlassMaterial backdrop, LiquidGlassMaterial optics, bool highlights, float layoutScale)
     {
-        if (this.mode != mode) appliedBackdrop = null;
+        if (this.mode != mode) ReleaseEffects();
         this.mode = mode; this.backdrop = backdrop; material = optics;
         this.highlights = highlights; this.layoutScale = layoutScale;
     }
@@ -55,7 +55,6 @@ internal sealed class UtilityGlassSurface : IDisposable
         if (!Active) return;
         if (renderingDevice is not null && !ReferenceEquals(renderingDevice, device)) Dispose();
         renderingDevice = device;
-        shader ??= new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
         var size = Bounds.Z * scale;
         var nextHeight = Bounds.W * scale;
         var nextRadius = Circular ? size / 2 : Math.Min(CornerRadius * scale, Math.Min(size, nextHeight) / 2);
@@ -67,16 +66,19 @@ internal sealed class UtilityGlassSurface : IDisposable
         }
         dpi = scale;
         var bounds = Bounds * scale + new Vector4(origin, 0, 0);
-        blur ??= new() { BorderMode = EffectBorderMode.Hard };
-        blur.Source = bitmap; blur.BlurAmount = material.BlurAmount * scale;
-        blur.Optimization = GlassEffectGraph.Quality((int)material.BlurQuality);
-        shader.Source1 = blur.BlurAmount > 0 ? blur : bitmap;
-        LiquidGlassShader.Configure(shader, material, scale, bounds,
-            new(bounds.X + size / 2, size / 2, 0, radius), frame, Vector4.Zero, ref previous);
         try
         {
             if (mode == DockAppearanceMode.Clear)
+            {
+                shader ??= new PixelShaderEffect(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Rendering", "Shaders", "LiquidGlass.bin")));
+                blur ??= new() { BorderMode = EffectBorderMode.Hard };
+                blur.Source = bitmap; blur.BlurAmount = material.BlurAmount * scale;
+                blur.Optimization = GlassEffectGraph.Quality((int)material.BlurQuality);
+                shader.Source1 = blur.BlurAmount > 0 ? blur : bitmap;
+                LiquidGlassShader.Configure(shader, material, scale, bounds,
+                    new(bounds.X + size / 2, size / 2, 0, radius), frame, Vector4.Zero, ref previous);
                 target.Draw(device, shader, geometry, new(bounds.X, bounds.Y, size, height), scale, drawRim);
+            }
             else
             {
                 var physical = UseDockMaterial ? RefractionLayer.ForNativeBackend(backdrop)
@@ -94,14 +96,15 @@ internal sealed class UtilityGlassSurface : IDisposable
                 baseBlur!.Source = bitmap; materialBlur!.Source = bitmap;
                 target.Draw(device, materialEffect, geometry, new(bounds.X, bounds.Y, size, height), scale, drawRim);
             }
-            Element.Opacity = UseDockMaterial && mode is (DockAppearanceMode.Frosted or DockAppearanceMode.Acrylic)
+            Element.Opacity = UseDockMaterial && mode is DockAppearanceMode.Frosted
                 ? material.SurfaceOpacity : 1;
             Element.Visibility = Visibility.Visible;
             if (!HasFrame) { HasFrame = true; RenderingChanged?.Invoke(this, EventArgs.Empty); }
         }
         finally
         {
-            shader.Source1 = null; blur.Source = null;
+            if (shader is not null) shader.Source1 = null;
+            if (blur is not null) blur.Source = null;
             if (baseBlur is not null) baseBlur.Source = null;
             if (materialBlur is not null) materialBlur.Source = null;
         }
@@ -113,13 +116,18 @@ internal sealed class UtilityGlassSurface : IDisposable
         if (HasFrame) { HasFrame = false; RenderingChanged?.Invoke(this, EventArgs.Empty); }
     }
 
-    public void Dispose()
+    private void ReleaseEffects()
     {
-        renderingDevice = null;
         shader?.Dispose(); shader = null; previous = null;
         blur?.Dispose(); blur = null;
         materialEffect?.Dispose(); materialEffect = null; appliedBackdrop = null;
         baseBlur = materialBlur = null;
+    }
+
+    public void Dispose()
+    {
+        renderingDevice = null;
+        ReleaseEffects();
         Element.Visibility = Visibility.Collapsed;
         if (HasFrame) { HasFrame = false; RenderingChanged?.Invoke(this, EventArgs.Empty); }
         geometry?.Dispose(); geometry = null; target.Dispose(); rim.Dispose();

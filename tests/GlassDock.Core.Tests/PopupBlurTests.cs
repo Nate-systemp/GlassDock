@@ -18,9 +18,7 @@ public sealed class PopupBlurTests
 
     [Theory]
     [InlineData(DockAppearanceMode.Frosted, 0)]
-    [InlineData(DockAppearanceMode.Acrylic, 0)]
     [InlineData(DockAppearanceMode.Frosted, 20)]
-    [InlineData(DockAppearanceMode.Acrylic, 10)]
     public void Glass_popups_use_the_exact_dock_blur(
         DockAppearanceMode mode, double blur)
     {
@@ -31,7 +29,6 @@ public sealed class PopupBlurTests
 
     [Theory]
     [InlineData(DockAppearanceMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic)]
     public void Stronger_user_blur_is_preserved(DockAppearanceMode mode)
     {
         Assert.Equal(52, PopupMaterial.CreateForPopup(Appearance(52), mode).BlurAmount);
@@ -50,7 +47,6 @@ public sealed class PopupBlurTests
 
     [Theory]
     [InlineData(DockAppearanceMode.Frosted, GlassMaterialMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic, GlassMaterialMode.Acrylic)]
     [InlineData(DockAppearanceMode.Clear, GlassMaterialMode.Clear)]
     public void Appearance_not_an_old_separate_material_setting_chooses_the_preset(
         DockAppearanceMode mode, GlassMaterialMode preset)

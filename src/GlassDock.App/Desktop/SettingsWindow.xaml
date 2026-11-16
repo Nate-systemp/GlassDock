@@ -80,13 +80,6 @@
           </StackPanel>
 
           <Grid x:Name="AppearanceTiles" ColumnSpacing="8" />
-          <ComboBox x:Name="DockAppearanceModeBox" Visibility="Collapsed" SelectionChanged="DockAppearanceChanged">
-            <ComboBoxItem Content="Dark" />
-            <ComboBoxItem Content="Light" />
-            <ComboBoxItem Content="Frosted" />
-            <ComboBoxItem Content="Acrylic" />
-            <ComboBoxItem Content="Clear" />
-          </ComboBox>
           <TextBlock x:Name="DockAppearanceDescription" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           <TextBlock x:Name="ClearMaterialNote" Text="Settings uses its own Light/Dark theme while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
           <StackPanel x:Name="GlassControls" Spacing="14" />

@@ -16,10 +16,6 @@ internal sealed class ClearDockSpecular : IDisposable
     private readonly W.CompositionSurfaceBrush mask;
     private readonly W.CompositionLinearGradientBrush light;
     private readonly W.CompositionColorGradientStop[] stops;
-    private readonly W.CompositionMaskBrush lighting;
-    private readonly W.SpriteVisual lightVisual;
-    private readonly W.CompositionVisualSurface lightSurface;
-    private readonly W.CompositionSurfaceBrush lightSource;
     private readonly W.CompositionEffectFactory factory;
     public W.CompositionEffectBrush Brush { get; }
     private double thickness, scale = 1;
@@ -45,17 +41,23 @@ internal sealed class ClearDockSpecular : IDisposable
             stops[i] = compositor.CreateColorGradientStop(i / 16f, global::Windows.UI.Color.FromArgb(0, 255, 255, 255));
             light.ColorStops.Add(stops[i]);
         }
-        lighting = compositor.CreateMaskBrush(); lighting.Source = light; lighting.Mask = mask;
-        lightVisual = compositor.CreateSpriteVisual(); lightVisual.Brush = lighting;
-        lightSurface = compositor.CreateVisualSurface(); lightSurface.SourceVisual = lightVisual;
-        lightSource = compositor.CreateSurfaceBrush(lightSurface);
-        lightSource.Stretch = W.CompositionStretch.Fill;
         factory = compositor.CreateEffectFactory(new CompositeEffect
         {
             Mode = CanvasComposite.SourceOver,
-            Sources = { new W.CompositionEffectSourceParameter("Body"), new W.CompositionEffectSourceParameter("Light") }
+            Sources =
+            {
+                new W.CompositionEffectSourceParameter("Body"),
+                new AlphaMaskEffect
+                {
+                    Source = new W.CompositionEffectSourceParameter("LightGradient"),
+                    AlphaMask = new W.CompositionEffectSourceParameter("LightMask")
+                }
+            }
         });
-        Brush = factory.CreateBrush(); Brush.SetSourceParameter("Body", body); Brush.SetSourceParameter("Light", lightSource);
+        Brush = factory.CreateBrush();
+        Brush.SetSourceParameter("Body", body);
+        Brush.SetSourceParameter("LightGradient", light);
+        Brush.SetSourceParameter("LightMask", mask);
     }
 
     public void Apply(GlassMaterial material, bool diagonalCatches = false, LiquidGlassMaterial? optics = null)
@@ -85,7 +87,6 @@ internal sealed class ClearDockSpecular : IDisposable
         stroke.StrokeThickness = (float)(thickness * 4 * dpi);
         var size = new Vector2((float)(width * dpi * 2), (float)(height * dpi * 2));
         visual.Size = capture.Size = surface.SourceSize = size;
-        lightVisual.Size = lightSurface.SourceSize = size / 2;
         light.StartPoint = new(0, (float)(top * dpi));
         light.EndPoint = new(0, (float)((top + dockHeight) * dpi));
         if (diagonal)
@@ -104,7 +105,7 @@ internal sealed class ClearDockSpecular : IDisposable
 
     public void Dispose()
     {
-        Brush.Dispose(); factory.Dispose(); lightSource.Dispose(); lightSurface.Dispose(); lightVisual.Dispose(); lighting.Dispose();
+        Brush.Dispose(); factory.Dispose();
         foreach (var stop in stops) stop.Dispose();
         light.Dispose(); mask.Dispose(); surface.Dispose(); capture.Dispose(); visual.Dispose(); stroke.Dispose(); white.Dispose();
     }

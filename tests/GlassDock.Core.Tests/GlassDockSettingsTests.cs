@@ -10,7 +10,6 @@ public sealed class GlassDockSettingsTests
     [InlineData(DockAppearanceMode.Dark, null)]
     [InlineData(DockAppearanceMode.Light, null)]
     [InlineData(DockAppearanceMode.Frosted, GlassMaterialMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic, GlassMaterialMode.Acrylic)]
     [InlineData(DockAppearanceMode.Clear, GlassMaterialMode.Clear)]
     public void Dock_surface_choices_select_existing_glass_styles(DockAppearanceMode mode, GlassMaterialMode? expected)
     {
@@ -236,10 +235,10 @@ public sealed class GlassDockSettingsTests
         GlassDockSettings? observed = null;
         session.Changed += (_, args) => observed = args.Settings;
 
-        var edited = session.CreateAppearanceUpdate(GlassMaterialMode.Acrylic, 36, 1.5, 14, 48, 0.62, 1.6, 0.4);
+        var edited = session.CreateAppearanceUpdate(GlassMaterialMode.Clear, 36, 1.5, 14, 48, 0.62, 1.6, 0.4);
         Assert.True(session.Replace(edited));
 
-        Assert.Equal(new DockAppearanceSettings(GlassMaterialMode.Acrylic, 36, 1.5, 14, 48, 0.62, 1.6, 0.4), session.Appearance);
+        Assert.Equal(new DockAppearanceSettings(GlassMaterialMode.Clear, 36, 1.5, 14, 48, 0.62, 1.6, 0.4), session.Appearance);
         Assert.Equal(session.Current, observed);
         Assert.True(session.Current.LaunchAtStartup);
         Assert.False(session.Current.SuppressWindowsTaskbar);
@@ -270,10 +269,9 @@ public sealed class GlassDockSettingsTests
     }
 
     [Fact]
-    public void Material_mode_presets_keep_frosted_and_define_acrylic_and_clear()
+    public void Material_mode_presets_keep_frosted_and_clear()
     {
         var frosted = DockMaterialStylePresets.Create(GlassMaterialMode.Frosted);
-        var acrylic = DockMaterialStylePresets.Create(GlassMaterialMode.Acrylic);
         var clear = DockMaterialStylePresets.Create(GlassMaterialMode.Clear);
 
         Assert.Equal(20, frosted.BlurAmount);
@@ -282,13 +280,6 @@ public sealed class GlassDockSettingsTests
         Assert.Equal(0xDCEAFFu, frosted.Tint);
         Assert.Equal(1.05, frosted.BorderThickness);
         Assert.Equal(0.78, frosted.BorderOpacity);
-
-        Assert.Equal(10, acrylic.BlurAmount);
-        Assert.Equal(0.58, acrylic.Opacity);
-        Assert.Equal(1.22, acrylic.Saturation);
-        Assert.Equal(0xD8E9FFu, acrylic.Tint);
-        Assert.Equal(0.8, acrylic.BorderThickness);
-        Assert.Equal(0.48, acrylic.BorderOpacity);
 
         Assert.Equal(4, clear.BlurAmount);
         Assert.Equal(0.36, clear.Opacity);

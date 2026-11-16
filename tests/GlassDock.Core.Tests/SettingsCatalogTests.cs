@@ -9,7 +9,6 @@ public sealed class SettingsCatalogTests
     [InlineData(DockAppearanceMode.Dark, DockAppearanceMode.Dark)]
     [InlineData(DockAppearanceMode.Light, DockAppearanceMode.Light)]
     [InlineData(DockAppearanceMode.Frosted, DockAppearanceMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic, DockAppearanceMode.Acrylic)]
     [InlineData(DockAppearanceMode.Clear, DockAppearanceMode.Frosted)]
     public void Settings_material_policy_preserves_dock_choice(DockAppearanceMode selected, DockAppearanceMode expected)
     {
@@ -57,7 +56,6 @@ public sealed class SettingsCatalogTests
     [InlineData(DockAppearanceMode.Dark)]
     [InlineData(DockAppearanceMode.Light)]
     [InlineData(DockAppearanceMode.Frosted)]
-    [InlineData(DockAppearanceMode.Acrylic)]
     [InlineData(DockAppearanceMode.Clear)]
     public void Appearance_change_notifies_the_same_session_and_preserves_other_preferences(DockAppearanceMode mode)
     {

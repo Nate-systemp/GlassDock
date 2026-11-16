@@ -1,5 +1,22 @@
 # Main dock materials and Clear rim
 
+## Part 1 appearance cleanup (2026-11-16)
+
+Settings exposes Dark, Light, Frosted and Clear. Persisted appearance value 3 and
+material value 1 migrate from Acrylic to Frosted. Profile and custom-preset
+normalization preserves edited material controls. Clear retains appearance value 4
+and material value 2. Loading keeps the original file intact until the next save.
+The obsolete hidden appearance selector and Acrylic-specific rendering branches
+are removed. Shared rendering and the existing WinUI tooltip brush remain in use.
+Frosted utility defaults are immutable and cached across appearance updates.
+
+Validation passed through `scripts/Validate.ps1`. Release built with zero warnings
+and errors, Core passed 451 tests, and Windows passed 348 tests. The off-screen
+rendering probe passed 39 GPU checks. Live appearance/interaction parity and RAM
+usage await manual verification.
+
+## Earlier rendering work
+
 Settings already selects absolute editable preset values. Apply them once: the
 discarded relative-to-Frosted adjustment double-scaled Acrylic/Clear values.
 Main-dock mode now reaches the native renderer explicitly. Its base branch uses

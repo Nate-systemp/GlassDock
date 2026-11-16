@@ -173,7 +173,6 @@ internal sealed class DockAppContextMenuWindow : Window
             var alpha = mode switch
             {
                 DockAppearanceMode.Frosted => (byte)248,
-                DockAppearanceMode.Acrylic => (byte)242,
                 _ => (byte)236
             };
             referenceGlassFill.GradientStops[0].Color = global::Windows.UI.Color.FromArgb(alpha, 195, 203, 216);

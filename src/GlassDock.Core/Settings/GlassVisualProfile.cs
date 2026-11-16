@@ -20,7 +20,7 @@ public sealed record GlassVisualProfile
             .Select(c => c with { Material = (c.Material ?? new()).Normalize() }).ToArray();
         return this with
         {
-            Mode = Enum.IsDefined(Mode) ? Mode : DockAppearanceMode.Clear,
+            Mode = Mode.Normalize(DockAppearanceMode.Clear),
             Material = (Material ?? new()).Normalize(),
             DockOverride = DockOverride?.Normalize(),
             Components = components.Length == 0 ? Array.Empty<GlassComponentVisual>() :
@@ -39,7 +39,7 @@ public sealed record GlassVisualProfile
     public static GlassVisualProfile FromSettings(GlassDockSettings settings)
     {
         if (settings.GlassVisuals is { } saved) return saved.Normalize();
-        var mode = settings.DockAppearanceMode;
+        var mode = settings.DockAppearanceMode.Normalize(GlassDockSettings.DefaultDockAppearanceMode);
         var style = DockMaterialStylePresets.Create(mode.GlassStyle() ?? settings.GlassMaterialMode);
         var clear = mode == DockAppearanceMode.Clear;
         return new()
