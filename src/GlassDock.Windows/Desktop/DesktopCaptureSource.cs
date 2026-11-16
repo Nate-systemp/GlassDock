@@ -23,6 +23,7 @@ public sealed class DesktopCaptureSource : IDisposable
     private bool excluded;
     private bool screenshotPaused;
     private bool countedSession;
+    private int disposed;
     public event EventHandler? FrameAvailable;
     public event EventHandler? Closed;
 
@@ -79,10 +80,12 @@ public sealed class DesktopCaptureSource : IDisposable
 
     private void StopFramePool()
     {
+        var previousSession = Interlocked.Exchange(ref session, null);
+        var previousPool = Interlocked.Exchange(ref pool, null);
         if (countedSession) { countedSession = false; GlassDock.Core.Desktop.DockPerformanceDiagnostics.CaptureSessionChanged(-1); }
-        session?.Dispose(); session = null;
-        if (pool is not null) pool.FrameArrived -= FrameArrived;
-        pool?.Dispose(); pool = null;
+        if (previousPool is not null) previousPool.FrameArrived -= FrameArrived;
+        try { previousSession?.Dispose(); }
+        finally { previousPool?.Dispose(); }
     }
 
     public bool PauseForScreenshot()
@@ -135,6 +138,7 @@ public sealed class DesktopCaptureSource : IDisposable
     }
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         if (pool is not null) pool.FrameArrived -= FrameArrived;
         if (item is not null) item.Closed -= ItemClosed;
         StopFramePool();

@@ -3,7 +3,8 @@ param(
     [switch]$Enable,
     [switch]$EnableDnd,
     [switch]$EnableEnergySaver,
-    [string]$DokyPath = (Join-Path $PSScriptRoot '..\..\artifacts\brightness-suppression-build\bin\GlassDock.App\debug_win-x64\GlassDock.App.exe'),
+    [string[]]$DokyArguments = @(),
+    [string]$DokyPath = (Join-Path $PSScriptRoot '..\..\src\GlassDock.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\GlassDock.App.exe'),
     [string]$WindhawkPath = (Join-Path $PSScriptRoot '..\..\artifacts\native-osd-poc\windhawk-portable')
 )
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,20 @@ $statusFile = Join-Path $output 'brightness-active.json'
 $modConfig = Join-Path $WindhawkPath 'AppData\Engine\Mods\doky-brightness-osd.ini'
 $engineConfig = Join-Path $WindhawkPath 'AppData\Engine\settings.ini'
 if (!(Test-Path -LiteralPath $DokyPath)) { throw 'Build Doky first.' }
+if (!$PSBoundParameters.ContainsKey('WindhawkPath')) {
+    $launch = [Diagnostics.ProcessStartInfo]::new($DokyPath)
+    $launch.UseShellExecute = $false
+    $launch.WorkingDirectory = Split-Path $DokyPath
+    foreach ($argument in $DokyArguments) { $launch.ArgumentList.Add($argument) }
+    $launch.Environment['DOKY_ENABLE_EXPERIMENTAL_BRIGHTNESS_OSD'] = '1'
+    $launch.Environment.Remove('DOKY_BRIGHTNESS_OSD_BRIDGE_PID') | Out-Null
+    $launch.Environment.Remove('DOKY_BRIGHTNESS_OSD_BRIDGE_CREATED') | Out-Null
+    if ($EnableDnd) { $launch.Environment['DOKY_ENABLE_EXPERIMENTAL_DND'] = '1' }
+    if ($EnableEnergySaver) { $launch.Environment['DOKY_ENABLE_EXPERIMENTAL_ENERGY_SAVER'] = '1' }
+    $child = [Diagnostics.Process]::Start($launch)
+    $child.Dispose()
+    return
+}
 if (!(Test-Path -LiteralPath (Join-Path $WindhawkPath 'AppData\Engine\Mods\64\doky-brightness-osd-0.1.0.dll'))) { throw 'Build-BrightnessBridge.ps1 is required first.' }
 if (Get-Process GlassDock.App -ErrorAction SilentlyContinue) { throw 'Exit the existing Doky instance before this opt-in launch.' }
 if (Get-Process windhawk -ErrorAction SilentlyContinue) { throw 'Exit the existing Windhawk instance before this isolated opt-in launch.' }
@@ -26,6 +41,10 @@ foreach ($other in Get-ChildItem (Join-Path $WindhawkPath 'AppData\Engine\Mods')
 }
 if (Test-Path -LiteralPath $stopFile) { Remove-Item -LiteralPath $stopFile }
 $originalEngineConfig = Get-Content -LiteralPath $engineConfig -Raw
+function Write-BridgeStatus([object]$Record) {
+    try { $Record | ConvertTo-Json | Set-Content -LiteralPath $statusFile }
+    catch [IO.IOException] { }
+}
 function Wait-BrightnessModule([int]$ShellPid) {
     $deadline = [Environment]::TickCount64 + 15000
     do {
@@ -50,6 +69,8 @@ try {
     $info = [Diagnostics.ProcessStartInfo]::new($DokyPath)
     $info.UseShellExecute = $false
     $info.WorkingDirectory = Split-Path $DokyPath
+    $info.ArgumentList.Add('--legacy-osd-supervisor')
+    foreach ($argument in $DokyArguments) { $info.ArgumentList.Add($argument) }
     $info.Environment['DOKY_ENABLE_EXPERIMENTAL_BRIGHTNESS_OSD'] = '1'
     if ($EnableDnd) { $info.Environment['DOKY_ENABLE_EXPERIMENTAL_DND'] = '1' }
     if ($EnableEnergySaver) { $info.Environment['DOKY_ENABLE_EXPERIMENTAL_ENERGY_SAVER'] = '1' }
@@ -104,8 +125,7 @@ enabled=1
             $shellProcess = Wait-BrightnessModule $currentShell
             $loaded = $true
         }
-        @{ DokyPid = $app.Id; BridgePid = $PID; ExplorerPid = $shellProcess.Id; Loaded = $loaded; SuppressedRequests = $view.ReadInt64(40); SuppressedVolumeRequests = $view.ReadInt64(80); Updated = [DateTime]::UtcNow.ToString('o') } |
-            ConvertTo-Json | Set-Content -LiteralPath $statusFile
+        Write-BridgeStatus @{ DokyPid = $app.Id; BridgePid = $PID; ExplorerPid = $shellProcess.Id; Loaded = $loaded; SuppressedRequests = $view.ReadInt64(40); SuppressedVolumeRequests = $view.ReadInt64(80); Updated = [DateTime]::UtcNow.ToString('o') }
         Start-Sleep -Seconds 1
     }
 } finally {
@@ -116,5 +136,5 @@ enabled=1
     $originalEngineConfig | Set-Content -LiteralPath $engineConfig
     if ($view) { $view.Dispose() }
     if ($map) { $map.Dispose() }
-    @{ Stopped = [DateTime]::UtcNow.ToString('o'); SuppressionEnabled = $false } | ConvertTo-Json | Set-Content -LiteralPath $statusFile
+    Write-BridgeStatus @{ Stopped = [DateTime]::UtcNow.ToString('o'); SuppressionEnabled = $false }
 }

@@ -26,12 +26,16 @@
   <ItemGroup>
     <Compile Include="../../tests/GlassDock.App.MemoryProbe.cs" Link="Diagnostics/MemoryLifecycleProbe.cs"
              Condition="'$(Configuration)' == 'Debug' or '$(DokyMemoryProbe)' == 'true'" />
+    <Content Include="../../artifacts/native-osd-runtime/**/*"
+             Link="NativeOsdRuntime/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <RuntimeHostConfigurationOption Include="System.Net.DisableIPv6" Value="true" />
     <Content Include="Assets\Doky.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Doky.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Utilities\**\*.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ThirdPartyNotices\win-nightlight-cli.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ThirdPartyNotices\Flylet.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="ThirdPartyNotices\Windhawk.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Rendering\Shaders\LiquidGlass.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\Register-InputHelper.ps1" Link="Register-InputHelper.ps1"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

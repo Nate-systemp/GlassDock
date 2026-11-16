@@ -46,7 +46,8 @@ inline bool VerifiedExplorerVersion() noexcept {
     return VerQueryValueW(data, L"\\", reinterpret_cast<void**>(&info), &length) &&
         length >= sizeof(*info) && info->dwSignature == 0xFEEF04BD &&
         info->dwFileVersionMS == MAKELONG(0, 10) &&
-        info->dwFileVersionLS == MAKELONG(9818, 26100);
+        (info->dwFileVersionLS == MAKELONG(9818, 26100) ||
+         info->dwFileVersionLS == MAKELONG(9974, 26100));
 }
 inline void Stop() noexcept { deadline.store(0); }
 inline bool Start(DWORD seconds) noexcept {

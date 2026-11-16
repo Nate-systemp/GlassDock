@@ -69,7 +69,7 @@ bool SnapshotLease(Snapshot& value) noexcept {
     return before == shared->sequence && value.version == 1 && value.session == ownSession;
 }
 
-bool ExactBinary(HMODULE module, PCWSTR expected) {
+bool ExactBinary(HMODULE module, PCWSTR expected, PCWSTR alternate = nullptr) {
     wchar_t path[MAX_PATH]{};
     if (!module || !GetModuleFileNameW(module, path, MAX_PATH)) return false;
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -90,7 +90,7 @@ bool ExactBinary(HMODULE module, PCWSTR expected) {
         if (readOk && BCryptFinishHash(hash, digest, sizeof(digest), 0) >= 0) {
             constexpr wchar_t digits[] = L"0123456789ABCDEF";
             for (unsigned i = 0; i < 32; ++i) { hex[i * 2] = digits[digest[i] >> 4]; hex[i * 2 + 1] = digits[digest[i] & 15]; }
-            ok = std::wcscmp(hex, expected) == 0;
+            ok = std::wcscmp(hex, expected) == 0 || (alternate && std::wcscmp(hex, alternate) == 0);
         }
     }
     if (hash) BCryptDestroyHash(hash);
@@ -153,8 +153,13 @@ BOOL WINAPI PositionBrightness(HWND window, HWND after, int x, int y, int cx, in
     return positionOriginal(window, after, x, y, cx, cy, flags);
 }
 
+void SetNativeReady(LONG value) noexcept {
+    if (shared) InterlockedExchange(reinterpret_cast<volatile LONG*>(reinterpret_cast<BYTE*>(shared) + 100), value);
+}
+
 void Cleanup() {
     enabled = false;
+    SetNativeReady(0);
     if (shared) { UnmapViewOfFile(shared); shared = nullptr; }
     if (mapping) { CloseHandle(mapping); mapping = nullptr; }
     if (owner) { CloseHandle(owner); owner = nullptr; }
@@ -167,28 +172,54 @@ void Cleanup() {
 BOOL Wh_ModInit() {
     if (!Wh_GetIntSetting(L"enabled") || CurrentShellPid() != GetCurrentProcessId() ||
         !InitNativeIdentity() || !osd_observe::VerifiedExplorerVersion() ||
-        !ProcessIdToSessionId(GetCurrentProcessId(), &ownSession)) return FALSE;
+        !ProcessIdToSessionId(GetCurrentProcessId(), &ownSession)) {
+        Wh_Log(L"OSD bridge rejected its setting or Shell identity.");
+        return FALSE;
+    }
     hardware = LoadLibraryExW(L"Windows.Internal.HardwareConfirmator.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     twinui = LoadLibraryExW(L"twinui.pcshell.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!ExactBinary(hardware, L"6EF846D28A14672725E71B4EB10F09E13E2F5A90B19BF3C9B4E662CA55FE99A9") ||
-        !ExactBinary(twinui, L"1894863A224D22BD8D3EF0E1BA382B4D3D3079E0FA9A1FDEEE82F3EBACE003B6")) { Cleanup(); return FALSE; }
-    wchar_t name[96]{}; swprintf_s(name, L"Local\\Doky.BrightnessOsd.v1.%lu", ownSession);
+        !ExactBinary(twinui, L"1894863A224D22BD8D3EF0E1BA382B4D3D3079E0FA9A1FDEEE82F3EBACE003B6",
+            L"0D44E428FE81F68522678F0958DB8B039E1E7DC3175B0D6A641918C3B125A2AE")) {
+        Wh_Log(L"OSD bridge rejected unverified Shell binaries.");
+        Cleanup(); return FALSE;
+    }
+    wchar_t name[128]{};
+    const int configuredOwner = Wh_GetIntSetting(L"ownerPid");
+    ULONGLONG configuredCreated{};
+    if (configuredOwner > 0) {
+        PCWSTR text = Wh_GetStringSetting(L"ownerCreated");
+        wchar_t* end = nullptr;
+        if (text) configuredCreated = _wcstoui64(text, &end, 10);
+        const bool valid = configuredCreated && end && *end == L'\0';
+        Wh_FreeStringSetting(text);
+        if (!valid) { Cleanup(); return FALSE; }
+        swprintf_s(name, L"Local\\Doky.NativeOsd.v2.%lu.%d.%llu", ownSession, configuredOwner, configuredCreated);
+    } else swprintf_s(name, L"Local\\Doky.BrightnessOsd.v1.%lu", ownSession);
     mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name);
     if (mapping) shared = static_cast<SharedLease*>(MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 128));
     Snapshot value{};
-    if (!SnapshotLease(value)) { Cleanup(); return FALSE; }
+    if (!SnapshotLease(value) || (configuredOwner > 0 &&
+        (value.pid != static_cast<DWORD>(configuredOwner) || value.created != configuredCreated))) {
+        Wh_Log(L"OSD bridge could not read the Doky lease.");
+        Cleanup(); return FALSE;
+    }
     ownerIdentity = {value.pid, value.created}; owner = OpenVerified(ownerIdentity);
     bridgeIdentity = {value.bridgePid, value.bridgeCreated}; bridge = OpenVerified(bridgeIdentity);
-    if (!owner || !bridge) { Cleanup(); return FALSE; }
+    if (!owner || !bridge) {
+        Wh_Log(L"OSD bridge rejected its owner or supervisor lifetime.");
+        Cleanup(); return FALSE;
+    }
     HMODULE user = GetModuleHandleW(L"user32.dll");
     if (!Wh_SetFunctionHook(std::bit_cast<void*>(GetProcAddress(user, "ShowWindow")), std::bit_cast<void*>(&ShowBrightness), reinterpret_cast<void**>(&showOriginal)) ||
         !Wh_SetFunctionHook(std::bit_cast<void*>(GetProcAddress(user, "SetWindowPos")), std::bit_cast<void*>(&PositionBrightness), reinterpret_cast<void**>(&positionOriginal))) {
         Cleanup(); return FALSE;
     }
     enabled = true;
+    SetNativeReady(1);
     Wh_Log(L"Sound and Brightness bridge ready for Doky PID %lu, hardware/twinui SHA256 pinned", value.pid);
     return TRUE;
 }
 BOOL Wh_ModSettingsChanged(BOOL* reload) { enabled = false; *reload = TRUE; return TRUE; }
-void Wh_ModBeforeUninit() { enabled = false; }
+void Wh_ModBeforeUninit() { enabled = false; SetNativeReady(0); }
 void Wh_ModUninit() { Cleanup(); }

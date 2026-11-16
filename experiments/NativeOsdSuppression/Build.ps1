@@ -38,6 +38,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination (Join-Path $output 'THIRD_PARTY_NOTICES.md') -Force
 
     if ($RunFixtures) {
+        & (Join-Path $PSScriptRoot 'StatusTests.ps1')
         & (Join-Path $output 'ObservationTests.exe') | Tee-Object -FilePath (Join-Path $output 'observation-test.log')
         if ($LASTEXITCODE -ne 0) { throw 'Read-only observation fixtures failed.' }
         foreach ($mode in '--external-test','--policy-test') {

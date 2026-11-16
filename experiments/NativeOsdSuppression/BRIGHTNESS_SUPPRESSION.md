@@ -1,6 +1,6 @@
 # Experimental Sound and Brightness bridge
 
-The opt-in runner starts the experimental Doky build and the isolated portable Windhawk instance. Exit Doky or run the stop script to restore native handling. The bridge uses the existing brightness HUD and hardware service. `DOKY_ENABLE_EXPERIMENTAL_BRIGHTNESS_OSD=1` enables the Doky lease publisher for this child process. The Windhawk mod's `enabled` setting defaults to false. The runner enables it for the current session and disables it during cleanup.
+Normal Doky EXE launches supervise the reviewed Windhawk runtime inside `GlassDock.Windows`. The runtime is built by `Build-BrightnessBridge.ps1` and copied beside the app during build or publish. Its verified per-user copy stores mutable configuration under LocalAppData. The existing brightness HUD and hardware services publish readiness. Safe and inspection modes skip startup. `DOKY_ENABLE_EXPERIMENTAL_BRIGHTNESS_OSD=0` disables this integration for laboratory runs.
 
 ## Actual source identification
 
@@ -16,26 +16,37 @@ The matching public PDB was downloaded from Microsoft's symbol server and resolv
 
 The touchpad reproduction recorded the same first two return sites followed by `Windows.Internal.HardwareConfirmator.dll + 0x24A14`. The matching Microsoft PDB resolves this to `HardwareConfirmatorHost::ShowVolumeAsync$_ResumeCoro$1 + 0x2B4`. Disassembly confirms a call to `ShowConfirmatorHWND` immediately before that return address. This exact ordered stack now identifies volume requests that bypass the media-key hook. The brightness stack remains independently classified. A visible native volume host can otherwise continue displaying subsequent utility updates.
 
-The allowlist requires OS build 26300, Explorer file version 10.0.26100.9818 and both exact SHA-256 values below. A different update fails initialization.
+The allowlist requires OS build 26300, Explorer numeric file version 10.0.26100.9818 or 10.0.26100.9974, the exact hardware DLL hash below, and either listed twinui DLL hash. Other binaries fail initialization. The 9974 Explorer binary retains a stale 9818 version string, so compatibility uses `VS_FIXEDFILEINFO` numeric fields.
 
 | Binary | SHA-256 |
 | --- | --- |
 | `Windows.Internal.HardwareConfirmator.dll` | `6EF846D28A14672725E71B4EB10F09E13E2F5A90B19BF3C9B4E662CA55FE99A9` |
 | `twinui.pcshell.dll` | `1894863A224D22BD8D3EF0E1BA382B4D3D3079E0FA9A1FDEEE82F3EBACE003B6` |
+| `twinui.pcshell.dll` 10.0.26100.9974 | `0D44E428FE81F68522678F0958DB8B039E1E7DC3175B0D6A641918C3B125A2AE` |
+
+The 9974 update retains the OSD host function at RVA `0x4F940–0x4F994` and the return site `0x4F977`. Offline disassembly against the previously verified 9818 binary shows the same instructions with the relocated delay-import operand. Both calls resolve to `ShowWindow` in `api-ms-win-rtcore-ntuser-window-l1-1-0.dll`. The hardware DLL remains byte-identical. Current-device suppression requires a live lease, the reviewed runtime, and physical input verification.
+
+The runner defaults to the current ordinary Release output and forwards arguments as a one-shot launcher. An explicit `-WindhawkPath` selects the preserved PowerShell laboratory supervisor. Direct EXE startup uses the bundled runtime and retains no PowerShell host.
+
+Opening Quick Settings keeps the native volume lease ready, matching the existing brightness lease. The existing custom control and pill visibility rules continue to handle the UI. The lifecycle probe checks volume readiness while Quick Settings is open.
+
+Status-file I/O failures are isolated from supervision. A reader holding `brightness-active.json` cannot terminate the bridge or unload suppression. `StatusTests.ps1` exercises exclusive file locks and successful writes after release.
 
 The earlier read-only comparison run recorded zero matching native-host show calls with Sound suppression enabled. That limits the volume/airplane/other-flyout comparison evidence. The positive brightness classification comes from the named brightness coroutine and exact binary identity. Current manual regression testing still needs to cover other flyouts.
 
 ## Runtime and recovery
 
-`NativeBrightnessOsdLease` creates a session-local mapping with an explicit current-user/SYSTEM DACL. PID, process creation time, session and protocol version are immutable after publication. The UI heartbeat publishes ready state and a 3-second deadline using aligned atomic writes. Normal heartbeat updates never invalidate the identity sequence. Readiness requires an available WMI display and a UI state that can present the HUD. Screenshot mode, safe/inspection mode, unavailable hardware and volume dragging withdraw readiness.
+`NativeBrightnessOsdLease` creates a mapping named `Local\Doky.NativeOsd.v2.<session>.<pid>.<creation-time>` with an explicit current-user/SYSTEM DACL. The mod receives the expected owner through its private configuration and verifies the published identity. Per-owner mappings permit immediate relaunch after a crash. The laboratory's original session mapping remains supported. The UI heartbeat publishes ready state and a 3-second deadline using aligned atomic writes. Readiness requires the existing hardware and HUD conditions. Screenshot mode, safe/inspection mode, unavailable hardware and volume dragging withdraw readiness.
 
-The native hook checks the current Shell HWND, ordered brightness stack, deadline and both verified process handles on each candidate. Doky death or launcher/bridge death immediately makes subsequent requests pass through. A stalled UI expires within 3 seconds. The mapping stays open until native unload but cannot renew itself. A counter in the mapping delivers suppressed requests to the existing HUD, including unchanged 0/100% presses. The UI coalesces duplicate WMI/counter events.
+The native hook checks the current Shell HWND, ordered hardware stack, deadline and verified process handles on each candidate. Doky owns both identities in integrated mode. Doky death immediately restores pass-through, and a stalled UI expires within 3 seconds. The mapping stays open until native unload but cannot renew itself. Suppressed-request counters feed the existing HUD, including unchanged 0/100% presses.
 
 The same 128-byte mapping has an optional volume extension at offsets 64 (ready), 72 (deadline), and 80 (request count). The original brightness fields and version remain compatible. Older publishers leave the extension zeroed, so volume requests pass through. Volume readiness requires the native-volume suppression setting, available Core Audio, and an available Doky HUD presentation state. Each utility has its own 3-second deadline and counter. Disposing the publisher revokes both. The UI coalesces duplicate Core Audio/counter volume notifications using the existing 100 ms brightness coalescing interval. The runner reports `SuppressedVolumeRequests` separately.
 
 `ShowWindow` declines matching Sound or Brightness reveals with their respective live leases and returns prior visibility. Matching `SWP_SHOWWINDOW` requests are converted to `SWP_HIDEWINDOW`. Hide operations and unknown contexts follow Windows' original calls. No retained foreign-window style, region, opacity or registry mutation needs recovery. Normal framework unload removes the API hooks. Recreated Explorer processes repeat all initialization checks. The first physical press after a real crash and first-frame behavior remain manual acceptance checks.
 
-The runner owns the temporary Windhawk session, watches Doky exit and restores its saved portable engine configuration. `Stop-BrightnessBridge.ps1` disables this mod and requests normal Windhawk exit. It leaves Doky running. No Explorer termination is part of either script.
+`NativeOsdBridgeHost` waits on engine and Shell process handles after activation. It uses bounded waits during startup and recovery. A private session lock prevents duplicate ownership. A Windows job closes the owned engine if Doky crashes. Normal asynchronous shutdown restores the dock's taskbar lease, revokes OSD readiness, requests Windhawk exit, and restores private configuration. Recovery permits at most three starts per minute. Another Windhawk instance prevents activation.
+
+The reserved lease bytes report supervisor activation at 88, engine PID at 92, Shell PID at 96, and native module acknowledgment at 100. `Stop-BrightnessBridge.ps1` writes a stop request at 104. The existing UI heartbeat consumes it and stops supervision while leaving Doky running. A subsequent EXE launch recreates supervision. The native module only acknowledges startup after its existing compatibility and hook checks succeed.
 
 An earlier read-only adapter crashed Explorer because it supplied stack-local trampoline output addresses to Windhawk's deferred hook registration. The corrected read-only adapter and active bridge pass persistent callback pointer storage directly. The active bridge remains native code in Explorer and carries Shell stability risk.
 
@@ -44,12 +55,12 @@ An earlier read-only adapter crashed Explorer because it supplied stack-local tr
 Use the reviewed portable Windhawk 1.7.3 SDK under `artifacts/native-osd-poc/windhawk-portable`.
 
 ```powershell
-dotnet build C:\Dev\GlassDock\GlassDock.sln -c Debug --artifacts-path C:\Dev\GlassDock\artifacts\brightness-suppression-build
 pwsh -NoProfile -File C:\Dev\GlassDock\experiments\NativeOsdSuppression\Build-BrightnessBridge.ps1
-pwsh -NoProfile -File C:\Dev\GlassDock\experiments\NativeOsdSuppression\Run-BrightnessBridge.ps1 -Enable
+dotnet build C:\Dev\GlassDock\GlassDock.sln -c Release
+C:\Dev\GlassDock\src\GlassDock.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\GlassDock.App.exe
 ```
 
-The runner requires existing Doky and Windhawk instances to be closed. The bundled SDK build uses warnings as errors. It installs no service or startup entry. Its running status and matched-request count are written to `artifacts/native-osd-poc/brightness-active.json`.
+The runtime build uses warnings as errors. It prepares the reviewed engine and its transitive runtime dependencies under `artifacts/native-osd-runtime`. App build and publish copy that payload. The compiler and Windhawk UI are excluded from the runtime payload. Windhawk update checks are disabled for this private instance. The lease exposes live activation and request counters. `brightness-active.json` remains a laboratory-supervisor diagnostic.
 
 Pass `-EnableDnd -EnableEnergySaver` to opt into those existing experimental utilities for the launched Doky process. These flags set their required startup environment variables. Without opt-in, clicking either utility displays its unavailable reason. Explicit toggle requests wait for an in-progress hover refresh, while repeated clicks during a toggle remain locked.
 

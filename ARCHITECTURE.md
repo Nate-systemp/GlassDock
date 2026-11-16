@@ -37,6 +37,12 @@ WindowsApplicationLauncher now exposes the same ShellExecuteEx path for search t
 Async UI operations use cancellation/revision checks. Development exceptions are written locally to development-error.log; no telemetry or application networking exists. Only an explicit taskbar test starts heartbeat and visibility checks.
 Avoid speculative empty interfaces such as IDockService until their contracts can be tested.
 
+### Native OSD supervision
+
+The user-authorized native brightness and touchpad-volume bridge is supervised inside `GlassDock.Windows` by `NativeOsdBridgeHost`. `NativeBrightnessOsdLease` publishes the existing heartbeat and request counters in a mapping named for its session, PID, and creation time. The reviewed Windhawk module verifies that identity and the existing exact Windows binary profiles before installing its existing hooks. Acknowledgment occupies reserved bytes in the 128-byte lease.
+
+The app starts the packaged runtime from a verified per-user copy, allowing installation under a read-only application directory. A private file handle excludes concurrent supervisors. Kernel process-exit waits monitor Windhawk and Explorer. Recovery is bounded, and a kill-on-close job contains only the owned Windhawk processes. App death closes that job independently of managed cleanup. Normal asynchronous shutdown revokes readiness and requests Windhawk exit after the dock restores its taskbar lease. Safe and inspection modes skip this runtime. The existing laboratory PowerShell supervisor remains available through an explicit runtime path.
+
 ## Development recovery architecture
 App starts a child recovery process over redirected standard input/output. READY precedes HIDE; the child checks the parent's process name, session and startup time, then acquires a named session mutex. Only the child hides the taskbar. A manual-reset event provides independent emergency signaling.
 The lease ends after parent exit, EOF, RESTORE, five seconds without a heartbeat, the 60-second maximum, or a taskbar identity change. App also restores if its helper fails. No process restarts are performed.

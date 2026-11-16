@@ -17,7 +17,7 @@ internal static class MemoryLifecycleProbe
     private static object? Field(object owner, string name)
     {
         for (var type = owner.GetType(); type is not null; type = type.BaseType)
-            if (type.GetField(name, Fields) is { } field) return field.GetValue(owner);
+            if (type.GetField(name, Fields | BindingFlags.Public) is { } field) return field.GetValue(owner);
         throw new MissingFieldException(owner.GetType().Name, name);
     }
     private static object? Call(object owner, string name, params object?[] args) =>
@@ -35,6 +35,13 @@ internal static class MemoryLifecycleProbe
         long CaptureCount() => (long)typeof(DockPerformanceDiagnostics)
             .GetField("captureSessions", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
         var baselineCaptures = 0L;
+        var allocationStart = GC.GetTotalAllocatedBytes();
+        var allocationTimer = Stopwatch.StartNew();
+        void StartAllocationSample()
+        {
+            allocationStart = GC.GetTotalAllocatedBytes();
+            allocationTimer.Restart();
+        }
         void Track(string kind, object? instance)
         {
             ArgumentNullException.ThrowIfNull(instance, kind);
@@ -44,13 +51,50 @@ internal static class MemoryLifecycleProbe
         void SampleIdle(string stage, int cycle)
         {
             using var process = Process.GetCurrentProcess();
+            var previews = Field(dock, "previews")!;
+            var cache = Field(previews, "frameCache")!;
+            var entries = (System.Collections.IDictionary)Field(cache, "entries")!;
+            byte[][] frames;
+            lock (Field(cache, "gate")!)
+                frames = entries.Values.Cast<object>().Select(entry => Field(entry, "Latest"))
+                    .Where(frame => frame is not null)
+                    .Select(frame => (byte[])frame!.GetType().GetProperty("Pixels")!.GetValue(frame)!).ToArray();
             var memory = new ProcessMemoryCounters { Size = (uint)Marshal.SizeOf<ProcessMemoryCounters>() };
             if (!GetProcessMemoryInfo(process.Handle, ref memory, memory.Size))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var componentIds = new HashSet<int> { Environment.ProcessId };
+            if (int.TryParse(Environment.GetEnvironmentVariable("DOKY_BRIGHTNESS_OSD_BRIDGE_PID"), out var bridgeId))
+                componentIds.Add(bridgeId);
+            foreach (var name in new[] { "GlassDock.InputHelper", "GlassDock.Watchdog", "windhawk" })
+                foreach (var component in Process.GetProcessesByName(name))
+                    using (component)
+                        if (component.SessionId == process.SessionId) componentIds.Add(component.Id);
+            var components = componentIds.Select(id =>
+            {
+                using var component = Process.GetProcessById(id);
+                var handle = OpenProcess(0x1000, false, id);
+                try
+                {
+                    var counters = new ProcessMemoryCounters { Size = (uint)Marshal.SizeOf<ProcessMemoryCounters>() };
+                    if (handle == 0 || !GetProcessMemoryInfo(handle, ref counters, counters.Size))
+                        throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    return new { pid = id, name = component.ProcessName,
+                        privateWorkingSet = (long)counters.PrivateWorkingSetSize, privateBytes = (long)counters.PrivateUsage };
+                }
+                finally { if (handle != 0) CloseHandle(handle); }
+            }).ToArray();
+            var nativeLease = (GlassDock.Windows.Desktop.NativeBrightnessOsdLease)Field(coordinator, "nativeBrightnessOsd")!;
             Log(new { stage, cycle, pid = Environment.ProcessId,
                 taskManagerBytes = (long)memory.PrivateWorkingSetSize,
                 privateBytes = process.PrivateMemorySize64, workingSet = process.WorkingSet64,
-                managedBytes = GC.GetTotalMemory(false), committedHeap = GC.GetGCMemoryInfo().TotalCommittedBytes });
+                managedBytes = GC.GetTotalMemory(false), committedHeap = GC.GetGCMemoryInfo().TotalCommittedBytes,
+                allocatedBytesPerSecond = (GC.GetTotalAllocatedBytes() - allocationStart) / allocationTimer.Elapsed.TotalSeconds,
+                appearance = session.Current.DockAppearanceMode.ToString(),
+                cachedFrames = frames.Length, cachedFrameBytes = frames.Sum(frame => (long)frame.Length),
+                captures = CaptureCount(), components,
+                combinedPrivateWorkingSet = components.Sum(component => component.privateWorkingSet),
+                combinedPrivateBytes = components.Sum(component => component.privateBytes),
+                nativeBridgeStatus = nativeLease.Status, nativeBridgeActive = nativeLease.BridgeActive });
         }
         async Task WaitClosed(Func<bool> isOpen, string kind)
         {
@@ -120,7 +164,10 @@ internal static class MemoryLifecycleProbe
             if (idleBenchmark)
             {
                 Log(new { stage = "benchmark-start", pid = Environment.ProcessId });
-                await Task.Delay(60000);
+                await Task.Delay(5000);
+                SampleIdle("startup", 0);
+                StartAllocationSample();
+                await Task.Delay(55000);
                 SampleIdle("startup-idle", 0);
             }
             else await Task.Delay(8000);
@@ -148,6 +195,11 @@ internal static class MemoryLifecycleProbe
                     retainedPreviewResources++;
                 Call(dock, "OpenQuickSettings");
                 await Task.Delay(400);
+                var nativeLease = (GlassDock.Windows.Desktop.NativeBrightnessOsdLease)Field(coordinator, "nativeBrightnessOsd")!;
+                var runtime = (DokySharedRuntime)Field(coordinator, "runtime")!;
+                if (nativeLease.Enabled && session.Current.SuppressNativeVolumeOsd && runtime.Volume.State.Available &&
+                    Marshal.ReadInt32((nint)Field(nativeLease, "view")!, 64) != 1)
+                    throw new InvalidOperationException("Quick Settings released native volume suppression.");
                 Track("quickSettingsWindow", Field(dock, "quickSettingsWindow"));
                 Track("quickSettingsPanel", Field(dock, "quickSettingsPanel"));
                 Call(dock, "CloseQuickSettings", false);
@@ -187,6 +239,7 @@ internal static class MemoryLifecycleProbe
                 if (idleBenchmark && cycle == 20)
                 {
                     session.Replace(saved);
+                    StartAllocationSample();
                     await Task.Delay(60000);
                     SampleIdle("post-interaction-idle", cycle);
                     await Checkpoint(cycle);
@@ -215,5 +268,9 @@ internal static class MemoryLifecycleProbe
     [DllImport("psapi.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetProcessMemoryInfo(nint process, ref ProcessMemoryCounters counters, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int pid);
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(nint handle);
 }
 

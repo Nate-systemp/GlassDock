@@ -31,7 +31,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
     private DesktopOverlayWindow? brightnessOwner;
     private string? selectedBrightnessDisplay, brightnessTarget;
     private readonly NativeVolumeOsdSuppression nativeVolumeOsd;
-    private readonly NativeBrightnessOsdLease nativeBrightnessOsd = new();
+    private readonly NativeBrightnessOsdLease nativeBrightnessOsd;
     private readonly DispatcherQueueTimer? brightnessOsdTimer;
     private long lastBrightnessHudSignal;
     private long lastVolumeHudSignal;
@@ -55,6 +55,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         this.inspection = inspection;
         this.safeMode = safeMode;
         this.prepareRestart = prepareRestart;
+        nativeBrightnessOsd = new(!safeMode && !inspection);
         lastDisplayMode = settingsSession.DisplayMode;
 
         nint initialMonitor = 0;
@@ -250,8 +251,9 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
     private void PulseBrightnessSuppression()
     {
+        if (!nativeBrightnessOsd.Enabled) { brightnessOsdTimer?.Stop(); return; }
         var volumeReady = !disposed && !shuttingDown && !safeMode && !inspection && !screenshotActive &&
-            !QuickSettingsOpen && settingsSession.Current.SuppressNativeVolumeOsd && runtime.Volume.State.Available &&
+            settingsSession.Current.SuppressNativeVolumeOsd && runtime.Volume.State.Available &&
             brightnessHud?.IsInteracting != true;
         if (nativeBrightnessOsd.PulseVolume(volumeReady) && volumeReady && Environment.TickCount64 - lastVolumeHudSignal >= 100)
         {
@@ -477,6 +479,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             await window.ShutdownForCoordinatorAsync();
         secondaryDocks.Clear();
 
+        await nativeBrightnessOsd.StopAsync();
         runtime.Dispose();
         shutdownCompleted();
     }
@@ -501,6 +504,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         secondaryDocks.Clear();
 
         await PrimaryWindow.ShutdownForCoordinatorAsync();
+        await nativeBrightnessOsd.StopAsync();
         runtime.Dispose();
         shutdownCompleted();
     }

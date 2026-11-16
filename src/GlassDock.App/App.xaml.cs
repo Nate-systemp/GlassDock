@@ -71,6 +71,13 @@ public partial class App : Application
             var settingsStore = new GlassDockSettingsStore();
             var settingsSession = new GlassDockSettingsSession(
                 await settingsStore.LoadAsync());
+#if DEBUG || DOKY_MEMORY_PROBE
+            if (arguments.Contains("--idle-memory-probe", StringComparer.OrdinalIgnoreCase) &&
+                Enum.TryParse<GlassDock.Core.Settings.DockAppearanceMode>(
+                    Environment.GetEnvironmentVariable("DOKY_MEMORY_PROBE_APPEARANCE"), true, out var probeAppearance) &&
+                Enum.IsDefined(probeAppearance))
+                settingsSession.Replace(settingsSession.Current with { DockAppearanceMode = probeAppearance });
+#endif
             Rendering.StartupDiagnostics.Write("Constructing dock coordinator");
             dockCoordinator = new Desktop.MonitorDockCoordinator(
                 settingsSession,
