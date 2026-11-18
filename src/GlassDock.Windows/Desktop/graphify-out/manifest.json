@@ -1,0 +1,290 @@
+{
+  "AirplaneModeNative.cs": {
+    "mtime": 1794786714.2984538,
+    "seen": 1795010507.8936665,
+    "ast_hash": "b928443479d0bd559d6bc9028e1fd1e7",
+    "semantic_hash": "b928443479d0bd559d6bc9028e1fd1e7"
+  },
+  "AirplaneModeUtilityService.cs": {
+    "mtime": 1794786714.3032568,
+    "seen": 1795010507.8936665,
+    "ast_hash": "9e7729633b54c2940f82189b07378daf",
+    "semantic_hash": "9e7729633b54c2940f82189b07378daf"
+  },
+  "BluetoothDeviceStore.cs": {
+    "mtime": 1794786714.3097217,
+    "seen": 1795010507.8936665,
+    "ast_hash": "2e4b4361226d82bf893677079e300a08",
+    "semantic_hash": "2e4b4361226d82bf893677079e300a08"
+  },
+  "BluetoothUtilityService.cs": {
+    "mtime": 1794786714.32538,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8f4aea9fb3e8a06d57786391f48165a3",
+    "semantic_hash": "8f4aea9fb3e8a06d57786391f48165a3"
+  },
+  "BrightnessHardware.cs": {
+    "mtime": 1794786714.3324285,
+    "seen": 1795010507.8936665,
+    "ast_hash": "38545423c9634879a4d72716c4e6227d",
+    "semantic_hash": "38545423c9634879a4d72716c4e6227d"
+  },
+  "BrightnessService.cs": {
+    "mtime": 1794786714.3365383,
+    "seen": 1795010507.8936665,
+    "ast_hash": "3d29f4763827286e0487c0c8ca777ae5",
+    "semantic_hash": "3d29f4763827286e0487c0c8ca777ae5"
+  },
+  "CaptureBorderPermission.cs": {
+    "mtime": 1794786714.4228177,
+    "seen": 1795010507.8936665,
+    "ast_hash": "f49807cc58969da789ee0783e3541715",
+    "semantic_hash": "f49807cc58969da789ee0783e3541715"
+  },
+  "DesktopCaptureSource.cs": {
+    "mtime": 1794798263.089828,
+    "seen": 1795010507.8936665,
+    "ast_hash": "25a8aa9e6b524adccdc078a82846aabb",
+    "semantic_hash": "25a8aa9e6b524adccdc078a82846aabb"
+  },
+  "DesktopWindowFocus.cs": {
+    "mtime": 1794786714.4614577,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8470dc1beab76639f1dbcdad777be6dc",
+    "semantic_hash": "8470dc1beab76639f1dbcdad777be6dc"
+  },
+  "DesktopWindowHighlight.cs": {
+    "mtime": 1794786714.4831104,
+    "seen": 1795010507.8936665,
+    "ast_hash": "76fedecdf17a607d973d1ba49c458748",
+    "semantic_hash": "76fedecdf17a607d973d1ba49c458748"
+  },
+  "DndNative.cs": {
+    "mtime": 1794786714.48973,
+    "seen": 1795010507.8936665,
+    "ast_hash": "bb978ee6e8c67e1154d266729c66921e",
+    "semantic_hash": "bb978ee6e8c67e1154d266729c66921e"
+  },
+  "DndUtilityService.cs": {
+    "mtime": 1794786714.4968674,
+    "seen": 1795010507.8936665,
+    "ast_hash": "65a206a0dc29efc6c93a7594b536e1ee",
+    "semantic_hash": "65a206a0dc29efc6c93a7594b536e1ee"
+  },
+  "EnergySaverNative.cs": {
+    "mtime": 1794786714.6289284,
+    "seen": 1795010507.8936665,
+    "ast_hash": "b6cec39de991ecc3dce8a5fffd62975b",
+    "semantic_hash": "b6cec39de991ecc3dce8a5fffd62975b"
+  },
+  "EnergySaverUtilityService.cs": {
+    "mtime": 1794786714.6333184,
+    "seen": 1795010507.8936665,
+    "ast_hash": "7bf6e227fc23321e1c546496cd9e903c",
+    "semantic_hash": "7bf6e227fc23321e1c546496cd9e903c"
+  },
+  "GlassHomeInput.cs": {
+    "mtime": 1794786714.6399095,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8e3110c44cc3021135d5537fe72762c7",
+    "semantic_hash": "8e3110c44cc3021135d5537fe72762c7"
+  },
+  "HomeDesktopEnvironment.cs": {
+    "mtime": 1794786714.6475418,
+    "seen": 1795010507.8936665,
+    "ast_hash": "e3f2f5710ac5fdf6f3095a1c38ac0364",
+    "semantic_hash": "e3f2f5710ac5fdf6f3095a1c38ac0364"
+  },
+  "InputDesktopMonitor.cs": {
+    "mtime": 1794786714.6561477,
+    "seen": 1795010507.8936665,
+    "ast_hash": "c2311a8916261ee2445032232c46a784",
+    "semantic_hash": "c2311a8916261ee2445032232c46a784"
+  },
+  "InteractiveGlassWindowHost.cs": {
+    "mtime": 1794786714.6614182,
+    "seen": 1795010507.8936665,
+    "ast_hash": "06ae9d980ed3f3168e166ec844823e77",
+    "semantic_hash": "06ae9d980ed3f3168e166ec844823e77"
+  },
+  "MasterVolumeService.cs": {
+    "mtime": 1794786714.672824,
+    "seen": 1795010507.8936665,
+    "ast_hash": "69cbabf63ac76881a30c235e4407aefe",
+    "semantic_hash": "69cbabf63ac76881a30c235e4407aefe"
+  },
+  "NativeBrightnessOsdLease.cs": {
+    "mtime": 1794798715.1236496,
+    "seen": 1795010507.8936665,
+    "ast_hash": "d04964d9054e0aabbbd06b1a101971e5",
+    "semantic_hash": "d04964d9054e0aabbbd06b1a101971e5"
+  },
+  "NativeOsdBridgeHost.cs": {
+    "mtime": 1794796276.7819307,
+    "seen": 1795010507.8936665,
+    "ast_hash": "e1bbcf8ccd5ec3ca7e075e6ee7dc6f24",
+    "semantic_hash": "e1bbcf8ccd5ec3ca7e075e6ee7dc6f24"
+  },
+  "NativeVolumeOsdSuppression.cs": {
+    "mtime": 1794786714.7891688,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8d96f7ef25e5ef6455fb58d5f97631ec",
+    "semantic_hash": "8d96f7ef25e5ef6455fb58d5f97631ec"
+  },
+  "NightLightCloudStore.cs": {
+    "mtime": 1794786714.7984025,
+    "seen": 1795010507.8936665,
+    "ast_hash": "1f073c8017436670492bcf01b7a8b1cd",
+    "semantic_hash": "1f073c8017436670492bcf01b7a8b1cd"
+  },
+  "NightLightRegistry.cs": {
+    "mtime": 1794786714.809782,
+    "seen": 1795010507.8936665,
+    "ast_hash": "dd5a33ecb68eae37b1cece9fb8e9b9da",
+    "semantic_hash": "dd5a33ecb68eae37b1cece9fb8e9b9da"
+  },
+  "NightLightUtilityService.cs": {
+    "mtime": 1794786714.8153317,
+    "seen": 1795010507.8936665,
+    "ast_hash": "b1e2047490e811ce3b36b87268d420d8",
+    "semantic_hash": "b1e2047490e811ce3b36b87268d420d8"
+  },
+  "RadioStateChange.cs": {
+    "mtime": 1794786714.8277726,
+    "seen": 1795010507.8936665,
+    "ast_hash": "66da499830664e0b4f25912d3193ec80",
+    "semantic_hash": "66da499830664e0b4f25912d3193ec80"
+  },
+  "SystemControlAudio.Bluetooth.cs": {
+    "mtime": 1794786714.8330438,
+    "seen": 1795010507.8936665,
+    "ast_hash": "194c4cb1f06ff84c8da643d3bd4e6dd6",
+    "semantic_hash": "194c4cb1f06ff84c8da643d3bd4e6dd6"
+  },
+  "SystemControlAudio.Volume.cs": {
+    "mtime": 1794786714.9235272,
+    "seen": 1795010507.8936665,
+    "ast_hash": "e39a508b38f2105ab82777843211d728",
+    "semantic_hash": "e39a508b38f2105ab82777843211d728"
+  },
+  "SystemControlAudio.cs": {
+    "mtime": 1794786714.9343152,
+    "seen": 1795010507.8936665,
+    "ast_hash": "62e8b125ed3430c7498278865a5c2a45",
+    "semantic_hash": "62e8b125ed3430c7498278865a5c2a45"
+  },
+  "TaskbarAutoHide.cs": {
+    "mtime": 1794786714.9399128,
+    "seen": 1795010507.8936665,
+    "ast_hash": "5898fb851fcb2830aca704f992025631",
+    "semantic_hash": "5898fb851fcb2830aca704f992025631"
+  },
+  "TaskbarDevelopmentSession.cs": {
+    "mtime": 1794786714.9452257,
+    "seen": 1795010507.8936665,
+    "ast_hash": "18d47efc6aa737413fad8519c7a15a52",
+    "semantic_hash": "18d47efc6aa737413fad8519c7a15a52"
+  },
+  "TaskbarRecovery.cs": {
+    "mtime": 1789124949.7058558,
+    "seen": 1795010507.8936665,
+    "ast_hash": "bfe5d5a86aec6c16b5590824f1575f7a",
+    "semantic_hash": "bfe5d5a86aec6c16b5590824f1575f7a"
+  },
+  "UtilityKeyInput.cs": {
+    "mtime": 1794786714.9512687,
+    "seen": 1795010507.8936665,
+    "ast_hash": "18bf0d8769a9181d4d9cbc989e55c6bf",
+    "semantic_hash": "18bf0d8769a9181d4d9cbc989e55c6bf"
+  },
+  "UtilityKeyState.cs": {
+    "mtime": 1794786714.956071,
+    "seen": 1795010507.8936665,
+    "ast_hash": "0cb486fcc135de0c2a7cd1c3a47746a9",
+    "semantic_hash": "0cb486fcc135de0c2a7cd1c3a47746a9"
+  },
+  "WifiNetworkControl.cs": {
+    "mtime": 1794786714.9616253,
+    "seen": 1795010507.8936665,
+    "ast_hash": "03962d0fc8472f05cf123c5c97939bc3",
+    "semantic_hash": "03962d0fc8472f05cf123c5c97939bc3"
+  },
+  "WifiNetworkSelection.cs": {
+    "mtime": 1794786715.0133238,
+    "seen": 1795010507.8936665,
+    "ast_hash": "685ab1b1db9b59b1ce18ebfefcdfeb42",
+    "semantic_hash": "685ab1b1db9b59b1ce18ebfefcdfeb42"
+  },
+  "WifiUtilityService.cs": {
+    "mtime": 1794786715.021454,
+    "seen": 1795010507.8936665,
+    "ast_hash": "a031fb2f578dde56c2f3dd781df816f9",
+    "semantic_hash": "a031fb2f578dde56c2f3dd781df816f9"
+  },
+  "WindowPreviewPlacement.cs": {
+    "mtime": 1794786715.0282671,
+    "seen": 1795010507.8936665,
+    "ast_hash": "fb5d395945025613240b041222cac2ff",
+    "semantic_hash": "fb5d395945025613240b041222cac2ff"
+  },
+  "WindowsChildProcessJob.cs": {
+    "mtime": 1794795800.4158626,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8506a7e5727b14684a2522d002fd0991",
+    "semantic_hash": "8506a7e5727b14684a2522d002fd0991"
+  },
+  "WindowsCompositionSupport.cs": {
+    "mtime": 1794786715.0429494,
+    "seen": 1795010507.8936665,
+    "ast_hash": "9e199e8563c54a3b6e9e28e0c188fab3",
+    "semantic_hash": "9e199e8563c54a3b6e9e28e0c188fab3"
+  },
+  "WindowsInputHelperBridge.cs": {
+    "mtime": 1794786715.0505295,
+    "seen": 1795010507.8936665,
+    "ast_hash": "8e98fa5518410f1ccb9b5b2e85521a06",
+    "semantic_hash": "8e98fa5518410f1ccb9b5b2e85521a06"
+  },
+  "WindowsInputHelperHost.cs": {
+    "mtime": 1794786715.0879242,
+    "seen": 1795010507.8936665,
+    "ast_hash": "ce8a44919eda4013d9dbb6bd3ed0abd7",
+    "semantic_hash": "ce8a44919eda4013d9dbb6bd3ed0abd7"
+  },
+  "WindowsKeyHook.cs": {
+    "mtime": 1794786715.2015436,
+    "seen": 1795010507.8936665,
+    "ast_hash": "5fcefb40418ba561abbc809358cdab50",
+    "semantic_hash": "5fcefb40418ba561abbc809358cdab50"
+  },
+  "WindowsKeyboardService.cs": {
+    "mtime": 1794786715.2099075,
+    "seen": 1795010507.8936665,
+    "ast_hash": "5b6ffb2c0613811c37915d50c41ae0a3",
+    "semantic_hash": "5b6ffb2c0613811c37915d50c41ae0a3"
+  },
+  "WindowsMonitorService.cs": {
+    "mtime": 1794786715.218227,
+    "seen": 1795010507.8936665,
+    "ast_hash": "a8abc197c3b901d6612ec0f3669e12cc",
+    "semantic_hash": "a8abc197c3b901d6612ec0f3669e12cc"
+  },
+  "WindowsOverlayManager.cs": {
+    "mtime": 1794786715.2286963,
+    "seen": 1795010507.8936665,
+    "ast_hash": "1f31c8b68cf8b44fba713c59b7cdba11",
+    "semantic_hash": "1f31c8b68cf8b44fba713c59b7cdba11"
+  },
+  "WindowsSystemTheme.cs": {
+    "mtime": 1794786715.234229,
+    "seen": 1795010507.8936665,
+    "ast_hash": "7752131a715bae91ebafda1f448672be",
+    "semantic_hash": "7752131a715bae91ebafda1f448672be"
+  },
+  "WindowsTaskbarController.cs": {
+    "mtime": 1794786715.2410636,
+    "seen": 1795010507.8936665,
+    "ast_hash": "e99fbf21685e0e5df90d97dae1e96c95",
+    "semantic_hash": "e99fbf21685e0e5df90d97dae1e96c95"
+  }
+}

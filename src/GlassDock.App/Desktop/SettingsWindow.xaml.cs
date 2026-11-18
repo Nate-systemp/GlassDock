@@ -78,13 +78,15 @@ public sealed partial class SettingsWindow : Window
         var startupEnabled = startupService.IsEnabled();
         Populate(settingsSession.Current with { LaunchAtStartup = startupEnabled });
         InitializeSettingsShell();
-        // Keep one Settings window alive instead of allocating a new WinUI/XAML
-        // tree and native composition host for every open/close cycle.
+        // Keep the editor alive while it has unsaved changes or work in progress.
         AppWindow.Closing += (_, args) =>
         {
             if (permanentlyClosing || shutdown.IsRequested) return;
-            args.Cancel = true;
-            AppWindow.Hide();
+            if (glassDirty || saving || updateBusy || editQueued || sliderEditing)
+            {
+                args.Cancel = true;
+                AppWindow.Hide();
+            }
         };
         PopulateAbout();
         badges.Changed += NotificationsChanged;
@@ -472,7 +474,9 @@ public sealed partial class SettingsWindow : Window
     {
         if (!navigation.ContainsKey(page)) return;
         selectedPage = page;
-        StickyGlassPreview.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        var showAppearance = page == "Appearance";
+        ApplyButton.Visibility = showAppearance ? Visibility.Visible : Visibility.Collapsed;
+        glassPreview?.SetVisible(showAppearance && AppWindow.IsVisible);
         foreach (var definition in SettingsCatalog.Pages)
         {
             if (SettingsRoot.FindName(definition.Id + "Page") is FrameworkElement content)
@@ -542,9 +546,15 @@ public sealed partial class SettingsWindow : Window
     private void SetNavigationState(Button button, bool selected)
     {
         button.Background = selected ? Brush("SelectionBrush") : new SolidColorBrush(Colors.Transparent);
-        button.Foreground = Brush("PrimaryBrush");
+        button.Foreground = Brush(selected ? "AccentTextBrush" : "PrimaryBrush");
         button.Resources["ButtonBackgroundPointerOver"] = Brush("CardBrush");
         button.Resources["ButtonForegroundPointerOver"] = Brush("PrimaryBrush");
+        if (button.Content is StackPanel content)
+            foreach (var element in content.Children)
+            {
+                if (element is FontIcon icon) icon.Foreground = Brush(selected ? "AccentTextBrush" : "SecondaryBrush");
+                if (element is TextBlock label) label.Foreground = Brush(selected ? "AccentTextBrush" : "PrimaryBrush");
+            }
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(button, selected ? "Selected" : "");
     }
 
@@ -810,7 +820,7 @@ public sealed partial class SettingsWindow : Window
     {
         StatusText.Text = message;
         StatusText.Foreground = new SolidColorBrush(success
-            ? (settingsSession.Current.DockAppearanceMode == DockAppearanceMode.Light ? ColorHelper.FromArgb(255, 36, 98, 68) : ColorHelper.FromArgb(255, 145, 220, 182))
-            : Colors.IndianRed);
+            ? (settingsSession.Current.UtilityTheme == UtilityTheme.Light ? ColorHelper.FromArgb(255, 36, 98, 68) : ColorHelper.FromArgb(255, 145, 220, 182))
+            : (settingsSession.Current.UtilityTheme == UtilityTheme.Light ? ColorHelper.FromArgb(255, 155, 42, 52) : ColorHelper.FromArgb(255, 255, 174, 179)));
     }
 }

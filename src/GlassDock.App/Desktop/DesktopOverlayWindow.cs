@@ -195,7 +195,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private double DockScale => settingsSession.Current.DockSize;
     private DockSizing appliedSizing;
     private DockSizing Sizing => new(DockScale, settingsSession.Current.IconSize, settingsSession.Current.PinnedPlacement, settingsSession.Current.FloatingDockGap);
-    private double AvailableDockWidth => Math.Max(120d, (root.ActualWidth > 0 ? root.ActualWidth : windowManager.CurrentHostWidthDips) - (GridUtilities ? 128d : 32d));
+    private double AvailableDockWidth => Math.Max(120d, (root.ActualWidth > 0 ? root.ActualWidth : windowManager.CurrentHostWidthDips) - Math.Max(GridUtilities ? 128d : 32d, MusicSideReservation));
     private DockAppearanceSettings Appearance => settingsSession.Appearance.ForDock(DockScale)
         .FitAppRow(VisibleDockApplications.Count, AvailableDockWidth, 36d * DockScale);
     private bool HoverWaveEnabled => !safeMode && settingsSession.Current.HoverWaveEnabled;
@@ -413,6 +413,7 @@ public sealed partial class DesktopOverlayWindow : Window
         {
             if (animation is not null)
             {
+                ConfigureMusicPill(settingsSession.Current.DockAppearanceMode);
                 UpdateApplicationSizing();
                 if (state.State == DockState.Expanded)
                     animation.ResizeExpanded(CalculateTargetDockWidth(), ExpandedDockHeight + (pinnedPlacementActive ? PinnedDockClipDepth : 0));
@@ -770,6 +771,7 @@ public sealed partial class DesktopOverlayWindow : Window
     private void UpdateApplicationSizing()
     {
         var appearance = Appearance;
+        musicPill?.SetPlayPauseIconSize(appearance.IconSize);
         icons.Spacing = appearance.IconSpacing;
         foreach (var button in applicationButtons.Values)
             if (button.Content is Grid content && content.Children.FirstOrDefault() is AdaptiveAppIcon icon)
@@ -2246,6 +2248,12 @@ public sealed partial class DesktopOverlayWindow : Window
             diagStart != 0 ? System.Diagnostics.Stopwatch.GetTimestamp() - diagStart : 0);
 
         PositionUtilities();
+        if (musicPill is { IsHitTestVisible: true } pill && utilityArea.Visibility == Visibility.Visible)
+        {
+            var bounds = pill.Glass.Bounds;
+            if (bounds.Z > 0 && bounds.W > 0)
+                reusableIconBounds.Add((bounds.X, bounds.Y, bounds.X + bounds.Z, bounds.Y + bounds.W));
+        }
         foreach (var button in utilityButtons.Values)
         {
             var bounds = button.Glass.Bounds;
@@ -2856,6 +2864,7 @@ public sealed partial class DesktopOverlayWindow : Window
         DockAppearanceMode dockAppearance)
     {
         stackWindow?.ApplyAppearance(appearance, dockAppearance);
+        ConfigureMusicPill(dockAppearance);
         appearance = appearance.ForDock(DockScale).FitAppRow(VisibleDockApplications.Count, AvailableDockWidth, 36d * DockScale);
         appliedSizing = Sizing;
         animation.SetLayoutScale(DockScale);
@@ -3272,6 +3281,7 @@ public sealed partial class DesktopOverlayWindow : Window
     {
         if (closeMainWindow) AppWindow.Hide();
         AbortDragLens();
+        SetMusicControls(null);
         DisposeUtilities();
         liquidGlass.Dispose();
         root.ContextFlyout?.Hide();

@@ -63,11 +63,12 @@ public sealed class WindowFrameCache : IDisposable
 
     private const int MaxConcurrentCaptures = 1;
 
-    private const int MaxRetainedWidth = 1920;
-    private const int MaxRetainedHeight = 1080;
+    // Cached frames are only used in preview cards up to 232 DIPs wide.
+    private const int MaxRetainedWidth = 640;
+    private const int MaxRetainedHeight = 400;
 
     private const int MaxRetainedFrames = 16;
-    private const long RetainedByteBudget = 24L * 1024 * 1024;
+    private const long RetainedByteBudget = 8L * 1024 * 1024;
 
     private static readonly TimeSpan FailedRetryAge =
         TimeSpan.FromSeconds(30);

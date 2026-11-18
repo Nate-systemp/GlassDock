@@ -46,11 +46,20 @@ public sealed partial class SettingsWindow
         PreviewHost.SizeChanged += (_, _) => { if (shellReady) UpdateDockPreview(); };
         foreach (var page in SettingsCatalog.Pages)
         {
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-            content.Children.Add(new FontIcon { Glyph = page.Glyph, FontSize = 18 });
-            content.Children.Add(new TextBlock { Text = page.Title, VerticalAlignment = VerticalAlignment.Center });
+            if (page.Id is "General" or "System")
+                NavigationItems.Children.Add(new TextBlock
+                {
+                    Text = page.Id == "General" ? "Preferences" : "Doky and Windows",
+                    FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush("SecondaryBrush"),
+                    Margin = new(12, page.Id == "General" ? 0 : 10, 0, 4)
+                });
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+            content.Children.Add(new FontIcon { Glyph = page.Glyph, FontSize = 16, Width = 20,
+                FontFamily = new FontFamily("Segoe Fluent Icons"), IsHitTestVisible = false });
+            content.Children.Add(new TextBlock { Text = page.Title, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
             var button = new Button { Content = content, Tag = page.Id, HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new(12,11,12,11), BorderThickness = new(0), CornerRadius = new(9) };
+                HorizontalContentAlignment = HorizontalAlignment.Left, MinHeight = 36, Padding = new(12, 7, 12, 7),
+                BorderThickness = new(0), CornerRadius = new(8) };
             AutomationProperties.SetName(button, page.Title);
             button.Click += NavigationClick; navigation[page.Id] = button; NavigationItems.Children.Add(button);
         }
@@ -119,7 +128,7 @@ public sealed partial class SettingsWindow
 
     private void SettingsVisibilityChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
     {
-        if (args.DidVisibilityChange) glassPreview?.SetVisible(sender.IsVisible);
+        if (args.DidVisibilityChange) glassPreview?.SetVisible(sender.IsVisible && selectedPage == "Appearance");
     }
 
     private void AddSettingSlider(NumberBox box)
@@ -170,13 +179,14 @@ public sealed partial class SettingsWindow
         var mode = settingsSession.Current.UtilityTheme == UtilityTheme.Light ? DockAppearanceMode.Light : DockAppearanceMode.Dark;
         var light = mode == DockAppearanceMode.Light;
         SettingsRoot.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
-        Brush("PrimaryBrush").Color = DockControlPalette.Foreground(mode);
-        Brush("SecondaryBrush").Color = light ? Color.FromArgb(255,84,77,68) : Color.FromArgb(255,190,199,211);
-        Brush("ShellBrush").Color = DockControlPalette.SolidSurface(mode);
-        Brush("SidebarBrush").Color = light ? Color.FromArgb(70,255,255,255) : Color.FromArgb(35,12,19,29);
-        Brush("CardBrush").Color = light ? Color.FromArgb(115,255,255,255) : Color.FromArgb(65,53,68,89);
-        Brush("DividerBrush").Color = DockControlPalette.Surface(mode, light ? (byte)38 : (byte)32);
-        Brush("SelectionBrush").Color = light ? Color.FromArgb(65,85,126,180) : Color.FromArgb(95,52,100,161);
+        Brush("PrimaryBrush").Color = light ? Color.FromArgb(255, 28, 36, 47) : Color.FromArgb(255, 244, 246, 250);
+        Brush("SecondaryBrush").Color = light ? Color.FromArgb(255, 77, 90, 107) : Color.FromArgb(255, 179, 192, 208);
+        Brush("ShellBrush").Color = light ? Color.FromArgb(255, 246, 248, 251) : Color.FromArgb(255, 23, 28, 36);
+        Brush("SidebarBrush").Color = light ? Color.FromArgb(255, 236, 241, 247) : Color.FromArgb(255, 29, 36, 46);
+        Brush("CardBrush").Color = light ? Colors.White : Color.FromArgb(255, 34, 43, 55);
+        Brush("DividerBrush").Color = light ? Color.FromArgb(255, 217, 225, 235) : Color.FromArgb(255, 61, 76, 94);
+        Brush("SelectionBrush").Color = light ? Color.FromArgb(255, 219, 234, 252) : Color.FromArgb(255, 37, 56, 77);
+        Brush("AccentTextBrush").Color = light ? Color.FromArgb(255, 16, 72, 133) : Color.FromArgb(255, 167, 206, 255);
         ClearMaterialNote.Visibility = glassDraft.Mode == DockAppearanceMode.Clear ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (value, button) in appearanceButtons)
         {

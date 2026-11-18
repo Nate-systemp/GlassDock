@@ -103,7 +103,16 @@ internal sealed class HomeAppStrip
             row.ColumnDefinitions[i].Width = i < capacity ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
             var app = i < capacity ? apps.ElementAtOrDefault(page * capacity + i) : null;
             buttons[i].Tag = app; buttons[i].Visibility = app is null ? Visibility.Collapsed : Visibility.Visible;
-            if (app is null) continue;
+            if (app is null)
+            {
+                if (renderedIcons[i] is { } previousIcon &&
+                    !apps.Any(current => ReferenceEquals(current.Icon, previousIcon)))
+                {
+                    renderedIcons[i] = null;
+                    icons[i].SetIcon(null);
+                }
+                continue;
+            }
             labels[i].Text = app.Name;
             AutomationProperties.SetName(buttons[i], app.Name);
             ToolTipService.SetToolTip(buttons[i], app.Name);

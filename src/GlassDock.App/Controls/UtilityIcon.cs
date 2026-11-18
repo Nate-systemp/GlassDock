@@ -14,6 +14,7 @@ internal sealed class UtilityIcon : Grid
 {
     private readonly Image image = new() { Stretch = Stretch.Uniform, IsHitTestVisible = false };
     private readonly TextBlock fallback = new() { Text = "?", HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Center, VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center };
+    private SolidColorBrush? fallbackBrush;
     private readonly Dictionary<string, SvgImageSource> sources = [];
     private readonly Dictionary<string, string> originals = [];
     private int revision;
@@ -55,10 +56,13 @@ internal sealed class UtilityIcon : Grid
     public async Task SetAsync(string icon, bool active, uint color, TimeSpan? colorTransitionDuration = null)
     {
         var current = ++revision;
-        fallback.Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255,
-            (byte)(color >> 16), (byte)(color >> 8), (byte)color));
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", "Utilities", active ? "Fill" : "Regular", icon + (active ? "-fill" : "") + ".svg");
         var key = path + color;
+        if (displayedKey == key) return;
+        fallbackBrush ??= new SolidColorBrush();
+        fallbackBrush.Color = global::Windows.UI.Color.FromArgb(255,
+            (byte)(color >> 16), (byte)(color >> 8), (byte)color);
+        fallback.Foreground = fallbackBrush;
         try
         {
             if (!sources.TryGetValue(key, out var source))
@@ -73,7 +77,6 @@ internal sealed class UtilityIcon : Grid
                 sources[key] = source;
             }
             if (current != revision) return;
-            if (displayedKey == key) return;
             var oldSource = image.Source;
             StopColorTransition();
             image.Source = source; fallback.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;

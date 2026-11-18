@@ -1,0 +1,212 @@
+{
+  "ApplicationShutdownState.cs": {
+    "mtime": 1794786713.4507754,
+    "seen": 1795010535.1169455,
+    "ast_hash": "67e496c8fe95bf5928141d843a4e0a9f",
+    "semantic_hash": "67e496c8fe95bf5928141d843a4e0a9f"
+  },
+  "BluetoothDeviceInfo.cs": {
+    "mtime": 1794786713.4724493,
+    "seen": 1795010535.1169455,
+    "ast_hash": "f163bb699bebf158c02c4a6e817e4959",
+    "semantic_hash": "f163bb699bebf158c02c4a6e817e4959"
+  },
+  "BluetoothListGeometry.cs": {
+    "mtime": 1794786713.4763334,
+    "seen": 1795010535.1169455,
+    "ast_hash": "afdac6dfdda484185cb6c499f5cf7739",
+    "semantic_hash": "afdac6dfdda484185cb6c499f5cf7739"
+  },
+  "CaptureDrawGate.cs": {
+    "mtime": 1794786713.4800785,
+    "seen": 1795010535.1169455,
+    "ast_hash": "c87f43aca14ada784edc005d93cbf9e5",
+    "semantic_hash": "c87f43aca14ada784edc005d93cbf9e5"
+  },
+  "DesktopPlacement.cs": {
+    "mtime": 1789124852.8311718,
+    "seen": 1795010535.1169455,
+    "ast_hash": "83477d8cba19a2400bb0dc6b5aec2284",
+    "semantic_hash": "83477d8cba19a2400bb0dc6b5aec2284"
+  },
+  "DockEdgeSlice.cs": {
+    "mtime": 1794786713.485389,
+    "seen": 1795010535.1169455,
+    "ast_hash": "d7c7523a329272b5cf1a7e270a03ac49",
+    "semantic_hash": "d7c7523a329272b5cf1a7e270a03ac49"
+  },
+  "DockHoverMagnification.cs": {
+    "mtime": 1794786713.4925902,
+    "seen": 1795010535.1169455,
+    "ast_hash": "161c66f602532a7f685f1357a11f8b28",
+    "semantic_hash": "161c66f602532a7f685f1357a11f8b28"
+  },
+  "DockIconMotion.cs": {
+    "mtime": 1794786713.4972045,
+    "seen": 1795010535.1169455,
+    "ast_hash": "1b2852dd19b15e79ab3615a16e69b70f",
+    "semantic_hash": "1b2852dd19b15e79ab3615a16e69b70f"
+  },
+  "DockKeyboardShortcut.cs": {
+    "mtime": 1794786713.5016942,
+    "seen": 1795010535.1169455,
+    "ast_hash": "b0593b588986408c059734565e8e57b0",
+    "semantic_hash": "b0593b588986408c059734565e8e57b0"
+  },
+  "DockPerformanceDiagnostics.cs": {
+    "mtime": 1794786713.5133376,
+    "seen": 1795010535.1169455,
+    "ast_hash": "2a2cb13b18932a36650304c283dec04c",
+    "semantic_hash": "2a2cb13b18932a36650304c283dec04c"
+  },
+  "DockRelocationGuard.cs": {
+    "mtime": 1794786713.5184684,
+    "seen": 1795010535.1169455,
+    "ast_hash": "f8254a81c3ba35505a912f2989fdbb93",
+    "semantic_hash": "f8254a81c3ba35505a912f2989fdbb93"
+  },
+  "DockSizing.cs": {
+    "mtime": 1794786713.5222223,
+    "seen": 1795010535.1169455,
+    "ast_hash": "b9364c77bb78e43a389ade6957b8dac0",
+    "semantic_hash": "b9364c77bb78e43a389ade6957b8dac0"
+  },
+  "DockStateMachine.cs": {
+    "mtime": 1794786713.5268092,
+    "seen": 1795010535.1169455,
+    "ast_hash": "aa675fabd3ef1eac682239dbcd32f362",
+    "semantic_hash": "aa675fabd3ef1eac682239dbcd32f362"
+  },
+  "DockTransitionGeometry.cs": {
+    "mtime": 1794786713.5313425,
+    "seen": 1795010535.1169455,
+    "ast_hash": "bfe1a5ea37df35684c680e8d286977ae",
+    "semantic_hash": "bfe1a5ea37df35684c680e8d286977ae"
+  },
+  "DockTransitionTiming.cs": {
+    "mtime": 1794786713.5361357,
+    "seen": 1795010535.1169455,
+    "ast_hash": "207379c187d94bc37e1a4ccbdf7a7134",
+    "semantic_hash": "207379c187d94bc37e1a4ccbdf7a7134"
+  },
+  "DockWaveGeometry.cs": {
+    "mtime": 1794786713.541395,
+    "seen": 1795010535.1169455,
+    "ast_hash": "d142b08e83be3216bff5a0251a6c6cc1",
+    "semantic_hash": "d142b08e83be3216bff5a0251a6c6cc1"
+  },
+  "DragLensMotion.cs": {
+    "mtime": 1794786713.5525415,
+    "seen": 1795010535.1169455,
+    "ast_hash": "6c40fd5a6e7744027a4998293ab71f06",
+    "semantic_hash": "6c40fd5a6e7744027a4998293ab71f06"
+  },
+  "FullscreenPolicy.cs": {
+    "mtime": 1791524604.5938869,
+    "seen": 1795010535.1169455,
+    "ast_hash": "1ce5dbfa5301c2fe17a03457e86b067b",
+    "semantic_hash": "1ce5dbfa5301c2fe17a03457e86b067b"
+  },
+  "GlassHomeSession.cs": {
+    "mtime": 1794786713.5588527,
+    "seen": 1795010535.1169455,
+    "ast_hash": "b6c018774caad0599e9105acff693bb7",
+    "semantic_hash": "b6c018774caad0599e9105acff693bb7"
+  },
+  "HomeDashboardLayout.cs": {
+    "mtime": 1794786713.566972,
+    "seen": 1795010535.1169455,
+    "ast_hash": "925f4e0158ff4535cb24bc48f3f75ce1",
+    "semantic_hash": "925f4e0158ff4535cb24bc48f3f75ce1"
+  },
+  "IKeyboardService.cs": {
+    "mtime": 1789389019.7708814,
+    "seen": 1795010535.1169455,
+    "ast_hash": "b34e590c2c28c3fc17a9333b515e3460",
+    "semantic_hash": "b34e590c2c28c3fc17a9333b515e3460"
+  },
+  "ITaskbarController.cs": {
+    "mtime": 1789161676.6698985,
+    "seen": 1795010535.1169455,
+    "ast_hash": "db34dee9face4170d09485d33a38d16d",
+    "semantic_hash": "db34dee9face4170d09485d33a38d16d"
+  },
+  "InputLifecycleRecoveryGate.cs": {
+    "mtime": 1794786713.5707788,
+    "seen": 1795010535.1169455,
+    "ast_hash": "8990d28145beec1c75bd0efcaebe42e8",
+    "semantic_hash": "8990d28145beec1c75bd0efcaebe42e8"
+  },
+  "InputSignalMailbox.cs": {
+    "mtime": 1794786713.5760908,
+    "seen": 1795010535.1169455,
+    "ast_hash": "4cce423d70c591410e604203e7c5071d",
+    "semantic_hash": "4cce423d70c591410e604203e7c5071d"
+  },
+  "RetainedWindowSlot.cs": {
+    "mtime": 1794786713.5806248,
+    "seen": 1795010535.1169455,
+    "ast_hash": "30805491da1765545c1fa29331ddacd7",
+    "semantic_hash": "30805491da1765545c1fa29331ddacd7"
+  },
+  "TaskbarLease.cs": {
+    "mtime": 1794786713.5851996,
+    "seen": 1795010535.1169455,
+    "ast_hash": "f42ebb09d099253e98e449cf2f5e08d2",
+    "semantic_hash": "f42ebb09d099253e98e449cf2f5e08d2"
+  },
+  "UtilityHudBounce.cs": {
+    "mtime": 1794786713.5904958,
+    "seen": 1795010535.1169455,
+    "ast_hash": "193125baf87dc0c24d4dd34dfce787d7",
+    "semantic_hash": "193125baf87dc0c24d4dd34dfce787d7"
+  },
+  "UtilityPlacement.cs": {
+    "mtime": 1793682411.1354585,
+    "seen": 1795010535.1169455,
+    "ast_hash": "8b4ca422d4c2c8860db4e04019e3eeab",
+    "semantic_hash": "8b4ca422d4c2c8860db4e04019e3eeab"
+  },
+  "UtilityPointerGesture.cs": {
+    "mtime": 1794786713.5999594,
+    "seen": 1795010535.1169455,
+    "ast_hash": "dab52e6a8c91a75679f2fa0d2dd81ed2",
+    "semantic_hash": "dab52e6a8c91a75679f2fa0d2dd81ed2"
+  },
+  "VolumeHudPlacement.cs": {
+    "mtime": 1794786713.60685,
+    "seen": 1795010535.1169455,
+    "ast_hash": "d5da1068ea507cc0e4bce21c850b662b",
+    "semantic_hash": "d5da1068ea507cc0e4bce21c850b662b"
+  },
+  "VolumeHudState.cs": {
+    "mtime": 1794786713.610605,
+    "seen": 1795010535.1169455,
+    "ast_hash": "ec0e134875ce81762c6ddbe14aa02108",
+    "semantic_hash": "ec0e134875ce81762c6ddbe14aa02108"
+  },
+  "WifiNetworkCaption.cs": {
+    "mtime": 1793861653.0880427,
+    "seen": 1795010535.1169455,
+    "ast_hash": "5ef18622f94fa7445928b773860662f2",
+    "semantic_hash": "5ef18622f94fa7445928b773860662f2"
+  },
+  "WifiProfile.cs": {
+    "mtime": 1794786713.6157675,
+    "seen": 1795010535.1169455,
+    "ast_hash": "82f19793f87bf53ec1dbe52242808b4a",
+    "semantic_hash": "82f19793f87bf53ec1dbe52242808b4a"
+  },
+  "WifiScrollGeometry.cs": {
+    "mtime": 1794786713.6195195,
+    "seen": 1795010535.1169455,
+    "ast_hash": "6a4ef260295d3e57f7af6fd421098189",
+    "semantic_hash": "6a4ef260295d3e57f7af6fd421098189"
+  },
+  "WindowsKeyGesture.cs": {
+    "mtime": 1794786713.6251,
+    "seen": 1795010535.1169455,
+    "ast_hash": "ad733c5c6eb2d9348319f2c7944a9012",
+    "semantic_hash": "ad733c5c6eb2d9348319f2c7944a9012"
+  }
+}

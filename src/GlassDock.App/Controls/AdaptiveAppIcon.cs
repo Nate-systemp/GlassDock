@@ -209,6 +209,8 @@ internal sealed class AdaptiveAppIcon : Grid
     public void SetIcon(ApplicationIcon? icon)
     {
         icon = ApplicationIconFallback.Visible(icon);
+        // Stack layers set their tile opacity after the constructor's fallback icon.
+        if (!isStackLayer && ReferenceEquals(original, icon)) { Fit(); return; }
         image.Source = null;
         original = null;
         rasterWidth = rasterHeight = 0;

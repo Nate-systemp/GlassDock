@@ -54,6 +54,11 @@ public sealed class WindowsOverlayManager : IDisposable
     {
         if (!NativeMethods.IsWindow(hwnd)) return;
         var foreground = NativeMethods.GetForegroundWindow();
+        // A nonactivating HUD is an overlay, not a switch away from the fullscreen app.
+        var nonActivating = foreground != 0 &&
+            (NativeMethods.GetWindowLongPtr(foreground, -20).ToInt64() & 0x08000000L) != 0 &&
+            !InteractiveGlassWindowHost.IsScreenshotWindow(foreground);
+        foreground = FullscreenPolicy.ForegroundWindow(foreground, lastForegroundWindow, nonActivating);
         var suppressed = false;
         if (foreground != 0 && foreground != hwnd)
         {
@@ -74,7 +79,8 @@ public sealed class WindowsOverlayManager : IDisposable
                 lastForegroundEligible = eligible;
             }
 
-            if (eligible && !NativeMethods.IsIconic(foreground) && NativeMethods.GetWindowRect(foreground, out var bounds))
+            if (eligible && NativeMethods.IsWindowVisible(foreground) &&
+                !NativeMethods.IsIconic(foreground) && NativeMethods.GetWindowRect(foreground, out var bounds))
             {
                 nint monitor;
                 NativeMethods.Rect monitorBounds;

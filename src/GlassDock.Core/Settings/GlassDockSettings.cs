@@ -62,6 +62,7 @@ public sealed record GlassDockSettings
     public UtilityTheme UtilityTheme { get; init; } = UtilityTheme.Dark;
     public UtilityDisplayMode UtilityDisplayMode { get; init; } = UtilityDisplayMode.Individual;
     public bool SuppressNativeVolumeOsd { get; init; }
+    public bool ShowMusicControlPill { get; init; }
     public bool LaunchAtStartup { get; init; } = DefaultLaunchAtStartup;
     public bool NotificationBadgesEnabled { get; init; } = DefaultNotificationBadgesEnabled;
     public bool SuppressWindowsTaskbar { get; init; } = true;

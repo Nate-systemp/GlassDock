@@ -64,6 +64,20 @@ public sealed class CoreDockBehaviorTests
         Assert.Equal(expected, FullscreenPolicy.CoversMonitor(eligible, same, minimized, -1920, top, 0, bottom, -1920, 0, 0, 1080));
 
     [Fact]
+    public void Nonactivating_hud_preserves_fullscreen_target_until_a_real_foreground_change()
+    {
+        nint fullscreen = 10, hud = 20, desktop = 30;
+        var target = FullscreenPolicy.ForegroundWindow(fullscreen, 0, false);
+        target = FullscreenPolicy.ForegroundWindow(hud, target, true);
+        Assert.Equal(fullscreen, target);
+        Assert.Equal(fullscreen, FullscreenPolicy.ForegroundWindow(0, target, false));
+        target = FullscreenPolicy.ForegroundWindow(desktop, target, false);
+        Assert.Equal(desktop, target);
+        Assert.Equal(desktop, FullscreenPolicy.ForegroundWindow(hud, target, true));
+        Assert.Equal((nint)0, FullscreenPolicy.ForegroundWindow(hud, 0, true));
+    }
+
+    [Fact]
     public void Fullscreen_entry_exit_does_not_change_logical_state()
     {
         var state = new DockStateMachine(); state.Show(); state.Complete(state.Expand());

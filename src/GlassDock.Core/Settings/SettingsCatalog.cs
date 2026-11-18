@@ -10,21 +10,23 @@ public static class SettingsCatalog
 {
     public static IReadOnlyList<SettingsPageEntry> Pages { get; } = Array.AsReadOnly(new[]
     {
-        new SettingsPageEntry("General", "General", "\uE80F"),
+        new SettingsPageEntry("General", "General", "\uE713"),
         new SettingsPageEntry("Appearance", "Appearance", "\uE790"),
         new SettingsPageEntry("Dock", "Dock", "\uE737"),
         new SettingsPageEntry("Apps", "Apps & Stacks", "\uE8F1"),
-        new SettingsPageEntry("Utilities", "Add Utilities", "\uE713"),
-        new SettingsPageEntry("Behavior", "Behavior", "\uE713"),
+        new SettingsPageEntry("Utilities", "Add Utilities", "\uE710"),
+        new SettingsPageEntry("Behavior", "Behavior", "\uE7AD"),
         new SettingsPageEntry("Displays", "Displays", "\uE7F4"),
-        new SettingsPageEntry("System", "System", "\uE80A"),
+        new SettingsPageEntry("System", "System", "\uE83D"),
         new SettingsPageEntry("Advanced", "Advanced", "\uE90F"),
         new SettingsPageEntry("About", "About", "\uE946")
     });
 
     public static IReadOnlyList<SettingsSearchEntry> Options { get; } = Array.AsReadOnly(new[]
     {
-        new SettingsSearchEntry("Utilities", "Add Utilities", "UtilitiesGrid", "wifi wi-fi bluetooth battery independent circles"),
+        new SettingsSearchEntry("Utilities", "Add Utilities", "UtilitiesGrid", "wifi wi-fi bluetooth battery music playback brightness sound"),
+        new SettingsSearchEntry("Utilities", "Settings and utility theme", "UtilityThemeBox", "dark light theme"),
+        new SettingsSearchEntry("Utilities", "Doky volume popup", "NativeVolumeOsdToggle", "native windows sound hud osd media keys"),
         new SettingsSearchEntry("Utilities", "Utility display mode", "UtilityDisplayModeBox", "quick settings grid individual utilities"),
         new SettingsSearchEntry("General", "Start with Windows", "LaunchAtStartupToggle", "startup login launch"),
         new SettingsSearchEntry("Appearance", "Appearance mode", "AppearanceTiles", "dark light frosted clear liquid glass theme"),
@@ -38,11 +40,11 @@ public static class SettingsCatalog
         new SettingsSearchEntry("Dock", "Magnification", "MagnificationScaleBox", "hover zoom grow"),
         new SettingsSearchEntry("Dock", "Icon spacing", "IconSpacingBox", "gap layout"),
         new SettingsSearchEntry("Behavior", "Pin dock", "PinDockToggle", "keep expanded visible appbar work area"),
-        new SettingsSearchEntry("Behavior", "Dock size", "DockSizeBox", "70 80 compact 100 scale"),
+        new SettingsSearchEntry("Dock", "Dock size", "DockSizeBox", "70 80 compact 100 scale"),
         new SettingsSearchEntry("Behavior", "Pinned placement", "PinnedPlacementBox", "floating bottom attached"),
         new SettingsSearchEntry("Behavior", "Floating gap", "FloatingDockGapBox", "bottom margin reservation"),
-        new SettingsSearchEntry("Dock", "Auto-hide delay", "AutoHideDelayBox", "collapse hide"),
-        new SettingsSearchEntry("Dock", "Peek delay", "PeekDelayBox", "indicator hide"),
+        new SettingsSearchEntry("Behavior", "Auto-hide delay", "AutoHideDelayBox", "collapse hide"),
+        new SettingsSearchEntry("Behavior", "Peek delay", "PeekDelayBox", "indicator hide"),
         new SettingsSearchEntry("Apps", "Stacks", "StackHelp", "stack unstack folder pinned reorder"),
         new SettingsSearchEntry("Apps", "Notification badges", "NotificationBadgesToggle", "unread notifications count access"),
         new SettingsSearchEntry("Behavior", "Hover wave", "HoverWaveToggle", "animation pointer"),

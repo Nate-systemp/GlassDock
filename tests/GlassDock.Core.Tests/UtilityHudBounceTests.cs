@@ -6,6 +6,18 @@ namespace GlassDock.Core.Tests;
 public sealed class UtilityHudBounceTests
 {
     [Fact]
+    public void Slow_bounce_keeps_its_timing_through_key_release()
+    {
+        var bounce = new UtilityHudBounce(.6);
+        bounce.Start(0, true, duration: 750);
+        Assert.Equal(.6, bounce.Sample(900), 6);
+        bounce.Release(900);
+        Assert.Equal(.8, bounce.Sample(1050), 6);
+        Assert.Equal(1, bounce.Sample(1200));
+        Assert.False(bounce.Active);
+    }
+
+    [Fact]
     public void Early_release_finishes_the_whole_bounce()
     {
         var bounce = new UtilityHudBounce(.6);

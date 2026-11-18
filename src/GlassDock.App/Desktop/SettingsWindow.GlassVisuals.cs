@@ -68,7 +68,7 @@ public sealed partial class SettingsWindow
 
     private void BuildGlassEditor()
     {
-        var view = new ComboBox { Header = "Detail", ItemsSource = new[] { "Basic", "Advanced" }, SelectedIndex = 0 };
+        var view = new ComboBox { Header = "Controls", ItemsSource = new[] { "Essentials", "Advanced" }, SelectedIndex = 0 };
         view.SelectionChanged += (_, _) => { advancedGlass = view.SelectedIndex == 1; RefreshGlassRows(); };
         GlassControls.Children.Add(view);
         GlassControls.Children.Add(glassPresetBox);
@@ -205,7 +205,8 @@ public sealed partial class SettingsWindow
         {
             var section = new StackPanel { Spacing = 8 };
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-            header.Children.Add(new TextBlock { Text = group.Key, FontSize = 17, VerticalAlignment = VerticalAlignment.Center });
+            header.Children.Add(new TextBlock { Text = group.Key == "Figma Glass" ? "Glass and lighting" : group.Key,
+                FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             var reset = new Button { Content = "Reset", IsEnabled = !inherited };
             reset.Click += (_, _) =>
             {
@@ -221,32 +222,47 @@ public sealed partial class SettingsWindow
                 var row = new Grid { ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new() { Width = new(62) });
+                row.ColumnDefinitions.Add(new() { Width = new(76) });
                 var label = new TextBlock { Text = control.Label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
                 ToolTipService.SetToolTip(label, control.Description);
                 row.Children.Add(label);
                 var maximum = glassTarget == "indicators" && control.Id == "CornerRadius" ? 2.25 :
                     glassTarget == "indicators" && control.Id == "EdgeWidth" ? 1.5 : control.Maximum;
                 var slider = new Slider { Minimum = control.Minimum, Maximum = maximum,
-                    StepFrequency = control.Id == "BlurQuality" ? 1 : control.Maximum > 10 ? .5 : .01,
+                    StepFrequency = control.Id switch
+                    {
+                        "BlurQuality" or "SpecularAngleDegrees" => 1,
+                        "BlurAmount" or "CornerRadius" => .5,
+                        _ => control.Maximum > 10 ? .25 : .01
+                    },
                     Value = Math.Min(maximum, control.Read(TargetGlass)), IsEnabled = !inherited && SupportsTarget(control) };
                 AutomationProperties.SetName(slider, control.Label);
                 AutomationProperties.SetHelpText(slider, control.Description);
                 ToolTipService.SetToolTip(slider, control.Description);
-                var number = new TextBlock { Text = slider.Value.ToString("0.##"), VerticalAlignment = VerticalAlignment.Center };
+                var number = new TextBlock { Text = FormatGlassValue(control.Id, slider.Value), VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Right, Foreground = Brush("SecondaryBrush") };
                 slider.ValueChanged += (_, _) =>
                 {
                     if (refreshingGlass) return;
-                    number.Text = slider.Value.ToString("0.##");
+                    number.Text = FormatGlassValue(control.Id, slider.Value);
                     WriteTargetGlass(control.Write(TargetGlass, (float)slider.Value));
                 };
                 Grid.SetColumn(slider, 1); Grid.SetColumn(number, 2);
                 row.Children.Add(slider); row.Children.Add(number); section.Children.Add(row);
             }
-            glassRows.Children.Add(section);
+            glassRows.Children.Add(new Border { Style = (Style)SettingsRoot.Resources["SectionCardStyle"], Child = section });
         }
         refreshingGlass = false;
     }
+
+    private static string FormatGlassValue(string control, double value) => control switch
+    {
+        "BlurQuality" => value < .5 ? "Fast" : value < 1.5 ? "Balanced" : "Quality",
+        "SpecularAngleDegrees" => $"{value:0.#}°",
+        "SurfaceOpacity" or "MaterialBlend" or "EdgeOpacity" => value.ToString("P0"),
+        "BlurAmount" or "CornerRadius" or "EdgeThickness" or "EdgeWidth" or "HighlightWidth" => $"{value:0.##} DIP",
+        _ => value.ToString("0.##")
+    };
 
     private async Task<string?> GlassPresetNameAsync(string title, string initial)
     {

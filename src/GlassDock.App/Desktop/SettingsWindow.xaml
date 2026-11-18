@@ -7,13 +7,35 @@
       <SolidColorBrush x:Key="SidebarBrush" Color="#18202020" />
       <SolidColorBrush x:Key="CardBrush" Color="#183F5068" />
       <SolidColorBrush x:Key="DividerBrush" Color="#22FFFFFF" />
-      <SolidColorBrush x:Key="SelectionBrush" Color="#334C9AFF" />
+      <SolidColorBrush x:Key="SelectionBrush" Color="#FF25384D" />
+      <SolidColorBrush x:Key="AccentTextBrush" Color="#FFA7CEFF" />
+      <FontFamily x:Key="SettingsTextFont">Segoe UI Variable Text</FontFamily>
+      <Style x:Key="PageTitleStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Segoe UI Variable Display" />
+        <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" />
+        <Setter Property="FontSize" Value="32" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+      </Style>
+      <Style x:Key="SectionCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource CardBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="18,16" />
+      </Style>
+      <Style TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource SettingsTextFont}" />
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="CornerRadius" Value="8" />
+      </Style>
       <Style TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource SettingsTextFont}" />
         <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" />
       </Style>
     </Grid.Resources>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="224" />
+      <ColumnDefinition Width="216" />
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
@@ -24,38 +46,31 @@
     <Border x:Name="ShellSurface" Grid.ColumnSpan="2" Grid.RowSpan="3" Background="{StaticResource ShellBrush}" />
     <Grid x:Name="SettingsTitleBar" Grid.ColumnSpan="2" Background="Transparent" />
     <Border Grid.Row="1" Grid.RowSpan="2" Background="{StaticResource SidebarBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
-      <Grid Padding="14,22,14,12">
+      <Grid Padding="12,16,12,12">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <StackPanel Orientation="Horizontal" Spacing="10" Margin="8,0,0,22">
-          <Image Source="ms-appx:///Assets/Doky.png" Width="32" Height="32" AutomationProperties.Name="Doky logo" />
-          <TextBlock Text="Doky" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
-          <TextBlock Text="Settings" Foreground="{StaticResource SecondaryBrush}" VerticalAlignment="Center" />
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="8,0,0,18">
+          <Image Source="ms-appx:///Assets/Doky.png" Width="28" Height="28" AutomationProperties.AccessibilityView="Raw" />
+          <StackPanel>
+            <TextBlock Text="Doky" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="Settings" FontSize="12" Foreground="{StaticResource SecondaryBrush}" />
+          </StackPanel>
         </StackPanel>
-        <AutoSuggestBox x:Name="SettingsSearch" Grid.Row="1" PlaceholderText="Search settings…" QueryIcon="Find" AutomationProperties.Name="Search settings" TextChanged="SearchSettingsChanged" SuggestionChosen="SearchSettingChosen" QuerySubmitted="SearchSettingSubmitted" Margin="0,0,0,18" />
-        <StackPanel x:Name="NavigationItems" Grid.Row="2" Spacing="4" />
+        <AutoSuggestBox x:Name="SettingsSearch" Grid.Row="1" PlaceholderText="Search settings…" QueryIcon="Find" AutomationProperties.Name="Search settings" TextChanged="SearchSettingsChanged" SuggestionChosen="SearchSettingChosen" QuerySubmitted="SearchSettingSubmitted" Margin="0,0,0,12" />
+        <StackPanel x:Name="NavigationItems" Grid.Row="2" Spacing="2" />
       </Grid>
     </Border>
-    <Grid Grid.Row="1" Grid.Column="1">
-      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-          <Border x:Name="StickyGlassPreview" Padding="14" Margin="28,12,28,0" CornerRadius="18" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1">
-            <StackPanel Spacing="6">
-              <TextBlock Text="Live Dock Preview" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
-              <TextBlock Text="Sample background. Changes stay in preview until Apply." Foreground="{StaticResource SecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
-              <Grid x:Name="PreviewHost" Height="140" />
-            </StackPanel>
-          </Border>
-    <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-      <Grid x:Name="PageHost" Padding="28,24,28,24" MaxWidth="1000" HorizontalAlignment="Stretch">
-        <StackPanel x:Name="GeneralPage" Spacing="24" Visibility="Collapsed">
+    <ScrollViewer x:Name="PageScroll" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid x:Name="PageHost" Padding="32,26,32,32" MaxWidth="900" HorizontalAlignment="Stretch">
+        <StackPanel x:Name="GeneralPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="General" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="General" Style="{StaticResource PageTitleStyle}" />
             <TextBlock Text="Make Doky part of your everyday desktop." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <Grid ColumnSpacing="24">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -63,54 +78,87 @@
               </Grid.ColumnDefinitions>
               <StackPanel Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="Start Doky when I sign in" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                <TextBlock Text="Uses your Windows user startup registration. Doky also prevents duplicate dock instances." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                <TextBlock Text="Open the dock automatically after you sign in to Windows." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
               </StackPanel>
               <ToggleSwitch x:Name="LaunchAtStartupToggle" Grid.Column="1" VerticalAlignment="Center" AutomationProperties.Name="Start Doky when I sign in" />
             </Grid>
           </Border>
           <StackPanel x:Name="GeneralHelp" Spacing="8">
-            <TextBlock Text="One Doky, your configuration" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Saved on this device" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Your pinned apps, stacks, ordering and appearance are restored from your existing profile." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
         </StackPanel>
-        <StackPanel x:Name="AppearancePage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="AppearancePage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Appearance" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="Customize how Doky looks and feels on your desktop." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="Appearance" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Choose a dock material and fine-tune its finish." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
 
-          <Grid x:Name="AppearanceTiles" ColumnSpacing="8" />
+          <TextBlock Text="Dock material" FontSize="17" FontWeight="SemiBold" />
+          <Grid x:Name="AppearanceTiles" ColumnSpacing="10" />
           <TextBlock x:Name="DockAppearanceDescription" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           <TextBlock x:Name="ClearMaterialNote" Text="Settings uses its own Light/Dark theme while your dock keeps its Clear refraction." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" Visibility="Collapsed" />
-          <StackPanel x:Name="GlassControls" Spacing="14" />
+          <Border Style="{StaticResource SectionCardStyle}">
+            <StackPanel Spacing="6">
+              <TextBlock Text="Live preview" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="Preview on a sample background. Select Apply appearance to save." FontSize="13"
+                         Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+              <Grid x:Name="PreviewHost" Height="140" />
+            </StackPanel>
+          </Border>
+          <StackPanel x:Name="GlassControls" Spacing="16" />
           <StackPanel Orientation="Horizontal" Spacing="20">
             <ToggleSwitch x:Name="CircularHighlightsToggle" Header="Native rim highlights" OnContent="On" OffContent="Off" />
             <ToggleSwitch x:Name="ClearCircularHighlightsToggle" Header="Clear rim highlights" OnContent="On" OffContent="Off" />
           </StackPanel>
         </StackPanel>
         <StackPanel x:Name="UtilitiesPage" Spacing="20" Visibility="Collapsed">
-          <TextBlock Text="Add Utilities" FontSize="28" FontWeight="SemiBold" />
-          <TextBlock Text="Choose independent circles beside your dock. Nothing is added until you select it." TextWrapping="Wrap" />
-          <ComboBox x:Name="UtilityDisplayModeBox" Header="Utility display mode" SelectionChanged="UtilityDisplayModeChanged">
-            <ComboBoxItem Content="Individual" /><ComboBoxItem Content="Grid" />
-          </ComboBox>
-          <ComboBox x:Name="UtilityThemeBox" Header="Settings and utility appearance" SelectionChanged="UtilityThemeChanged">
-            <ComboBoxItem Content="Dark" /><ComboBoxItem Content="Light" />
-          </ComboBox>
-          <ToggleSwitch x:Name="NativeVolumeOsdToggle" Header="Hide Windows volume popup" OffContent="Off" OnContent="On" Toggled="NativeVolumeOsdChanged" />
-          <TextBlock Text="Use Doky's HUD for volume keys. Windows handles keys normally when disabled or audio is unavailable." TextWrapping="Wrap" FontSize="12" />
-          <Grid x:Name="UtilitiesGrid">
-            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
-          </Grid>
-        </StackPanel>
-        <StackPanel x:Name="DockPage" Spacing="24" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Dock" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Add Utilities" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Choose the controls you want beside the dock." FontSize="14" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+          </StackPanel>
+          <Grid x:Name="UtilitiesGrid" ColumnSpacing="10" RowSpacing="10">
+            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+          </Grid>
+          <Border Style="{StaticResource SectionCardStyle}">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Utility preferences" FontSize="17" FontWeight="SemiBold" />
+              <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                <ComboBox x:Name="UtilityDisplayModeBox" Header="Utility layout" HorizontalAlignment="Stretch"
+                          SelectionChanged="UtilityDisplayModeChanged">
+                  <ComboBoxItem Content="Individual pills" /><ComboBoxItem Content="Quick Settings grid" />
+                </ComboBox>
+                <ComboBox x:Name="UtilityThemeBox" Grid.Column="1" Header="Settings and utility theme" HorizontalAlignment="Stretch"
+                          SelectionChanged="UtilityThemeChanged">
+                  <ComboBoxItem Content="Dark" /><ComboBoxItem Content="Light" />
+                </ComboBox>
+              </Grid>
+              <ToggleSwitch x:Name="NativeVolumeOsdToggle" Header="Use Doky’s volume popup" OffContent="Off" OnContent="On" Toggled="NativeVolumeOsdChanged" />
+              <TextBlock Text="Replace the Windows volume popup when using volume keys." TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource SecondaryBrush}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+        <StackPanel x:Name="DockPage" Spacing="20" Visibility="Collapsed">
+          <StackPanel Spacing="5">
+            <TextBlock Text="Dock" Style="{StaticResource PageTitleStyle}" />
             <TextBlock Text="Shape your dock and choose when it stays visible." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="18">
+              <Grid ColumnSpacing="24">
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions>
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Text="Dock size" FontWeight="SemiBold" />
+                  <TextBlock Text="Scale the full dock. Compact (70%) is the default." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox x:Name="DockSizeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" AutomationProperties.Name="Dock size">
+                  <ComboBoxItem Content="Compact (70%)" />
+                  <ComboBoxItem Content="Medium (80%)" />
+                  <ComboBoxItem Content="Full (100%)" />
+                </ComboBox>
+              </Grid>
+              <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
               <TextBlock Text="App icons" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
               <Grid ColumnSpacing="24" x:Name="IconSizeBoxRow">
                 <Grid.ColumnDefinitions>
@@ -119,7 +167,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="3" VerticalAlignment="Center">
                   <TextBlock Text="Icon size" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="Base icon size before hover magnification." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Default: 28 DIP before dock scaling." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
                 <NumberBox x:Name="IconSizeBox" Grid.Column="1" Header="DIP" Minimum="20" Maximum="40" SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Dock icon size" />
               </Grid>
@@ -131,9 +179,9 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="3" VerticalAlignment="Center">
                   <TextBlock Text="Magnification" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="How much icons grow near the pointer." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Default: 1.24×. Set 1.00× for no magnification." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
-                <NumberBox x:Name="MagnificationScaleBox" Grid.Column="1" Header="Scale" Minimum="1" Maximum="1.6" SmallChange="0.05" LargeChange="0.1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Dock icon magnification scale" />
+                <NumberBox x:Name="MagnificationScaleBox" Grid.Column="1" Header="Scale" Minimum="1" Maximum="1.6" SmallChange="0.01" LargeChange="0.1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Dock icon magnification scale" />
               </Grid>
               <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
               <Grid ColumnSpacing="24" x:Name="IconSpacingBoxRow">
@@ -143,62 +191,32 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="3" VerticalAlignment="Center">
                   <TextBlock Text="Icon spacing" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="Space between dock applications." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Default: 6 DIP before dock scaling." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
                 <NumberBox x:Name="IconSpacingBox" Grid.Column="1" Header="DIP" Minimum="0" Maximum="20" SmallChange="1" LargeChange="4" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Spacing between dock icons in device-independent pixels" />
               </Grid>
             </StackPanel>
           </Border>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Spacing="18">
-
-              <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-              <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-              <Grid ColumnSpacing="24">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="180" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="3" VerticalAlignment="Center">
-                  <TextBlock Text="Auto-hide delay" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="Wait before the expanded dock starts collapsing." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-                <NumberBox x:Name="AutoHideDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Auto-hide delay in seconds" />
-              </Grid>
-              <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
-              <Grid ColumnSpacing="24">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="180" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Spacing="3" VerticalAlignment="Center">
-                  <TextBlock Text="Peek delay" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
-                  <TextBlock Text="How long the raised indicator waits before lowering near the edge." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-                <NumberBox x:Name="PeekDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="30" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Peek delay in seconds" />
-              </Grid>
-            </StackPanel>
-          </Border>
         </StackPanel>
-        <StackPanel x:Name="AppsPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="AppsPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Apps &amp; Stacks" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Apps &amp; Stacks" Style="{StaticResource PageTitleStyle}" />
             <TextBlock Text="Organize your applications and keep notifications in view." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel x:Name="StackHelp" Spacing="8">
-            <TextBlock Text="Apps &amp; Stacks" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Pinning and stacks" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Drag an application onto the dock to pin it. Hold a pinned app over another to create a stack. Right-click a stack to unstack all apps. Open a stack to launch or move its members. Pinning, ordering and stack changes are saved automatically." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
           <Border Padding="14" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="12">
             <StackPanel Spacing="10">
               <TextBlock Text="Unavailable pinned shortcuts" FontSize="17" FontWeight="SemiBold" />
-              <TextBlock Text="Missing local shortcuts are hidden from the dock, not deleted. They reappear if their targets return. Show one manually or remove its saved pin here." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+              <TextBlock Text="Shortcuts return when their targets are available. You can also show or remove them here." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
               <TextBlock x:Name="MissingPinsStatusText" Text="Checking saved pins…" FontSize="12" Foreground="{StaticResource SecondaryBrush}" AutomationProperties.LiveSetting="Polite" />
               <StackPanel x:Name="MissingPinsList" Spacing="10" />
               <Button Content="Refresh missing pins" Click="RefreshMissingPinsClick" HorizontalAlignment="Left" Padding="12,6" />
             </StackPanel>
           </Border>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="18">
               <Grid ColumnSpacing="24">
                 <Grid.ColumnDefinitions>
@@ -215,7 +233,7 @@
               <StackPanel Spacing="10">
                 <TextBlock Text="Windows notification access" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
                 <TextBlock x:Name="NotificationStatusText" Text="Notification badges are not enabled." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-                <Button x:Name="NotificationAccessButton" Content="Request / refresh Windows access" Click="RequestNotificationAccessClick" HorizontalAlignment="Left" Padding="14,8" AutomationProperties.Name="Request Windows notification access" />
+                <Button x:Name="NotificationAccessButton" Content="Manage notification access" Click="RequestNotificationAccessClick" HorizontalAlignment="Left" Padding="14,8" AutomationProperties.Name="Request Windows notification access" />
               </StackPanel>
               <Border Padding="14" CornerRadius="10" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1">
                 <TextBlock Text="The current Windows provider reads Notification Center identity/count metadata only; it does not read notification text or remove notifications. Windows may request permission the first time it is enabled." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
@@ -223,11 +241,14 @@
             </StackPanel>
           </Border>
         </StackPanel>
-        <StackPanel x:Name="BehaviorPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="BehaviorPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Behavior" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="Fine-tune how Doky responds to you." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="Behavior" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Choose when the dock opens, stays visible, and hides." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
+          <Border Style="{StaticResource SectionCardStyle}">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Keep the dock visible" FontSize="17" FontWeight="SemiBold" />
               <Grid ColumnSpacing="24">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*" />
@@ -239,15 +260,17 @@
                 </StackPanel>
                 <ToggleSwitch x:Name="PinDockToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" Toggled="PinDockToggleToggled" AutomationProperties.Name="Pin Doky to the bottom edge" />
               </Grid>
-          <ComboBox x:Name="DockSizeBox" Header="Dock size" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="70% — Compact" /><ComboBoxItem Content="80%" /><ComboBoxItem Content="100% — Original" />
-          </ComboBox>
-          <ComboBox x:Name="PinnedPlacementBox" Header="Pinned dock placement" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Bottom-attached" /><ComboBoxItem Content="Floating" />
-          </ComboBox>
-          <NumberBox x:Name="FloatingDockGapBox" Header="Floating bottom gap (DIP at 100%)" Minimum="8" Maximum="32" SmallChange="1" Value="14" />
-          <TextBlock Text="Screen space is reserved automatically while Pin Dock is on. The floating gap scales with dock size." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
-
+              <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                <ComboBox x:Name="PinnedPlacementBox" Header="Pinned placement" HorizontalAlignment="Stretch">
+                  <ComboBoxItem Content="Bottom-attached" /><ComboBoxItem Content="Floating" />
+                </ComboBox>
+                <NumberBox x:Name="FloatingDockGapBox" Grid.Column="1" Header="Floating gap (DIP)" Minimum="8" Maximum="32"
+                           SmallChange="1" LargeChange="4" Value="14" SpinButtonPlacementMode="Compact" />
+              </Grid>
+              <TextBlock Text="The gap scales with dock size and applies to floating placement." FontSize="13" TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
+            </StackPanel>
+          </Border>
           <Grid ColumnSpacing="24">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*" />
@@ -270,17 +293,46 @@
             </StackPanel>
             <ToggleSwitch x:Name="HoverToExpandOnlyToggle" Grid.Column="1" OnContent="On" OffContent="Off" HorizontalAlignment="Right" VerticalAlignment="Center" AutomationProperties.Name="Open the minimized dock on hover only" />
           </Grid>
+          <Border Style="{StaticResource SectionCardStyle}">
+            <StackPanel Spacing="18">
+
+              <TextBlock Text="Hide timing" FontSize="17" FontWeight="SemiBold" />
+              <Grid ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="180" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Text="Auto-hide delay" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Wait before the dock collapses. Default: 1 second." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <NumberBox x:Name="AutoHideDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Auto-hide delay in seconds" />
+              </Grid>
+              <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
+              <Grid ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="180" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Text="Peek delay" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
+                  <TextBlock Text="Wait before the raised indicator lowers. Default: 2 seconds." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <NumberBox x:Name="PeekDelayBox" Grid.Column="1" Header="Seconds" Minimum="0" Maximum="30" SmallChange="0.1" LargeChange="1" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Peek delay in seconds" />
+              </Grid>
+            </StackPanel>
+          </Border>
           <StackPanel x:Name="InteractionHelp" Spacing="8">
             <TextBlock Text="Everyday interactions" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="Click an app to launch or activate it. Hover a running app to preview its windows. Drag files onto a compatible app to open them. Bare Win expands or collapses the dock; Win + Space opens Home. These interactions currently have no separate preference." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
         </StackPanel>
-        <StackPanel x:Name="DisplaysPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="DisplaysPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Displays" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="Displays" Style="{StaticResource PageTitleStyle}" />
             <TextBlock Text="Choose where Doky appears. Windows scaling is handled automatically." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="18">
               <Grid ColumnSpacing="24">
                 <Grid.ColumnDefinitions>
@@ -317,17 +369,17 @@
             <TextBlock Text="Primary keeps Doky on your primary monitor. Follow pointer moves it to the pointer’s display. Follow active window follows your foreground app. All Displays shows a dock on every active monitor." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
         </StackPanel>
-        <StackPanel x:Name="SystemPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="SystemPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="System" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="Windows integration with recovery close at hand." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="System" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Manage Windows integration, recovery, and restart options." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel x:Name="HelperGroup" Spacing="8">
             <TextBlock Text="Input Helper" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Text="The elevated helper supports Doky shortcuts and activation across privilege levels. Opening this page does not install anything or request administrator access." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           </StackPanel>
           <TextBlock x:Name="HelperStatusText" TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="14">
               <StackPanel Spacing="3">
                 <TextBlock Text="Taskbar safety" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
@@ -345,7 +397,7 @@
               <TextBlock Text="Restoring the taskbar pauses suppression for this Doky session. Restart Doky or choose Resume suppression to turn it back on." FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
           </Border>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="14">
               <StackPanel Spacing="3">
                 <TextBlock Text="Restart and Safe Mode" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
@@ -357,7 +409,7 @@
               </StackPanel>
             </StackPanel>
           </Border>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <Grid ColumnSpacing="18">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -371,10 +423,10 @@
             </Grid>
           </Border>
         </StackPanel>
-        <StackPanel x:Name="AdvancedPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="AdvancedPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="Advanced" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="Rendering information and carefully scoped resets." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="Advanced" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="View rendering details or restore default preferences." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
           <TextBlock x:Name="RenderingStatusText" TextWrapping="Wrap" />
           <StackPanel Spacing="8">
@@ -384,7 +436,7 @@
           </StackPanel>
           <TextBlock Text="Settings uses one retained desktop backdrop. Unsupported composition falls back to a readable solid surface." TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
           <StackPanel x:Name="ResetSection">
-            <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+            <Border Style="{StaticResource SectionCardStyle}">
               <StackPanel Spacing="14">
                 <StackPanel Spacing="3">
                   <TextBlock Text="Reset" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
@@ -401,12 +453,12 @@
           <TextBlock Text="Settings file" FontWeight="SemiBold" TextWrapping="Wrap" />
           <TextBlock x:Name="SettingsPathText" TextWrapping="Wrap" Foreground="{StaticResource SecondaryBrush}" />
         </StackPanel>
-        <StackPanel x:Name="AboutPage" Spacing="24" Visibility="Collapsed">
+        <StackPanel x:Name="AboutPage" Spacing="20" Visibility="Collapsed">
           <StackPanel Spacing="5">
-            <TextBlock Text="About" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="Doky — a calmer desktop." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="About" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Version, updates, and app information." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
           </StackPanel>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="8">
               <TextBlock Text="Doky" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
               <Image Source="ms-appx:///Assets/Doky.png" Width="64" Height="64" Stretch="Uniform" HorizontalAlignment="Left" AutomationProperties.Name="Doky logo" />
@@ -414,14 +466,14 @@
               <TextBlock x:Name="VersionText" Margin="0,4,0,0" FontSize="12" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
           </Border>
-          <Border Padding="0,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+          <Border Style="{StaticResource SectionCardStyle}">
             <StackPanel Spacing="6">
               <TextBlock Text="Updates" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextWrapping="Wrap" />
               <TextBlock x:Name="UpdateStatusText" Text="Check for a newer version of Doky." FontSize="13" Foreground="{StaticResource SecondaryBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
               <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,6" />
               <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                <Button x:Name="CheckUpdatesButton" Content="Check for Updates" Click="CheckUpdatesClick" />
-                <Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdateClick" Visibility="Collapsed" />
+                <Button x:Name="CheckUpdatesButton" Content="Check for updates" Click="CheckUpdatesClick" />
+                <Button x:Name="InstallUpdateButton" Content="Install update" Click="InstallUpdateClick" Visibility="Collapsed" />
               </StackPanel>
             </StackPanel>
           </Border>
@@ -429,15 +481,14 @@
         </StackPanel>
       </Grid>
     </ScrollViewer>
-    </Grid>
-    <Border Grid.Row="2" Grid.Column="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="24,10">
+    <Border Grid.Row="2" Grid.Column="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="32,12">
       <Grid ColumnSpacing="12">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <TextBlock x:Name="StatusText" Foreground="{StaticResource SecondaryBrush}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-        <Button x:Name="ApplyButton" Grid.Column="1" Content="Apply changes" Click="ApplyClick" Padding="16,8" />
+        <Button x:Name="ApplyButton" Grid.Column="1" Content="Apply appearance" Click="ApplyClick" Style="{StaticResource AccentButtonStyle}" Padding="16,8" />
       </Grid>
     </Border>
   </Grid>

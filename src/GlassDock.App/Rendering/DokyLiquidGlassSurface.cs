@@ -76,8 +76,9 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     private bool disposed, failed, enabled, screenshotFrozen, desktopRecoveryQueued;
     private bool updating;
     private (bool Active, double Opacity, float Scale, Vector4 Dock, Vector4 Wave)? deferredUpdate;
-    private readonly GlassDock.Core.Desktop.CaptureDrawGate drawGate = new();
-    private long queuedAt;
+    private readonly GlassDock.Core.Desktop.CaptureDrawGate captureDrawGate = new();
+    private readonly GlassDock.Core.Desktop.CaptureDrawGate visualDrawGate = new();
+    private long captureQueuedAt, visualQueuedAt;
     private Vector4 dock, wave;
     private float scale = 1;
     private LiquidGlassMaterial material = new() { RefractionStrength = 12 };
@@ -308,19 +309,27 @@ internal sealed class DokyLiquidGlassSurface : IDisposable
     });
     private void QueueDraw(bool visualChanged = true)
     {
-        if (!drawGate.Request(visualChanged)) return;
-        queuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        if (!dispatcher.TryEnqueue(DispatcherQueuePriority.Low, Draw)) drawGate.EnqueueFailed();
+        if (visualChanged)
+        {
+            if (!visualDrawGate.Request(true)) return;
+            visualQueuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+            if (!dispatcher.TryEnqueue(DispatcherQueuePriority.Normal, DrawVisual)) visualDrawGate.EnqueueFailed();
+            return;
+        }
+
+        if (!captureDrawGate.Request(false)) return;
+        captureQueuedAt = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        if (!dispatcher.TryEnqueue(DispatcherQueuePriority.Low, DrawCapture)) captureDrawGate.EnqueueFailed();
     }
-    private void Draw() => DrawFrame(drawGate.Begin());
-    private void DrawFrame(bool visualChanged, bool frozenFrame = false)
+    private void DrawVisual() => DrawFrame(visualDrawGate.Begin(), scheduledAt: visualQueuedAt);
+    private void DrawCapture() => DrawFrame(captureDrawGate.Begin(), scheduledAt: captureQueuedAt);
+    private void DrawFrame(bool visualChanged, bool frozenFrame = false, long scheduledAt = 0)
     {
-        var scheduledAt = queuedAt;
         if (disposed || !enabled || (screenshotFrozen && !frozenFrame) || capture is null || shader is null ||
             (clearActive && swapChain is null && popupTarget is null)) return;
         var started = GlassDock.Core.Desktop.DockPerformanceDiagnostics.Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         long preparedAt = 0;
-        if (started != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordDrawQueueDelay(started - scheduledAt);
+        if (started != 0 && scheduledAt != 0) GlassDock.Core.Desktop.DockPerformanceDiagnostics.RecordDrawQueueDelay(started - scheduledAt);
         try
         {
             var pending = frozenFrame ? null : capture.TakeFrame();

@@ -62,7 +62,9 @@ public sealed partial class DesktopOverlayWindow
 
     internal void ShowBrightnessMonitors(IReadOnlyList<BrightnessDisplay> displays, string? selected, Action<string?> select)
     {
-        if (closing || !utilityButtons.TryGetValue(UtilityKind.Brightness, out var button)) return;
+        if (closing) return;
+        var anchor = quickSettingsPanel?.BrightnessAnchor ?? utilityButtons.GetValueOrDefault(UtilityKind.Brightness);
+        if (anchor is null) return;
         brightnessSelector?.Hide();
         var menu = new MenuFlyout(); brightnessSelector = menu;
         var follow = new ToggleMenuFlyoutItem { Text = "Follow dock display", IsChecked = selected is null };
@@ -77,10 +79,11 @@ public sealed partial class DesktopOverlayWindow
         if (displays.Count == 0) menu.Items.Add(new MenuFlyoutItem { Text = "Checking displays…", IsEnabled = false });
         menu.Opened += (_, _) => previews.BeginContextMenu(menu);
         menu.Closed += (_, _) => { previews.EndContextMenu(menu); if (brightnessSelector == menu) brightnessSelector = null; };
-        menu.ShowAt(quickSettingsPanel?.BrightnessAnchor ?? button);
+        menu.ShowAt(anchor);
     }
 
     private bool IsPointerOverUtility(double x, double y) =>
+        IsPointerOverMusicPill(x, y) ||
         utilityArea.Visibility == Visibility.Visible && ((GridUtilities && quickSettingsButton is { IsHitTestVisible: true } grid &&
             new global::Windows.Foundation.Rect(grid.Glass.Bounds.X, grid.Glass.Bounds.Y, 36, 36).Contains(new(x, y))) || utilityButtons.Values.Any(button =>
             !button.FloatingPresentation && button.Visibility == Visibility.Visible && button.IsHitTestVisible && new global::Windows.Foundation.Rect(
@@ -146,7 +149,7 @@ public sealed partial class DesktopOverlayWindow
         SynchronizeUtilities();
     }
 
-    private void SynchronizeUtilities()
+    private void SynchronizeUtilities(bool prepareGrid = false)
     {
         if (utilityWifi is null) return;
         CloseQuickSettings(immediate: true);
@@ -155,6 +158,7 @@ public sealed partial class DesktopOverlayWindow
         utilityNightLight?.SetMonitoring(selected.Contains(UtilityKind.NightLight));
         utilityEnergySaver?.SetMonitoring(selected.Contains(UtilityKind.BatterySaver));
         utilityDnd?.SetMonitoring(selected.Contains(UtilityKind.Focus));
+        if (GridUtilities && !prepareGrid) ReleaseGridUtilityButtons();
         foreach (var kind in utilityButtons.Keys.Where(k => !selected.Contains(k)).ToArray())
         {
             if (wifiSettingsOnly?.Definition.Kind == kind) DismissWifiSettingsOnly();
@@ -173,7 +177,8 @@ public sealed partial class DesktopOverlayWindow
                 UpdateNativeUtilitySurfaces();
             });
         }
-        foreach (var definition in UtilityDefinition.All.Where(d => d.Available && selected.Contains(d.Kind))
+        foreach (var definition in UtilityDefinition.All.Where(d => d.Available && selected.Contains(d.Kind) &&
+                     (!GridUtilities || prepareGrid && QuickSettingsPanel.CircleOrder.Contains(d.Kind)))
             .OrderBy(d => Array.IndexOf(selected, d.Kind)))
         {
             if (!utilityButtons.TryGetValue(definition.Kind, out var button))
@@ -261,7 +266,7 @@ public sealed partial class DesktopOverlayWindow
                     else if (button.Definition.Kind == UtilityKind.Bluetooth) await utilityBluetooth!.RefreshAsync();
                     else await utilityWifi.RefreshAsync();
                 };
-                FadeUtility(button, 1);
+                if (!GridUtilities) FadeUtility(button, 1);
                 if (button.Definition.Kind is UtilityKind.Volume or UtilityKind.Brightness) { }
                 else if (button.Definition.Kind == UtilityKind.Focus) _ = utilityDnd!.RefreshAsync();
                 else if (button.Definition.Kind == UtilityKind.BatterySaver) _ = utilityEnergySaver!.RefreshAsync();
@@ -386,6 +391,8 @@ public sealed partial class DesktopOverlayWindow
         if (!closing && utilityArea.Visibility == Visibility.Visible && desktopBackdrop.SupportsUtilitySurfaces &&
             (Application.Current as App)?.BasicRendering != true)
         {
+            if (musicPill is { IsLoaded: true } pill && pill.Glass.UsesNativeDockBackdrop && pill.Glass.Bounds.Z > 0)
+                surfaces.Add((pill.Glass.Bounds, (float)utilityArea.Opacity));
             foreach (var button in utilityButtons.Values.Concat(fadingUtilities))
             {
                 if (button.FloatingPresentation || button.Visibility != Visibility.Visible) continue;
@@ -414,14 +421,15 @@ public sealed partial class DesktopOverlayWindow
         var visible = !closing && !windowManager.FullscreenSuppressed && state.State is DockState.Expanding or DockState.Expanded or DockState.Collapsing;
         utilityArea.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         utilityArea.Opacity = surface.Opacity;
-        if (GridUtilities) { PositionQuickSettingsButton(visible); UpdateNativeUtilitySurfaces(); return; }
-        if (!visible) { DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); }
-        if (utilityButtons.Count == 0) { UpdateNativeUtilitySurfaces(); return; }
         var top = root.ActualHeight - surface.Margin.Bottom - surface.ActualHeight;
         var dock = new HomeCardRect((root.ActualWidth - surface.ActualWidth) / 2, top,
             surface.ActualWidth, Math.Max(1, Math.Min(surface.ActualHeight, root.ActualHeight - top)));
-        var mode = settingsSession.Current.DockAppearanceMode;
         var gap = 12 * DockScale;
+        PositionMusicPill(visible, dock, gap);
+        if (GridUtilities) { PositionQuickSettingsButton(visible); UpdateNativeUtilitySurfaces(); return; }
+        if (!visible) { DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly(); }
+        if (utilityButtons.Count == 0) { UpdateNativeUtilitySurfaces(); return; }
+        var mode = settingsSession.Current.DockAppearanceMode;
         var index = 0;
         var expansionShift = 0d;
         var minimumLeft = dock.X + dock.Width + gap;
@@ -503,6 +511,7 @@ public sealed partial class DesktopOverlayWindow
     private void UpdateUtilitySurfaces()
     {
         var surfaces = utilityButtons.Values.Select(b => b.Glass).ToList();
+        if (musicPill is { } pill) surfaces.Add(pill.Glass);
         if (quickSettingsButton is { } grid) surfaces.Add(grid.Glass);
         if (quickSettingsPanel is { } quick) surfaces.AddRange(quick.CapsuleSurfaces);
         if (wifiWindow is { IsOpen: true } window) surfaces.AddRange(window.GlassSurfaces);

@@ -5,6 +5,30 @@ namespace GlassDock.Windows.Tests;
 public sealed class DockStackWiringTests
 {
     [Fact]
+    public void Repeated_icon_updates_reuse_the_existing_raster_and_fallback_brush()
+    {
+        var icon = Read("src/GlassDock.App/Controls/AdaptiveAppIcon.cs");
+        var setIcon = icon[icon.IndexOf("public void SetIcon(", StringComparison.Ordinal)..icon.IndexOf("private void OnRootChanged", StringComparison.Ordinal)];
+        Assert.True(setIcon.IndexOf("ReferenceEquals(original, icon)", StringComparison.Ordinal) >= 0);
+        Assert.Contains("!isStackLayer && ReferenceEquals(original, icon)", setIcon);
+        Assert.True(setIcon.IndexOf("ReferenceEquals(original, icon)", StringComparison.Ordinal) <
+            setIcon.IndexOf("image.Source = null", StringComparison.Ordinal));
+        var utility = Read("src/GlassDock.App/Controls/UtilityIcon.cs");
+        Assert.Contains("fallbackBrush ??= new SolidColorBrush();", utility);
+        Assert.True(utility.IndexOf("if (displayedKey == key) return;", StringComparison.Ordinal) <
+            utility.IndexOf("fallbackBrush.Color =", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Empty_home_slots_release_the_previous_app_icon()
+    {
+        var card = Read("src/GlassDock.App/Desktop/HomeDashboardCard.cs");
+        Assert.Contains("!apps.Any(current => ReferenceEquals(current.Icon, previousIcon))", card);
+        Assert.Contains("renderedIcons[i] = null;", card);
+        Assert.Contains("icons[i].SetIcon(null);", card);
+    }
+
+    [Fact]
     public void Folder_preview_uses_four_native_icons_in_two_rows_without_thumbnail_recursion()
     {
         var icon = Read("src/GlassDock.App/Controls/AdaptiveAppIcon.cs");

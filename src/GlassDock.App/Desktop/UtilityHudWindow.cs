@@ -50,6 +50,8 @@ internal sealed class UtilityHudWindow : Window, IDisposable
     private readonly double bouncePeak, bouncePeakValue;
     private (double X, double Y, double Offset) bounceFrom;
     private bool keyGesture, awaitingKeyValue;
+    private bool singleAdjustment;
+    private const double EntryScaleX = .84, EntryScaleY = .72, EntryOffset = 18;
     private readonly DispatcherQueueTimer idle;
     private readonly bool animations = new global::Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
     private readonly CompositionRoundedRectangleGeometry rounded;
@@ -159,13 +161,23 @@ internal sealed class UtilityHudWindow : Window, IDisposable
         if (disposed || !value.Available) return;
         var entering = state.Phase == VolumeHudPhase.Hidden;
         anchor = source;
-        if (explicitOpen || keyDown || !awaitingKeyValue) state.Change(explicitOpen);
+        if (explicitOpen || keyDown || !awaitingKeyValue)
+        {
+            singleAdjustment = entering && !explicitOpen;
+            state.Change(explicitOpen);
+        }
         awaitingKeyValue = keyDown;
         if (!open)
         {
             open = true;
             CompositionTarget.Rendering += Frame;
-            if (animations) { root.Opacity = 0; springScale.ScaleX = .82; springScale.ScaleY = .65; springOffset.Y = 8; }
+            if (animations)
+            {
+                root.Opacity = singleAdjustment ? 1 : 0;
+                springScale.ScaleX = singleAdjustment ? EntryScaleX : .82;
+                springScale.ScaleY = singleAdjustment ? EntryScaleY : .65;
+                springOffset.Y = singleAdjustment ? EntryOffset * layoutScale : 8;
+            }
         }
         Reposition();
         if (keyDown || !explicitOpen && !keyGesture) StartBounce(keyDown);
@@ -185,12 +197,13 @@ internal sealed class UtilityHudWindow : Window, IDisposable
         springScale.ScaleX = bounceFrom.X; springScale.ScaleY = bounceFrom.Y; springOffset.Y = bounceFrom.Offset;
         root.Opacity = 1;
         keyGesture |= held;
-        bounce.Start(AnimationTime, held);
+        bounce.Start(AnimationTime, held, singleAdjustment && animations ? 750 : UtilityHudBounce.Duration);
         if (!animations)
         {
             springScale.ScaleX = springScale.ScaleY = 1; springOffset.Y = 0;
             return;
         }
+        if (singleAdjustment) return;
         presentation = new();
         Add(presentation, root, "Opacity", opacity, 1, 160, new SineEase { EasingMode = EasingMode.EaseInOut });
         presentation.Begin();
@@ -207,9 +220,9 @@ internal sealed class UtilityHudWindow : Window, IDisposable
         if (!bounce.Active || !animations || frozen) return;
         var progress = bounce.Sample(AnimationTime);
         var eased = bounceEase.Ease(progress);
-        var peakX = .82 + .18 * bouncePeakValue;
-        var peakY = .65 + .35 * bouncePeakValue;
-        var peakOffset = 8 * (1 - bouncePeakValue);
+        var peakX = 1 + (1 - (singleAdjustment ? EntryScaleX : .82)) * (bouncePeakValue - 1);
+        var peakY = 1 + (1 - (singleAdjustment ? EntryScaleY : .65)) * (bouncePeakValue - 1);
+        var peakOffset = (singleAdjustment ? EntryOffset * layoutScale : 8) * (1 - bouncePeakValue);
         if (progress <= bouncePeak)
         {
             var amount = eased / bouncePeakValue;
@@ -266,7 +279,11 @@ internal sealed class UtilityHudWindow : Window, IDisposable
     private void RestartIdle()
     {
         idle.Stop();
-        if (open && !state.Interacting && !bounce.Held && !frozen) idle.Start();
+        if (!open || state.Interacting || bounce.Held || frozen) return;
+        var briefHold = animations && singleAdjustment;
+        if (briefHold && bounce.Active) return;
+        idle.Interval = TimeSpan.FromMilliseconds(briefHold ? 450 : 1500);
+        idle.Start();
     }
     private void AnimateShape()
     {
@@ -287,16 +304,20 @@ internal sealed class UtilityHudWindow : Window, IDisposable
         ApplyBounce(); bounce.Cancel();
         var current = (root.Opacity, springScale.ScaleX, springScale.ScaleY, springOffset.Y);
         var generation = ++revision; presentation?.Stop();
-        root.Opacity = 1; springScale.ScaleX = hiding ? 0 : 1;
-        springScale.ScaleY = hiding ? 0 : 1; springOffset.Y = hiding ? 6 * layoutScale : 0;
+        root.Opacity = 1;
+        springScale.ScaleX = hiding ? 0 : 1;
+        springScale.ScaleY = hiding ? 0 : 1;
+        springOffset.Y = hiding ? 6 * layoutScale : 0;
         if (!animations) { if (hiding) FinishHide(); return; }
         presentation = new();
-        var spring = new BackEase { Amplitude = hiding ? .6 : 1, EasingMode = hiding ? EasingMode.EaseIn : EasingMode.EaseOut };
+        var spring = new BackEase { Amplitude = hiding ? .6 : 1,
+            EasingMode = hiding ? EasingMode.EaseIn : EasingMode.EaseOut };
+        var duration = hiding ? 230 : 350;
         if (!hiding)
             Add(presentation, root, "Opacity", current.Opacity, root.Opacity, 160, new SineEase { EasingMode = EasingMode.EaseInOut });
-        Add(presentation, springScale, "ScaleX", current.ScaleX, springScale.ScaleX, hiding ? 230 : 350, spring);
-        Add(presentation, springScale, "ScaleY", current.ScaleY, springScale.ScaleY, hiding ? 230 : 350, spring);
-        Add(presentation, springOffset, "Y", current.Y, springOffset.Y, hiding ? 230 : 350, spring);
+        Add(presentation, springScale, "ScaleX", current.ScaleX, springScale.ScaleX, duration, spring);
+        Add(presentation, springScale, "ScaleY", current.ScaleY, springScale.ScaleY, duration, spring);
+        Add(presentation, springOffset, "Y", current.Y, springOffset.Y, duration, spring);
         presentation.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
             if (disposed || generation != revision) return;
@@ -336,7 +357,11 @@ internal sealed class UtilityHudWindow : Window, IDisposable
     private void Frame(object? sender, object args)
     {
         if (disposed || !open) return;
-        Reposition(); ApplyBounce(); UpdateGeometry();
+        Reposition();
+        var wasBouncing = bounce.Active;
+        ApplyBounce();
+        UpdateGeometry();
+        if (singleAdjustment && wasBouncing && !bounce.Active) RestartIdle();
     }
     private void UpdateGeometry()
     {
@@ -364,7 +389,7 @@ internal sealed class UtilityHudWindow : Window, IDisposable
     {
         if (!open) return;
         revision++; open = false; dragging = hovering = false;
-        bounce.Cancel(); keyGesture = awaitingKeyValue = false;
+        bounce.Cancel(); keyGesture = awaitingKeyValue = singleAdjustment = false;
         dragPreview = null;
         idle.Stop(); presentation?.Stop(); shape?.Stop(); filling?.Stop();
         capsule.ReleasePointerCaptures();

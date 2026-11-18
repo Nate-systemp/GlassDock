@@ -74,6 +74,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             resumeTaskbarOverride: null);
 
         nativeVolumeOsd = new(runtime.Volume);
+        SetMusicControls(settingsSession.Current.ShowMusicControlPill);
         ConfigureVolumeSuppression();
         runtime.StartApplications();
         runtime.Volume.Changed += VolumeChanged;
@@ -144,6 +145,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
             ScreenshotRequested = () => SnippingRequested(this, EventArgs.Empty)
         };
         window.SoundRequested += (_, _) => ShowVolume(window, explicitOpen: true);
+        window.SetMusicControls(runtime.Music);
         window.ReadQuickSettingsBrightness = () => UtilityHudValue.Brightness(BrightnessFor(window),
             BrightnessFor(window) is { } display && runtime.Brightness.IsPending(display.Id));
         window.WriteQuickSettingsBrightness = level =>
@@ -336,6 +338,7 @@ internal sealed class MonitorDockCoordinator : IDisposable
         if (!shuttingDown && !disposed) volumeHud?.ApplyAppearance(settingsSession.Appearance, e.Settings.DockAppearanceMode);
         if (!shuttingDown && !disposed)
         {
+            SetMusicControls(e.Settings.ShowMusicControlPill);
             brightnessHud?.ApplyAppearance(settingsSession.Appearance, e.Settings.DockAppearanceMode);
             UpdateBrightnessButtons();
         }
@@ -344,6 +347,14 @@ internal sealed class MonitorDockCoordinator : IDisposable
 
         lastDisplayMode = e.Settings.DockDisplayMode;
         _ = ReconcileMonitorsAsync();
+    }
+
+    private void SetMusicControls(bool enabled)
+    {
+        if (enabled == (runtime.Music is not null)) return;
+        runtime.SetMusicControls(enabled);
+        PrimaryWindow.SetMusicControls(runtime.Music);
+        foreach (var dock in secondaryDocks.Values) dock.SetMusicControls(runtime.Music);
     }
 
     private async Task ReconcileMonitorsAsync()

@@ -23,8 +23,15 @@ public sealed partial class DesktopOverlayWindow
     private void SynchronizeQuickSettingsMode()
     {
         CloseQuickSettings(immediate: true);
-        quickSettingsButton ??= CreateQuickSettingsButton();
-        quickSettingsButton.Visibility = GridUtilities ? Visibility.Visible : Visibility.Collapsed;
+        if (GridUtilities)
+            quickSettingsButton ??= CreateQuickSettingsButton();
+        else if (quickSettingsButton is { } gridButton)
+        {
+            quickSettingsButton = null;
+            gridButton.Glass.Active = false;
+            utilityArea.Children.Remove(gridButton);
+            gridButton.Dispose();
+        }
         foreach (var button in utilityButtons.Values)
         {
             button.Visibility = GridUtilities ? Visibility.Collapsed : Visibility.Visible;
@@ -77,6 +84,7 @@ public sealed partial class DesktopOverlayWindow
         DismissWifiSettingsOnly(); DismissBluetoothSettingsOnly();
         try
         {
+            SynchronizeUtilities(prepareGrid: true);
             foreach (var kind in QuickSettingsPanel.CircleOrder)
                 if (utilityButtons.TryGetValue(kind, out var button)) { utilityArea.Children.Remove(button); button.Visibility = Visibility.Visible; }
             var panel = new QuickSettingsPanel(utilityButtons, settingsSession.Current.SelectedUtilities,
@@ -125,6 +133,11 @@ public sealed partial class DesktopOverlayWindow
     private void RestoreQuickSettingsButtons()
     {
         quickSettingsPanel?.ReleaseButtons();
+        if (GridUtilities)
+        {
+            ReleaseGridUtilityButtons();
+            return;
+        }
         foreach (var button in utilityButtons.Values)
         {
             if (button.FloatingPresentation && button.Parent is Border wrapper)
@@ -132,6 +145,23 @@ public sealed partial class DesktopOverlayWindow
             if (button.Parent is null) utilityArea.Children.Add(button);
             button.Visibility = GridUtilities ? Visibility.Collapsed : Visibility.Visible;
         }
+    }
+
+    private void ReleaseGridUtilityButtons()
+    {
+        wifiWindow?.Hide(immediate: true);
+        bluetoothWindow?.Hide(immediate: true);
+        DismissWifiSettingsOnly();
+        DismissBluetoothSettingsOnly();
+        brightnessSelector?.Hide();
+        foreach (var button in utilityButtons.Values)
+        {
+            button.Glass.Active = false;
+            utilityArea.Children.Remove(button);
+            button.Dispose();
+        }
+        utilityButtons.Clear();
+        utilityOffsets.Clear();
     }
 
     private void CloseQuickSettings(bool immediate = false)

@@ -1,5 +1,6 @@
 using GlassDock.Core.Applications;
 using GlassDock.Windows.Applications;
+using GlassDock.Windows.Desktop;
 
 namespace GlassDock.App.Desktop;
 
@@ -16,6 +17,7 @@ internal sealed class DokySharedRuntime : IDisposable
     public GlassDock.Windows.Desktop.DndUtilityService DoNotDisturb { get; } = new();
     public GlassDock.Windows.Desktop.MasterVolumeService Volume { get; } = new();
     public GlassDock.Windows.Desktop.BrightnessService Brightness { get; } = new();
+    public MusicSessionService? Music { get; private set; }
     public WindowsToastBadgeProvider WindowsToastBadges { get; } = new();
     public BadgeCoordinator Badges { get; }
 
@@ -28,6 +30,14 @@ internal sealed class DokySharedRuntime : IDisposable
     {
         if (disposed) return;
         Applications.Start();
+    }
+
+    public void SetMusicControls(bool enabled)
+    {
+        if (disposed || enabled == (Music is not null)) return;
+        Music?.Dispose();
+        Music = enabled ? new(SynchronizationContext.Current!) : null;
+        if (Music is { } service) _ = service.StartAsync();
     }
 
     public Task SetNotificationBadgesAsync(bool enabled, bool requestPermission = false)
@@ -54,6 +64,8 @@ internal sealed class DokySharedRuntime : IDisposable
         DoNotDisturb.Dispose();
         Volume.Dispose();
         Brightness.Dispose();
+        Music?.Dispose();
+        Music = null;
         Badges.Dispose();
         Applications.Dispose();
     }

@@ -2,6 +2,9 @@ namespace GlassDock.Core.Desktop;
 
 public static class FullscreenPolicy
 {
+    public static nint ForegroundWindow(nint foreground, nint previousForeground, bool nonActivating) =>
+        foreground == 0 || nonActivating ? previousForeground : foreground;
+
     public static bool CoversMonitor(bool eligible, bool sameMonitor, bool minimized,
         double left, double top, double right, double bottom,
         double monitorLeft, double monitorTop, double monitorRight, double monitorBottom) =>

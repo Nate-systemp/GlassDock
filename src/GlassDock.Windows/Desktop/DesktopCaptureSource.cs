@@ -66,7 +66,10 @@ public sealed class DesktopCaptureSource : IDisposable
             CaptureBorderPermission.Configure(session);
             if (global::Windows.Foundation.Metadata.ApiInformation.IsPropertyPresent(
                 "Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
-                session.MinUpdateInterval = TimeSpan.FromSeconds(1d / 60);
+            {
+                // Each visible dock can capture a full monitor. Keep backdrop updates cheaper than UI animation.
+                session.MinUpdateInterval = TimeSpan.FromSeconds(1d / 30);
+            }
             session.StartCapture();
             countedSession = true;
             GlassDock.Core.Desktop.DockPerformanceDiagnostics.CaptureSessionChanged(1);
